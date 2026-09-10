@@ -51,7 +51,7 @@ printf 'Runtime: %s\nTarget:  %s\n' "${runtime_cmd[*]}" "${run_dir}"
         zypper --root /target --non-interactive --gpg-auto-import-keys refresh
 
         zypper --root /target --non-interactive --gpg-auto-import-keys \
-            --auto-agree-with-licenses install --no-recommends "${seeds[@]}"
+            install --no-recommends "${seeds[@]}"
 
         rpm --root /target -qa \
             --qf "%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\t%{ARCH}\t%{INSTALLSIZE}\n" \
