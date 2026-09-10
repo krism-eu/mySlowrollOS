@@ -8,7 +8,7 @@ else
     run_name=stage0
 fi
 
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")")" && pwd)"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd -- "${script_dir}/../.." && pwd)"
 
 if (( $# == 0 )); then
@@ -41,6 +41,12 @@ else
     exit 2
 fi
 
+mode="${MYSLOWROLL_MODE:-install}"
+if [[ "${mode}" != install && "${mode}" != resolve ]]; then
+    printf 'MYSLOWROLL_MODE must be install or resolve.\n' >&2
+    exit 2
+fi
+
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 run_dir="${repo_dir}/out/${run_name}-${stamp}"
 rootfs_dir="${run_dir}/rootfs"
@@ -56,13 +62,14 @@ LC_ALL=C sort -u -o "${merged_seed}" "${merged_seed}"
 
 tool_image="registry.opensuse.org/opensuse/tumbleweed:latest"
 
-printf 'Runtime: %s\nTarget:  %s\nLayers:  %s\n' \
-    "${runtime_cmd[*]}" "${run_dir}" "${layer_names[*]}"
+printf 'Runtime: %s\nMode:    %s\nTarget:  %s\nLayers:  %s\n' \
+    "${runtime_cmd[*]}" "${mode}" "${run_dir}" "${layer_names[*]}"
 
 "${runtime_cmd[@]}" run --rm \
     --mount "type=bind,src=${rootfs_dir},dst=/target" \
     --mount "type=bind,src=${report_dir},dst=/report" \
     --mount "type=bind,src=${merged_seed},dst=/input/seed,readonly" \
+    --env "MYSLOWROLL_MODE=${mode}" \
     "${tool_image}" bash -euxo pipefail -c '
         mapfile -t seeds < /input/seed
         printf "%s\n" "${seeds[@]}" > /report/seeds.txt
@@ -73,6 +80,27 @@ printf 'Runtime: %s\nTarget:  %s\nLayers:  %s\n' \
         zypper --root /target --non-interactive addrepo \
             --refresh https://download.opensuse.org/update/slowroll/repo/oss/ slowroll-update
         zypper --root /target --non-interactive --gpg-auto-import-keys refresh
+
+        if [[ "${MYSLOWROLL_MODE}" == resolve ]]; then
+            zypper --root /target --non-interactive --gpg-auto-import-keys --xmlout \
+                install --dry-run --no-recommends "${seeds[@]}" \
+
+                > /report/solver.xml
+            grep -o "kind=\"package\" name=\"[^\"]*\"" /report/solver.xml \
+                | cut -d "\"" -f4 | LC_ALL=C sort -u > /report/resolved.names
+            grep -o "<install-summary[^>]*>" /report/solver.xml \
+                > /report/transaction-summary.xml
+            package_count="$(wc -l < /report/resolved.names)"
+            {
+                printf "stage=%s\
+" "'"${run_name}"'"
+                printf "layers=%s\n
+" "'"${layer_names[*]}"'"
+                printf "mode=resolve\n"
+                printf "packages=%s\n" "${package_count}"
+            } > /report/summary.txt
+            exit 0
+        fi
 
         zypper --root /target --non-interactive --gpg-auto-import-keys \
             install --no-recommends "${seeds[@]}"
@@ -92,6 +120,7 @@ printf 'Runtime: %s\nTarget:  %s\nLayers:  %s\n' \
         {
             printf "stage=%s\n" "'"${run_name}"'"
             printf "layers=%s\n" "'"${layer_names[*]}"'"
+            printf "mode=install\n"
             printf "packages=%s\n" "${package_count}"
             printf "rootfs_bytes=%s\n" "${rootfs_bytes}"
         } > /report/summary.txt
