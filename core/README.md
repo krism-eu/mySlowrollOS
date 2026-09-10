@@ -125,3 +125,56 @@ Prima di scrivere lo spec definitivo occorre produrre tre elenchi separati:
 - `protected.seed`: solo ciò che non deve essere rimosso accidentalmente.
 
 `protected.seed` sarà l'unica fonte per i `Requires` comuni delle due ancore.
+
+## Pulizia protetta dei pacchetti non necessari
+
+Il prototipo [`criscore-clean-orphans`](criscore-clean-orphans) applica tre
+controlli:
+
+1. richiede che entrambe le ancore siano installate;
+2. esclude esplicitamente `criscore1` e `criscore2` dall'elenco restituito da
+   `zypper packages --unneeded`;
+3. esegue un `remove --dry-run --clean-deps` e annulla tutto se la sezione
+   `<to-remove>` del piano XML contiene una delle due ancore.
+
+Finché le ancore restano installate, le loro dipendenze non sono orfane per il
+solver. Il filtro e la simulazione sono controlli ulteriori; il `%preun` dei due
+RPM rimane l'ultima barriera. Lo script verrà installato con permessi eseguibili
+dal pacchetto definitivo.
+
+## Profilo Agama online e ISO
+
+Agama può caricare un profilo remoto JSON, Jsonnet o AutoYaST tramite URL. Il
+profilo può dichiarare:
+
+- i pacchetti `criscore1` e `criscore2`;
+- `onlyRequired: true`;
+- un repository RPM aggiuntivo mediante `software.extraRepositories`.
+
+L'URL del profilo non sostituisce il repository: Agama scarica il profilo da un
+URL, ma i due RPM devono trovarsi in un repository RPM indicizzato, locale o
+online. Quando saranno su OBS, il profilo potrà puntare direttamente al
+repository firmato.
+
+Per caricare la configurazione senza iniziare automaticamente l'installazione,
+il supporto di avvio previsto da Agama è concettualmente:
+
+```text
+inst.auto=https://…/profile.json inst.install=0
+```
+
+`inst.install=0` è essenziale nel nostro caso: consente di controllare e
+modificare graficamente il partizionamento, soprattutto il riuso di `/home`,
+prima di avviare l'installazione.
+
+Decisione proposta:
+
+- metodo principale: ISO Agama ufficiale + profilo remoto versionato +
+  repository OBS firmato;
+- ISO KIWI personalizzata: seconda modalità, utile per installazione offline,
+  congelamento di una versione verificata dell'installer o personalizzazioni
+  necessarie già nell'ambiente live.
+
+Per una sola macchina non conviene mantenere subito una ISO se il percorso
+online supera una reinstallazione completa in VM e riconosce rete, dischi,
+Secure Boot e `/home` come previsto.
