@@ -39,7 +39,6 @@ dosfstools
 e2fsprogs
 exfatprogs
 ntfs-3g
-ntfsprogs
 udisks2
 nvme-cli
 smartmontools
@@ -122,8 +121,6 @@ breeze6-style
 polkit-kde-agent-6
 systemsettings6
 kde-cli-tools6
-plasma6-systemmonitor
-plasma6-disks
 
 # Compatibilita e greeter; nessuna sessione Plasma X11
 xwayland
@@ -144,4 +141,3 @@ dolphin
 konsole
 kio-admin
 kio-extras
-kio-fuse
