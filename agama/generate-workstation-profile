@@ -25,7 +25,15 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd -- "${script_dir}/.." && pwd)"
 system_seed="${repo_dir}/experiments/rootfs/system.seed"
 plasma_seed="${repo_dir}/experiments/rootfs/plasma.seed"
+post_script="${script_dir}/post-install.sh"
 out="${script_dir}/workstation.jsonnet"
+
+for required in "${system_seed}" "${plasma_seed}" "${post_script}"; do
+    if [[ ! -f "${required}" ]]; then
+        printf 'File necessario non trovato: %s\n' "${required}" >&2
+        exit 2
+    fi
+done
 
 tmp="$(mktemp)"
 trap 'rm -f -- "$tmp"' EXIT
@@ -39,11 +47,17 @@ LC_ALL=C sort -u -o "${tmp}" "${tmp}"
 {
     cat <<EOF
 // GENERATED FILE - DO NOT EDIT BY HAND.
-// Sources: experiments/rootfs/system.seed + experiments/rootfs/plasma.seed.
-// Profilo intenzionalmente parziale: storage, utenti, password e locale restano manuali.
+// Sources: experiments/rootfs/system.seed + experiments/rootfs/plasma.seed + agama/post-install.sh.
+// Profilo intenzionalmente parziale: storage, utenti e password restano manuali.
 {
   product: {
     id: "Slowroll",
+  },
+
+  l10n: {
+    locale: "it_IT.UTF-8",
+    keymap: "it",
+    timezone: "Europe/Rome",
   },
 
   software: {
@@ -68,14 +82,18 @@ EOF
     onlyRequired: true,
   },
 
-  // Politica macchina applicata solo dopo l'installazione. Lo script non
-  // imposta utenti, password, storage o localizzazione.
+  // La policy post-install e incorporata per rendere workstation.jsonnet
+  // autosufficiente anche quando viene caricato con usb:///.
   scripts: {
     post: [
       {
         name: "myslowroll-system-policy",
         chroot: true,
-        url: "./post-install.sh",
+        content: |||
+EOF
+    sed 's/^/          /' "${post_script}"
+    cat <<'EOF'
+        |||,
       },
     ],
   },
@@ -85,5 +103,6 @@ EOF
 
 printf 'Generato %s con %s pacchetti espliciti.\n' "${out}" "$(wc -l < "${tmp}")"
 printf 'Repository criscore: %s\n' "${repo_url}"
-printf 'Storage, utente e locale volutamente assenti: verranno completati interattivamente in Agama.\n'
-printf 'Servizi/logging: verra applicato agama/post-install.sh a installazione conclusa.\n'
+printf 'Localizzazione: it_IT.UTF-8, tastiera it, fuso Europe/Rome.\n'
+printf 'Storage, utente e password volutamente assenti: verranno completati interattivamente in Agama.\n'
+printf 'Servizi/logging: agama/post-install.sh e incorporato nel profilo generato.\n'
