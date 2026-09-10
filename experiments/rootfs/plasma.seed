@@ -1,0 +1,69 @@
+# Plasma Wayland e applicazioni desktop personali.
+# Si applica sopra system.seed. Niente sessione Plasma X11 o server Xorg completo.
+
+# Accesso e sessione Plasma
+sddm-qt6
+sddm-qt6-branding-openSUSE
+sddm-kcm6
+plasma6-session
+plasma6-workspace
+plasma6-integration-plugin
+kwin6
+kscreenlocker6
+kglobalacceld6
+powerdevil6
+breeze6
+breeze6-cursors
+breeze6-decoration
+breeze6-style
+polkit-kde-agent-6
+systemsettings6
+kde-cli-tools6
+kde-gtk-config6
+plasma6-systemmonitor
+plasma6-disks
+plasma6-branding-openSUSE
+plasma6-theme-openSUSE
+xwayland
+
+# Integrazione rete, sicurezza, audio e portali
+plasma6-nm
+plasma6-firewall
+bluedevil6
+plasma6-pa
+xdg-desktop-portal
+xdg-desktop-portal-kde6
+
+# Desktop quotidiano
+dolphin
+kio-admin
+kio-extras
+kio-fuse
+ark
+gwenview
+kate
+konsole
+okular
+spectacle
+partitionmanager
+kwalletmanager
+pam_kwallet6
+
+# Flatpak; nessun backend PackageKit
+flatpak
+discover6
+discover6-backend-flatpak
+
+# Font
+google-noto-coloremoji-fonts
+google-noto-sans-fonts
+liberation-fonts
+
+# Stampa e scansione presenti nelle liste personali
+cups
+cups-filters
+cups-pk-helper
+plasma6-print-manager
+gutenprint
+skanlite
+yast2-scanner
