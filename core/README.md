@@ -153,7 +153,7 @@ dal pacchetto definitivo.
 
 ## Profilo Agama online e ISO
 
-Agama può caricare un profilo remoto JSON, Jsonnet o AutoYaST tramite URL. Il
+Agama può caricare tramite URL un profilo remoto JSON, Jsonnet oppure direttamente AutoYaST. Il
 profilo può dichiarare:
 
 - i pacchetti `criscore1` e `criscore2`;
@@ -169,7 +169,7 @@ Per caricare la configurazione senza iniziare automaticamente l'installazione,
 il supporto di avvio previsto da Agama è concettualmente:
 
 ```text
-inst.auto=https://…/profile.json inst.install=0
+inst.auto=https://…/profilo.xml inst.install=0
 ```
 
 `inst.install=0` è essenziale nel nostro caso: consente di controllare e
@@ -190,18 +190,20 @@ Secure Boot e `/home` come previsto.
 
 ## Politica degli aggiornamenti
 
-La macchina resta tradizionale e consente installazioni o rimozioni mirate
-durante la sessione. Il cambio completo di snapshot Slowroll segue invece una
-regola diversa:
+La macchina resta una Slowroll tradizionale. Non usa il ruolo Transactional
+Server e non tenta di mescolare il modello MicroOS con installazioni RPM live.
 
-- niente `zypper dup` applicato direttamente al sistema in esecuzione;
-- il `dup` viene eseguito tramite `transactional-update` in una nuova snapshot;
-- il nuovo stato diventa attivo soltanto al riavvio;
-- dopo aver preparato la snapshot non si effettuano altre modifiche RPM prima
-  del riavvio, per non creare divergenze;
-- `/var` deve restare fuori dalla snapshot della root, mentre `/home` continua
-  a essere una partizione separata.
+Il flusso previsto per l'upgrade completo è:
 
-Questa è atomicità dell'upgrade completo, non immutabilità quotidiana. Il
-comando definitivo verrà racchiuso in uno script dedicato e testato in VM prima
-di impedire o scoraggiare il `dup` tradizionale.
+1. aggiornare i metadati e risolvere il piano;
+2. scaricare in anticipo tutti i pacchetti;
+3. lasciare che `snapper-zypp-plugin` crei le snapshot pre/post;
+4. eseguire il normale `zypper dup`;
+5. non effettuare altre modifiche al sistema e riavviare subito;
+6. in caso di problema, avviare la snapshot precedente e fare rollback.
+
+Il riavvio immediato è una nostra regola operativa: non rende il `dup` atomico e
+non significa che l'aggiornamento venga applicato soltanto al boot. Una vera
+attivazione transazionale al riavvio richiederebbe adottare coerentemente
+MicroOS oppure mantenere una nostra infrastruttura offline, che qui
+aggiungerebbe più rischio e manutenzione del beneficio.
