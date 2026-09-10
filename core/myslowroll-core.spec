@@ -45,9 +45,6 @@ Requires:       kglobalacceld6
 Requires:       powerdevil6
 Requires:       polkit-kde-agent-6
 Requires:       plasma6-nm
-Requires:       systemsettings6
-Requires:       dolphin
-Requires:       konsole
 
 # Audio session
 Requires:       pipewire
