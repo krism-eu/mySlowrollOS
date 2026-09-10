@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # mySlowrollOS conservative runtime policy.
-# User, storage, passwords and locale are deliberately left to Agama UI.
+# User, storage and passwords are deliberately left to Agama UI.
+# Locale, keymap and timezone are preset by the Agama profile.
 
 # Desktop target; package presets remain responsible for the concrete services.
 systemctl set-default graphical.target
