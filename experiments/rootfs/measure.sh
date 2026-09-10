@@ -99,6 +99,7 @@ printf 'Runtime: %s\nMode:    %s\nTarget:  %s\nLayers:  %s\n' \
     --mount "type=bind,src=${merged_seed},dst=/input/seed,readonly" \
     --env "MYSLOWROLL_MODE=${mode}" \
     "${tool_image}" bash -euxo pipefail -c '
+        export LC_ALL=C
         mapfile -t seeds < /input/seed
         printf "%s\n" "${seeds[@]}" > /report/seeds.txt
 
@@ -114,8 +115,8 @@ printf 'Runtime: %s\nMode:    %s\nTarget:  %s\nLayers:  %s\n' \
                 install --dry-run --no-recommends "${seeds[@]}" \
                 > /report/solver.xml
 
-            # Zypper XML uses kind="package" on solvable elements. Validate the
-            # expected transaction summary first so a format change cannot be
+            # Zypper XML has used both type="package" and kind="package" on solvable elements.
+            # Validate the expected transaction summary first so a format change cannot be
             # mistaken for an empty solver result.
             if ! grep -Eq "<install-summary([[:space:]>])" /report/solver.xml; then
                 printf "Solver XML missing install-summary.\n" >&2
@@ -123,7 +124,7 @@ printf 'Runtime: %s\nMode:    %s\nTarget:  %s\nLayers:  %s\n' \
             fi
 
             if ! awk '\''
-                /<solvable[[:space:]][^>]*kind="package"/ {
+                /<solvable[[:space:]][^>]*(type|kind)="package"/ {
                     if (match($0, /name="[^"]+"/)) {
                         print substr($0, RSTART + 6, RLENGTH - 7)
                     } else {
