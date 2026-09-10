@@ -10,7 +10,7 @@ if ! command -v rpmbuild >/dev/null 2>&1; then
     exit 2
 fi
 
-"${script_dir}/generate-criscore-spec"
+bash "${script_dir}/generate-criscore-spec"
 
 rm -rf -- "${topdir}/BUILD" "${topdir}/BUILDROOT" "${topdir}/RPMS" "${topdir}/SRPMS"
 mkdir -p -- "${topdir}/BUILD" "${topdir}/BUILDROOT" "${topdir}/RPMS" \
