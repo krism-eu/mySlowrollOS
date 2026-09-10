@@ -32,7 +32,9 @@ mkdir -p -- "${criscore_repo}" "${target_dir}"
 cp -- "${rpm1}" "${rpm2}" "${criscore_repo}/"
 createrepo_c "${criscore_repo}"
 
-local_repo="file://${criscore_repo}"
+# KIWI distingue i locator locali: dir:/// per una directory repository,
+# file:/// per un singolo file. criscore_repo è una directory RPM-MD.
+local_repo="dir://${criscore_repo}"
 
 printf '\nKIWI description: %s\n' "${description_dir}"
 printf 'criscore repository: %s\n' "${local_repo}"
