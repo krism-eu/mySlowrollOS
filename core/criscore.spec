@@ -1,6 +1,6 @@
 # GENERATED FILE - DO NOT EDIT BY HAND.
 # Source of common Requires: experiments/rootfs/protected.seed
-# Regenerate with: core/generate-criscore-spec
+# Regenerate with: bash core/generate-criscore-spec
 
 Name:           criscore1
 Version:        0.1
@@ -8,9 +8,9 @@ Release:        0
 Summary:        Protected core anchor 1 for mySlowrollOS
 License:        MIT
 BuildArch:      noarch
-Source0:        criscore-clean-orphans
 
-# Keep the two anchors on exactly the same build without creating an ordering loop.
+# A meta dependency keeps both anchors on exactly the same build without
+# introducing an artificial install/erase ordering dependency.
 Requires(meta): criscore2 = %{version}-%{release}
 Requires:       Mesa-dri
 Requires:       Mesa-vulkan-device-select
@@ -134,8 +134,8 @@ Requires:       zypper
 %description
 criscore1 is one of two deliberately redundant dependency anchors used by
 mySlowrollOS. It protects the approved core package set from accidental removal.
-The package contains no application payload beyond the guarded orphan-cleanup
-helper and a marker file.
+It contains only a marker file; the protection is expressed by RPM dependencies
+and the erase guard.
 
 %package -n criscore2
 Summary:        Protected core anchor 2 for mySlowrollOS
@@ -269,7 +269,6 @@ same approved Requires as criscore1 and is version-locked to its peer.
 %build
 
 %install
-install -Dm0755 %{SOURCE0} %{buildroot}%{_sbindir}/criscore-clean-orphans
 install -d %{buildroot}%{_datadir}/criscore
 printf '%s\n' 'mySlowrollOS protected core anchor 1' > %{buildroot}%{_datadir}/criscore/criscore1
 printf '%s\n' 'mySlowrollOS protected core anchor 2' > %{buildroot}%{_datadir}/criscore/criscore2
@@ -289,7 +288,6 @@ if [ "$1" -eq 0 ] && [ ! -e /run/criscore.allow-removal ]; then
 fi
 
 %files
-%{_sbindir}/criscore-clean-orphans
 %{_datadir}/criscore/criscore1
 
 %files -n criscore2
