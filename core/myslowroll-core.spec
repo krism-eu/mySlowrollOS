@@ -1,5 +1,7 @@
-# DRAFT NON APPROVATA: non usare per build o installazione.
-# I Requires saranno sostituiti dopo il confronto della baseline KIWI.
+# SUPERATA: non usare per build o installazione.
+# Questa bozza a pacchetto singolo resta solo come riferimento storico.
+# Il progetto corrente usa criscore1 e criscore2 generati dallo stesso manifesto;
+# vedere core/README.md. I Requires qui sotto non sono approvati.
 
 Name:           myslowroll-core
 Version:        0.1
