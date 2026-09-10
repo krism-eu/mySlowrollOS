@@ -84,7 +84,6 @@ printf 'Runtime: %s\nMode:    %s\nTarget:  %s\nLayers:  %s\n' \
         if [[ "${MYSLOWROLL_MODE}" == resolve ]]; then
             zypper --root /target --non-interactive --gpg-auto-import-keys --xmlout \
                 install --dry-run --no-recommends "${seeds[@]}" \
-
                 > /report/solver.xml
             grep -o "kind=\"package\" name=\"[^\"]*\"" /report/solver.xml \
                 | cut -d "\"" -f4 | LC_ALL=C sort -u > /report/resolved.names
@@ -92,10 +91,8 @@ printf 'Runtime: %s\nMode:    %s\nTarget:  %s\nLayers:  %s\n' \
                 > /report/transaction-summary.xml
             package_count="$(wc -l < /report/resolved.names)"
             {
-                printf "stage=%s\
-" "'"${run_name}"'"
-                printf "layers=%s\n
-" "'"${layer_names[*]}"'"
+                printf "stage=%s\n" "'"${run_name}"'"
+                printf "layers=%s\n" "'"${layer_names[*]}"'"
                 printf "mode=resolve\n"
                 printf "packages=%s\n" "${package_count}"
             } > /report/summary.txt
