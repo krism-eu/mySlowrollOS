@@ -17,6 +17,7 @@ mkdir -p -- "${topdir}/BUILD" "${topdir}/BUILDROOT" "${topdir}/RPMS" \
     "${topdir}/SOURCES" "${topdir}/SPECS" "${topdir}/SRPMS"
 
 cp -- "${script_dir}/criscore.spec" "${topdir}/SPECS/criscore.spec"
+cp -- "${script_dir}/myslowroll-atomic-dup" "${topdir}/SOURCES/myslowroll-atomic-dup"
 
 rpmbuild --define "_topdir ${topdir}" -ba "${topdir}/SPECS/criscore.spec"
 
