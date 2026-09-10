@@ -79,7 +79,7 @@ LC_ALL=C sort -u -o "${profile_seed}" "${profile_seed}"
 if (( protected_audit )); then
     sed -E '/^[[:space:]]*(#|$)/d; s/[[:space:]]+$//' \
         "${script_dir}/protected.seed" | LC_ALL=C sort -u > "${protected_list}"
-    comm -23 "${protected_list}" "${profile_seed}" \
+    LC_ALL=C comm -23 "${protected_list}" "${profile_seed}" \
         > "${report_dir}/protected-not-in-profile.names"
     if [[ -s "${report_dir}/protected-not-in-profile.names" ]]; then
         printf 'Protected packages missing from system + plasma:\n' >&2
@@ -160,7 +160,7 @@ if (( protected_audit )); then
         result_names="${report_dir}/installed.names"
     fi
 
-    comm -23 "${protected_list}" "${result_names}" \
+    LC_ALL=C comm -23 "${protected_list}" "${result_names}" \
         > "${report_dir}/protected-missing-from-result.names"
     if [[ -s "${report_dir}/protected-missing-from-result.names" ]]; then
         printf 'Protected packages missing from solver result:\n' >&2
