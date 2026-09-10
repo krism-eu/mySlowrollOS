@@ -40,10 +40,14 @@ printf '\nKIWI description: %s\n' "${description_dir}"
 printf 'criscore repository: %s\n' "${local_repo}"
 printf 'target: %s\n\n' "${target_dir}"
 
+# --add-repo usa campi posizionali separati da virgole. Il settimo campo è
+# signing_keys: lasciarlo vuoto significa nessuna chiave aggiuntiva. Passare
+# letteralmente {} viene interpretato come una voce e KIWI prova a trattarla
+# come URI, producendo "URI scheme not detected".
 kiwi-ng system build \
     --description="${description_dir}" \
     --target-dir="${target_dir}" \
-    --add-repo="${local_repo},rpm-md,criscore-local,1,false,false,{},,,false,baseurl"
+    --add-repo="${local_repo},rpm-md,criscore-local,1,false,false,,,,false,baseurl"
 
 printf '\nRisultati KIWI:\n'
 find "${target_dir}" -maxdepth 1 -type f -print | LC_ALL=C sort
