@@ -1,5 +1,6 @@
 # Candidato workstation completo, ancora da validare.
 # Nessun pattern openSUSE. Nessuna sessione Plasma X11.
+# Nota: la sorgente autorevole per Agama/KIWI resta system.seed + plasma.seed.
 
 # Identita del sistema e gestione pacchetti
 openSUSE-release
@@ -21,7 +22,7 @@ glibc-locale
 xdg-user-dirs
 xdg-utils
 
-# UEFI, Secure Boot, Btrfs e recupero
+# UEFI, Secure Boot, Btrfs, snapshot e recupero
 systemd-boot
 shim
 efibootmgr
@@ -32,6 +33,8 @@ btrfsprogs
 btrfsmaintenance
 snapper
 snapper-zypp-plugin
+transactional-update
+zram-generator
 
 # Filesystem e diagnostica dischi usati dalla macchina
 dosfstools
@@ -105,6 +108,8 @@ kde-gtk-config6
 plasma6-systemmonitor
 plasma6-disks
 xwayland
+xorg-x11-server
+xf86-input-libinput
 xdg-desktop-portal
 xdg-desktop-portal-kde6
 
@@ -134,6 +139,7 @@ zstd
 yast2
 yast2-control-center-qt
 yast2-packager
+libyui-qt-pkg16
 yast2-storage-ng
 yast2-snapper
 yast2-apparmor
