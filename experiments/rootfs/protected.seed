@@ -22,7 +22,7 @@ glibc-locale
 xdg-user-dirs
 xdg-utils
 
-# UEFI, Secure Boot, Btrfs e recupero
+# UEFI, Secure Boot, Btrfs, snapshot e recupero
 systemd-boot
 shim
 efibootmgr
@@ -33,6 +33,7 @@ btrfsprogs
 btrfsmaintenance
 snapper
 snapper-zypp-plugin
+transactional-update
 
 # Filesystem e diagnostica della macchina
 dosfstools
