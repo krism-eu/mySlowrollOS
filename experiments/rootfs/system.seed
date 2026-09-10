@@ -21,17 +21,6 @@ glibc-locale
 xdg-user-dirs
 xdg-utils
 
-# Funzioni standard e diagnostica della macchina
-chrony
-pam_pwquality
-acl
-psmisc
-less
-vim
-cnf
-ethtool
-cpupower
-
 # UEFI, Secure Boot, Btrfs e recupero
 systemd-boot
 shim
