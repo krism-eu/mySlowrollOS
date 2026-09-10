@@ -81,6 +81,7 @@
       "kwin6",
       "liberation-fonts",
       "libvulkan_radeon",
+      "libyui-qt-pkg16",
       "myrlyn",
       "nss-mdns",
       "ntfs-3g",
