@@ -90,6 +90,22 @@ Use the official Agama Live ISO. The profile can also be supplied through `inst.
 
 The OBS repository key is intentionally not bypassed with `allowUnsigned`.
 
+## VM validation
+
+A first real Agama installation in a VM completed successfully on 2026-09-10 using the project profile and the published OBS criscore repository.
+
+Observed results:
+
+- Agama resolved and installed about 1552 packages;
+- the VM used ext4 because the small test disk was below the practical size wanted for the Btrfs/Snapper test;
+- the installed Slowroll system booted successfully;
+- SDDM started correctly and the graphical login path worked;
+- `criscore1` and `criscore2` were present from the OBS repository;
+- attempting to remove the protected `dolphin` package caused the solver to include both criscore anchors in the removal transaction;
+- confirming the removal reached the criscore `%preun` guard and the transaction was blocked, validating the protection on the installed VM rather than only in a disposable root test.
+
+Still to validate separately on a larger VM disk: Btrfs/Snapper layout and rollback behaviour, and the final bootloader path with explicit confirmation that systemd-boot is used without GRUB fallback.
+
 ## ISO policy
 
 A custom installer ISO is not required. If a single-medium installer becomes useful later, inject the same profile into an official Agama ISO instead of maintaining a fork of the installer image. Keep the profile under a non-special path/name if interactive review is desired rather than automatic unattended installation.
