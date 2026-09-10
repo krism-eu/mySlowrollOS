@@ -72,7 +72,6 @@ Requires:       pciutils
 Requires:       pipewire
 Requires:       pipewire-alsa
 Requires:       pipewire-pulseaudio
-Requires:       plasma6-branding-openSUSE
 Requires:       plasma6-disks
 Requires:       plasma6-firewall
 Requires:       plasma6-integration-plugin
@@ -80,7 +79,6 @@ Requires:       plasma6-nm
 Requires:       plasma6-pa
 Requires:       plasma6-session
 Requires:       plasma6-systemmonitor
-Requires:       plasma6-theme-openSUSE
 Requires:       plasma6-workspace
 Requires:       plymouth
 Requires:       plymouth-branding-openSUSE
@@ -201,7 +199,6 @@ Requires:       pciutils
 Requires:       pipewire
 Requires:       pipewire-alsa
 Requires:       pipewire-pulseaudio
-Requires:       plasma6-branding-openSUSE
 Requires:       plasma6-disks
 Requires:       plasma6-firewall
 Requires:       plasma6-integration-plugin
@@ -209,7 +206,6 @@ Requires:       plasma6-nm
 Requires:       plasma6-pa
 Requires:       plasma6-session
 Requires:       plasma6-systemmonitor
-Requires:       plasma6-theme-openSUSE
 Requires:       plasma6-workspace
 Requires:       plymouth
 Requires:       plymouth-branding-openSUSE
