@@ -123,6 +123,13 @@ partitionmanager
 kwalletmanager
 pam_kwallet6
 
+# Backend archivi per Ark; utili ma non protetti da criscore
+7zip
+unar
+zip
+unzip
+zstd
+
 # Gestione grafica: RPM con YaST/Myrlyn, applicazioni con Flatpak
 yast2
 yast2-control-center-qt
