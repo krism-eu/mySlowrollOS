@@ -42,6 +42,15 @@ Questo protegge dagli errori nelle normali operazioni Zypper/RPM. Non pretende d
 fermare root che usi `rpm --nodeps`, cancelli file manualmente o modifichi lo
 spec: non è immutabilità e non è atomicità.
 
+La protezione vale anche lungo i `Requires` forti transitivi. Non è quindi
+necessario elencare ogni libreria. Devono invece essere dichiarati direttamente
+i componenti indispensabili che arriverebbero soltanto come `Recommends`, come
+provider sostituibili o per integrazione runtime. Tra questi rientrano firmware,
+plugin Snapper/Zypper, bridge PipeWire, portali KDE, input del greeter, KWallet e
+integrazioni di rete/Bluetooth. Prima del rilascio, un audit del solver proverà
+la rimozione simulata dei nodi critici e dovrà vedere entrambe le ancore nella
+transazione proposta.
+
 ## Contenuto del core
 
 Non si importano automaticamente pacchetti dalle vecchie liste. Le liste
@@ -178,3 +187,21 @@ Decisione proposta:
 Per una sola macchina non conviene mantenere subito una ISO se il percorso
 online supera una reinstallazione completa in VM e riconosce rete, dischi,
 Secure Boot e `/home` come previsto.
+
+## Politica degli aggiornamenti
+
+La macchina resta tradizionale e consente installazioni o rimozioni mirate
+durante la sessione. Il cambio completo di snapshot Slowroll segue invece una
+regola diversa:
+
+- niente `zypper dup` applicato direttamente al sistema in esecuzione;
+- il `dup` viene eseguito tramite `transactional-update` in una nuova snapshot;
+- il nuovo stato diventa attivo soltanto al riavvio;
+- dopo aver preparato la snapshot non si effettuano altre modifiche RPM prima
+  del riavvio, per non creare divergenze;
+- `/var` deve restare fuori dalla snapshot della root, mentre `/home` continua
+  a essere una partizione separata.
+
+Questa è atomicità dell'upgrade completo, non immutabilità quotidiana. Il
+comando definitivo verrà racchiuso in uno script dedicato e testato in VM prima
+di impedire o scoraggiare il `dup` tradizionale.
