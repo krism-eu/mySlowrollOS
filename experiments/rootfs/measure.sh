@@ -113,10 +113,34 @@ printf 'Runtime: %s\nMode:    %s\nTarget:  %s\nLayers:  %s\n' \
             zypper --root /target --non-interactive --gpg-auto-import-keys --xmlout \
                 install --dry-run --no-recommends "${seeds[@]}" \
                 > /report/solver.xml
-            grep -o "<solvable[^>]*>" /report/solver.xml \
-                | grep "type=\"package\"" \
-                | sed -E "s/.* name=\"([^\"]*)\".*/\1/" \
-                | LC_ALL=C sort -u > /report/resolved.names
+
+            # Zypper XML uses kind="package" on solvable elements. Validate the
+            # expected transaction summary first so a format change cannot be
+            # mistaken for an empty solver result.
+            if ! grep -Eq "<install-summary([[:space:]>])" /report/solver.xml; then
+                printf "Solver XML missing install-summary.\n" >&2
+                exit 5
+            fi
+
+            if ! awk '\''
+                /<solvable[[:space:]][^>]*kind="package"/ {
+                    if (match($0, /name="[^"]+"/)) {
+                        print substr($0, RSTART + 6, RLENGTH - 7)
+                    } else {
+                        bad = 1
+                    }
+                }
+                END { exit bad ? 1 : 0 }
+            '\'' /report/solver.xml | LC_ALL=C sort -u > /report/resolved.names; then
+                printf "Cannot parse package names from solver XML.\n" >&2
+                exit 5
+            fi
+
+            if [[ ! -s /report/resolved.names ]]; then
+                printf "Solver XML contained no package names for a non-empty request.\n" >&2
+                exit 5
+            fi
+
             grep -o "<install-summary[^>]*>" /report/solver.xml \
                 > /report/transaction-summary.xml
             package_count="$(wc -l < /report/resolved.names)"
