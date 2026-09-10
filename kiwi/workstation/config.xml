@@ -98,6 +98,7 @@
     <package name="kwin6"/>
     <package name="liberation-fonts"/>
     <package name="libvulkan_radeon"/>
+    <package name="libyui-qt-pkg16"/>
     <package name="myrlyn"/>
     <package name="nss-mdns"/>
     <package name="ntfs-3g"/>
@@ -149,6 +150,7 @@
     <package name="systemd-presets-branding-openSUSE"/>
     <package name="systemsettings6"/>
     <package name="timezone"/>
+    <package name="transactional-update"/>
     <package name="ucode-amd"/>
     <package name="udisks2"/>
     <package name="unar"/>
