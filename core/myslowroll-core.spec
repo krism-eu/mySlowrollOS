@@ -1,3 +1,6 @@
+# DRAFT NON APPROVATA: non usare per build o installazione.
+# I Requires saranno sostituiti dopo il confronto della baseline KIWI.
+
 Name:           myslowroll-core
 Version:        0.1
 Release:        0
