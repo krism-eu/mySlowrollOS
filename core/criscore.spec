@@ -8,6 +8,8 @@ Release:        0
 Summary:        Protected core anchor 1 for mySlowrollOS
 License:        MIT
 BuildArch:      noarch
+Source1:        myslowroll-atomic-dup
+BuildRequires:  bash
 
 # A meta dependency keeps both anchors on exactly the same build without
 # introducing an artificial install/erase ordering dependency.
@@ -59,6 +61,7 @@ Requires:       konsole
 Requires:       kscreenlocker6
 Requires:       kwin6
 Requires:       libvulkan_radeon
+Requires:       libyui-qt-pkg16
 Requires:       myrlyn
 Requires:       nss-mdns
 Requires:       ntfs-3g
@@ -100,6 +103,7 @@ Requires:       systemd-boot
 Requires:       systemd-presets-branding-openSUSE
 Requires:       systemsettings6
 Requires:       timezone
+Requires:       transactional-update
 Requires:       ucode-amd
 Requires:       udisks2
 Requires:       upower
@@ -128,8 +132,7 @@ Requires:       zypper
 %description
 criscore1 is one of two deliberately redundant dependency anchors used by
 mySlowrollOS. It protects the approved core package set from accidental removal.
-It contains only a marker file; the protection is expressed by RPM dependencies
-and the erase guard.
+It also installs the guarded myslowroll-atomic-dup upgrade command.
 
 %package -n criscore2
 Summary:        Protected core anchor 2 for mySlowrollOS
@@ -182,6 +185,7 @@ Requires:       konsole
 Requires:       kscreenlocker6
 Requires:       kwin6
 Requires:       libvulkan_radeon
+Requires:       libyui-qt-pkg16
 Requires:       myrlyn
 Requires:       nss-mdns
 Requires:       ntfs-3g
@@ -223,6 +227,7 @@ Requires:       systemd-boot
 Requires:       systemd-presets-branding-openSUSE
 Requires:       systemsettings6
 Requires:       timezone
+Requires:       transactional-update
 Requires:       ucode-amd
 Requires:       udisks2
 Requires:       upower
@@ -260,6 +265,10 @@ same approved Requires as criscore1 and is version-locked to its peer.
 install -d %{buildroot}%{_datadir}/criscore
 printf '%s\n' 'mySlowrollOS protected core anchor 1' > %{buildroot}%{_datadir}/criscore/criscore1
 printf '%s\n' 'mySlowrollOS protected core anchor 2' > %{buildroot}%{_datadir}/criscore/criscore2
+install -D -m 0755 %{SOURCE1} %{buildroot}%{_sbindir}/myslowroll-atomic-dup
+
+%check
+bash -n %{SOURCE1}
 
 # openSUSE post-build-checks performs a synthetic erase test with
 # YAST_IS_RUNNING=instsys. Permit that build-root cleanup without weakening
@@ -281,6 +290,7 @@ fi
 %files
 %dir %{_datadir}/criscore
 %{_datadir}/criscore/criscore1
+%{_sbindir}/myslowroll-atomic-dup
 
 %files -n criscore2
 %dir %{_datadir}/criscore
