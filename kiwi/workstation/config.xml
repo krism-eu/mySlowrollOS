@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8"?>
+<image schemaversion="8.0" name="myslowroll-workstation">
+  <description type="system">
+    <author>krism-eu</author>
+    <contact>krism-eu</contact>
+    <specification>Personal openSUSE Slowroll workstation rootfs for mySlowrollOS</specification>
+  </description>
+
+  <preferences>
+    <version>0.1.0</version>
+    <packagemanager>zypper</packagemanager>
+    <type image="tbz" primary="true"/>
+    <rpm-check-signatures>false</rpm-check-signatures>
+  </preferences>
+
+  <!-- Build repositories only. openSUSE-repos-Slowroll configures the installed system. -->
+  <repository type="rpm-md" alias="slowroll-oss">
+    <source path="https://download.opensuse.org/slowroll/repo/oss/"/>
+  </repository>
+  <repository type="rpm-md" alias="slowroll-update">
+    <source path="https://download.opensuse.org/update/slowroll/repo/oss/"/>
+  </repository>
+
+  <!-- Minimal bootstrap needed by KIWI/Zypper before the image package phase. -->
+  <packages type="bootstrap">
+    <package name="filesystem"/>
+    <package name="glibc-locale"/>
+    <package name="cracklib-dict-full"/>
+    <package name="ca-certificates"/>
+    <package name="ca-certificates-mozilla"/>
+    <package name="openSUSE-release"/>
+    <package name="zypper"/>
+  </packages>
+
+  <!-- GENERATED from experiments/rootfs/system.seed + plasma.seed. -->
+  <packages type="image">
+    <package name="7zip"/>
+    <package name="Mesa-dri"/>
+    <package name="Mesa-vulkan-device-select"/>
+    <package name="NetworkManager"/>
+    <package name="NetworkManager-bluetooth"/>
+    <package name="alsa-ucm-conf"/>
+    <package name="alsa-utils"/>
+    <package name="apparmor-parser"/>
+    <package name="apparmor-utils"/>
+    <package name="ark"/>
+    <package name="avahi"/>
+    <package name="bash-completion"/>
+    <package name="bluedevil6"/>
+    <package name="bluez"/>
+    <package name="bluez-obexd"/>
+    <package name="breeze6"/>
+    <package name="breeze6-cursors"/>
+    <package name="breeze6-decoration"/>
+    <package name="breeze6-style"/>
+    <package name="btrfsmaintenance"/>
+    <package name="btrfsprogs"/>
+    <package name="ca-certificates-mozilla"/>
+    <package name="cifs-utils"/>
+    <package name="cups"/>
+    <package name="cups-filters"/>
+    <package name="cups-pk-helper"/>
+    <package name="curl"/>
+    <package name="dbus-broker"/>
+    <package name="discover6"/>
+    <package name="discover6-backend-flatpak"/>
+    <package name="dolphin"/>
+    <package name="dosfstools"/>
+    <package name="dracut"/>
+    <package name="e2fsprogs"/>
+    <package name="efibootmgr"/>
+    <package name="exfatprogs"/>
+    <package name="firewalld"/>
+    <package name="flatpak"/>
+    <package name="fwupd"/>
+    <package name="fwupd-efi"/>
+    <package name="glibc-locale"/>
+    <package name="google-noto-coloremoji-fonts"/>
+    <package name="google-noto-sans-fonts"/>
+    <package name="gutenprint"/>
+    <package name="gwenview"/>
+    <package name="iproute2"/>
+    <package name="iputils"/>
+    <package name="kate"/>
+    <package name="kde-cli-tools6"/>
+    <package name="kde-gtk-config6"/>
+    <package name="kernel-default"/>
+    <package name="kernel-firmware-amdgpu"/>
+    <package name="kernel-firmware-mediatek"/>
+    <package name="kernel-firmware-realtek"/>
+    <package name="kglobalacceld6"/>
+    <package name="kio-admin"/>
+    <package name="kio-extras"/>
+    <package name="kio-fuse"/>
+    <package name="konsole"/>
+    <package name="kscreenlocker6"/>
+    <package name="kwalletmanager"/>
+    <package name="kwin6"/>
+    <package name="liberation-fonts"/>
+    <package name="libvulkan_radeon"/>
+    <package name="myrlyn"/>
+    <package name="nss-mdns"/>
+    <package name="ntfs-3g"/>
+    <package name="ntfsprogs"/>
+    <package name="nvme-cli"/>
+    <package name="okular"/>
+    <package name="openSUSE-release"/>
+    <package name="openSUSE-repos-Slowroll"/>
+    <package name="pam_kwallet6"/>
+    <package name="partitionmanager"/>
+    <package name="pciutils"/>
+    <package name="pipewire"/>
+    <package name="pipewire-alsa"/>
+    <package name="pipewire-pulseaudio"/>
+    <package name="plasma6-branding-openSUSE"/>
+    <package name="plasma6-disks"/>
+    <package name="plasma6-firewall"/>
+    <package name="plasma6-integration-plugin"/>
+    <package name="plasma6-nm"/>
+    <package name="plasma6-pa"/>
+    <package name="plasma6-print-manager"/>
+    <package name="plasma6-session"/>
+    <package name="plasma6-systemmonitor"/>
+    <package name="plasma6-theme-openSUSE"/>
+    <package name="plasma6-workspace"/>
+    <package name="plymouth"/>
+    <package name="plymouth-branding-openSUSE"/>
+    <package name="plymouth-dracut"/>
+    <package name="polkit"/>
+    <package name="polkit-kde-agent-6"/>
+    <package name="power-profiles-daemon"/>
+    <package name="powerdevil6"/>
+    <package name="rpm"/>
+    <package name="sdbootutil"/>
+    <package name="sdbootutil-kernel-install"/>
+    <package name="sdbootutil-snapper"/>
+    <package name="sddm-kcm6"/>
+    <package name="sddm-qt6"/>
+    <package name="sddm-qt6-branding-openSUSE"/>
+    <package name="shim"/>
+    <package name="skanlite"/>
+    <package name="smartmontools"/>
+    <package name="snapper"/>
+    <package name="snapper-zypp-plugin"/>
+    <package name="spectacle"/>
+    <package name="sudo"/>
+    <package name="systemd"/>
+    <package name="systemd-boot"/>
+    <package name="systemd-presets-branding-openSUSE"/>
+    <package name="systemsettings6"/>
+    <package name="timezone"/>
+    <package name="ucode-amd"/>
+    <package name="udisks2"/>
+    <package name="unar"/>
+    <package name="unzip"/>
+    <package name="upower"/>
+    <package name="usbutils"/>
+    <package name="wireplumber"/>
+    <package name="wpa_supplicant"/>
+    <package name="xdg-desktop-portal"/>
+    <package name="xdg-desktop-portal-kde6"/>
+    <package name="xdg-user-dirs"/>
+    <package name="xdg-utils"/>
+    <package name="xf86-input-libinput"/>
+    <package name="xorg-x11-server"/>
+    <package name="xwayland"/>
+    <package name="yast2"/>
+    <package name="yast2-apparmor"/>
+    <package name="yast2-bootloader"/>
+    <package name="yast2-control-center-qt"/>
+    <package name="yast2-packager"/>
+    <package name="yast2-scanner"/>
+    <package name="yast2-services-manager"/>
+    <package name="yast2-snapper"/>
+    <package name="yast2-storage-ng"/>
+    <package name="yast2-sysconfig"/>
+    <package name="zip"/>
+    <package name="zram-generator"/>
+    <package name="zstd"/>
+    <package name="zypper"/>
+    <package name="criscore1"/>
+    <package name="criscore2"/>
+  </packages>
+</image>
