@@ -40,6 +40,7 @@ Requires:       plasma6-session
 Requires:       plasma6-workspace
 Requires:       plasma6-desktop
 Requires:       kwin6
+Requires:       xwayland
 Requires:       kscreenlocker6
 Requires:       kglobalacceld6
 Requires:       powerdevil6
@@ -64,10 +65,11 @@ Requires:       yast2-storage-ng
 %description
 myslowroll-core is the deliberately small protected dependency root of
 mySlowrollOS. It keeps the machine bootable, recoverable, networked and able
-to start a minimal Plasma Wayland administration session.
+to start a minimal Plasma Wayland administration session. Xwayland is kept
+for legacy application compatibility without installing a Plasma X11 session.
 
-Applications, printing, Bluetooth, codecs, Xwayland and other workstation
-features intentionally do not belong to this package.
+Applications, printing, Bluetooth, codecs and other workstation features
+intentionally do not belong to this package.
 
 %prep
 
