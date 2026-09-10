@@ -1,15 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-stage="${1:-stage0}"
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-repo_dir="$(cd -- "${script_dir}/../.." && pwd)"
-seed_file="${script_dir}/${stage}.seed"
-
-if [[ ! -f "${seed_file}" ]]; then
-    printf 'Seed file not found: %s\n' "${seed_file}" >&2
-    exit 2
+if (( $# > 0 )); then
+    run_name="$1"
+    shift
+else
+    run_name=stage0
 fi
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")")" && pwd)"
+repo_dir="$(cd -- "${script_dir}/../.." && pwd)"
+
+if (( $# == 0 )); then
+    layer_names=("${run_name}")
+else
+    layer_names=("$@")
+fi
+
+seed_files=()
+for layer in "${layer_names[@]}"; do
+    seed_file="${script_dir}/${layer}.seed"
+    if [[ ! -f "${seed_file}" ]]; then
+        printf 'Seed file not found: %s\n' "${seed_file}" >&2
+        exit 2
+    fi
+    seed_files+=("${seed_file}")
+done
 
 runtime_cmd=()
 if command -v podman >/dev/null 2>&1; then
@@ -26,21 +42,29 @@ else
 fi
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-run_dir="${repo_dir}/out/${stage}-${stamp}"
+run_dir="${repo_dir}/out/${run_name}-${stamp}"
 rootfs_dir="${run_dir}/rootfs"
 report_dir="${run_dir}/report"
+merged_seed="${run_dir}/requested.seed"
 mkdir -p "${rootfs_dir}" "${report_dir}"
+: > "${merged_seed}"
+
+for seed_file in "${seed_files[@]}"; do
+    sed -E '/^[[:space:]]*(#|$)/d; s/[[:space:]]+$//' "${seed_file}" >> "${merged_seed}"
+done
+LC_ALL=C sort -u -o "${merged_seed}" "${merged_seed}"
 
 tool_image="registry.opensuse.org/opensuse/tumbleweed:latest"
 
-printf 'Runtime: %s\nTarget:  %s\n' "${runtime_cmd[*]}" "${run_dir}"
+printf 'Runtime: %s\nTarget:  %s\nLayers:  %s\n' \
+    "${runtime_cmd[*]}" "${run_dir}" "${layer_names[*]}"
 
 "${runtime_cmd[@]}" run --rm \
     --mount "type=bind,src=${rootfs_dir},dst=/target" \
     --mount "type=bind,src=${report_dir},dst=/report" \
-    --mount "type=bind,src=${seed_file},dst=/input/seed,readonly" \
+    --mount "type=bind,src=${merged_seed},dst=/input/seed,readonly" \
     "${tool_image}" bash -euxo pipefail -c '
-        mapfile -t seeds < <(sed -E "/^[[:space:]]*(#|$)/d; s/[[:space:]]+$//" /input/seed)
+        mapfile -t seeds < /input/seed
         printf "%s\n" "${seeds[@]}" > /report/seeds.txt
 
         mkdir -p /target/etc/zypp/repos.d
@@ -66,7 +90,8 @@ printf 'Runtime: %s\nTarget:  %s\n' "${runtime_cmd[*]}" "${run_dir}"
         package_count="$(wc -l < /report/installed.names)"
         rootfs_bytes="$(du -sx -B1 /target | cut -f1)"
         {
-            printf "stage=%s\n" "'"${stage}"'"
+            printf "stage=%s\n" "'"${run_name}"'"
+            printf "layers=%s\n" "'"${layer_names[*]}"'"
             printf "packages=%s\n" "${package_count}"
             printf "rootfs_bytes=%s\n" "${rootfs_bytes}"
         } > /report/summary.txt
