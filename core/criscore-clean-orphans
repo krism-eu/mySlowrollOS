@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Rimuove soltanto i pacchetti che Zypper considera non necessari.
+# criscore1 e criscore2 sono esclusi sia dalla lista iniziale sia dal piano
+# finale calcolato dal solver.
+
+if (( EUID != 0 )); then
+    printf 'Eseguire come root.\n' >&2
+    exit 2
+fi
+
+for anchor in criscore1 criscore2; do
+    if ! rpm --quiet -q "${anchor}"; then
+        printf 'Protezione incompleta: %s non e installato. Operazione annullata.\n'             "${anchor}" >&2
+        exit 3
+    fi
+done
+
+mapfile -t orphans < <(
+    zypper --xmlout packages --unneeded         | grep -o '<solvable[^>]*>'         | grep 'type="package"'         | sed -E 's/.* name="([^"]*)".*/\1/'         | grep -vxE 'criscore1|criscore2'         | LC_ALL=C sort -u
+)
+
+if (( ${#orphans[@]} == 0 )); then
+    printf 'Nessun pacchetto non necessario da rimuovere.\n'
+    exit 0
+fi
+
+plan="$(mktemp)"
+trap 'rm -f -- "${plan}"' EXIT
+
+if ! zypper --non-interactive --xmlout remove --dry-run --clean-deps     "${orphans[@]}" > "${plan}"; then
+    printf 'Il solver non ha prodotto un piano valido. Nessuna modifica eseguita.\n' >&2
+    exit 4
+fi
+
+remove_block="$(sed -n '/<to-remove>/,/<\/to-remove>/p' "${plan}")"
+if grep -Eq 'name="criscore(1|2)"' <<< "${remove_block}"; then
+    printf 'Il piano coinvolge criscore1 o criscore2. Operazione annullata.\n' >&2
+    exit 5
+fi
+
+printf 'Pacchetti non necessari proposti: %s\n' "${#orphans[@]}"
+printf 'Il comando seguente mostrera il riepilogo definitivo prima della conferma.\n'
+zypper remove --clean-deps "${orphans[@]}"
