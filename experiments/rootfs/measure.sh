@@ -60,6 +60,34 @@ for seed_file in "${seed_files[@]}"; do
 done
 LC_ALL=C sort -u -o "${merged_seed}" "${merged_seed}"
 
+# If protected is one of the requested layers, verify that it is only a
+# protection subset. It must never smuggle packages into system + plasma.
+protected_audit=0
+protected_list="${run_dir}/protected.requested"
+profile_seed="${run_dir}/requested-without-protected.seed"
+: > "${profile_seed}"
+for i in "${!layer_names[@]}"; do
+    if [[ "${layer_names[i]}" == protected ]]; then
+        protected_audit=1
+        continue
+    fi
+    sed -E '/^[[:space:]]*(#|$)/d; s/[[:space:]]+$//' \
+        "${seed_files[i]}" >> "${profile_seed}"
+done
+LC_ALL=C sort -u -o "${profile_seed}" "${profile_seed}"
+
+if (( protected_audit )); then
+    sed -E '/^[[:space:]]*(#|$)/d; s/[[:space:]]+$//' \
+        "${script_dir}/protected.seed" | LC_ALL=C sort -u > "${protected_list}"
+    comm -23 "${protected_list}" "${profile_seed}" \
+        > "${report_dir}/protected-not-in-profile.names"
+    if [[ -s "${report_dir}/protected-not-in-profile.names" ]]; then
+        printf 'Protected packages missing from system + plasma:\n' >&2
+        sed 's/^/  /' "${report_dir}/protected-not-in-profile.names" >&2
+        exit 3
+    fi
+fi
+
 tool_image="registry.opensuse.org/opensuse/tumbleweed:latest"
 
 printf 'Runtime: %s\nMode:    %s\nTarget:  %s\nLayers:  %s\n' \
@@ -124,5 +152,27 @@ printf 'Runtime: %s\nMode:    %s\nTarget:  %s\nLayers:  %s\n' \
             printf "rootfs_bytes=%s\n" "${rootfs_bytes}"
         } > /report/summary.txt
     '
+
+if (( protected_audit )); then
+    if [[ "${mode}" == resolve ]]; then
+        result_names="${report_dir}/resolved.names"
+    else
+        result_names="${report_dir}/installed.names"
+    fi
+
+    comm -23 "${protected_list}" "${result_names}" \
+        > "${report_dir}/protected-missing-from-result.names"
+    if [[ -s "${report_dir}/protected-missing-from-result.names" ]]; then
+        printf 'Protected packages missing from solver result:\n' >&2
+        sed 's/^/  /' "${report_dir}/protected-missing-from-result.names" >&2
+        exit 4
+    fi
+
+    {
+        printf 'protected=%s\n' "$(wc -l < "${protected_list}")"
+        printf 'missing_from_profile=0\n'
+        printf 'missing_from_result=0\n'
+    } > "${report_dir}/protected-summary.txt"
+fi
 
 printf '\nCompleted. Reports: %s\n' "${report_dir}"
