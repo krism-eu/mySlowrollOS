@@ -3,42 +3,57 @@ set -euo pipefail
 
 if (( $# != 1 )); then
     printf 'Uso: bash agama/generate-workstation-profile URL_REPO_OBS_CRISCORE\n' >&2
-    printf 'Esempio: bash agama/generate-workstation-profile https://download.opensuse.org/repositories/home:USER/openSUSE_Slowroll/\n' >&2
+    printf 'Accetta sia la directory RPM-MD sia il file .repo pubblicato da OBS.\n' >&2
     exit 2
 fi
 
-repo_url="${1%/}/"
+input_url="$1"
+case "${input_url}" in
+    *.repo) repo_url="${input_url%/*}/" ;;
+    *)      repo_url="${input_url%/}/" ;;
+esac
+
+case "${repo_url}" in
+    https://*|http://*) ;;
+    *)
+        printf 'URL repository non supportato: %s\n' "${repo_url}" >&2
+        exit 2
+        ;;
+esac
+
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd -- "${script_dir}/.." && pwd)"
-seed="${repo_dir}/experiments/rootfs/workstation.seed"
+system_seed="${repo_dir}/experiments/rootfs/system.seed"
+plasma_seed="${repo_dir}/experiments/rootfs/plasma.seed"
 out="${script_dir}/workstation.jsonnet"
 
 tmp="$(mktemp)"
 trap 'rm -f -- "$tmp"' EXIT
 
-sed -E '/^[[:space:]]*(#|$)/d; s/[[:space:]]+$//' "$seed" > "$tmp"
-printf '%s\n' criscore1 criscore2 >> "$tmp"
-LC_ALL=C sort -u -o "$tmp" "$tmp"
+for seed in "${system_seed}" "${plasma_seed}"; do
+    sed -E '/^[[:space:]]*(#|$)/d; s/[[:space:]]+$//' "${seed}" >> "${tmp}"
+done
+printf '%s\n' criscore1 criscore2 >> "${tmp}"
+LC_ALL=C sort -u -o "${tmp}" "${tmp}"
 
 {
     cat <<EOF
-// Generato da experiments/rootfs/workstation.seed.
-// Profilo intenzionalmente parziale: niente storage, utenti, password o locale.
-// Avviare Agama con inst.install=0 per rivedere e completare manualmente l'installazione.
+// GENERATED FILE - DO NOT EDIT BY HAND.
+// Sources: experiments/rootfs/system.seed + experiments/rootfs/plasma.seed.
+// Profilo intenzionalmente parziale: storage, utenti, password e locale restano manuali.
 {
   product: {
     id: "Slowroll",
   },
 
   software: {
-    // Una lista esplicita sostituisce i pattern predefiniti del prodotto.
     patterns: [],
     packages: [
 EOF
 
     while IFS= read -r package; do
-        printf '      "%s",\n' "$package"
-    done < "$tmp"
+        printf '      "%s",\n' "${package}"
+    done < "${tmp}"
 
     cat <<EOF
     ],
@@ -66,8 +81,9 @@ EOF
   },
 }
 EOF
-} > "$out"
+} > "${out}"
 
-printf 'Generato %s con %s pacchetti espliciti.\n' "$out" "$(wc -l < "$tmp")"
+printf 'Generato %s con %s pacchetti espliciti.\n' "${out}" "$(wc -l < "${tmp}")"
+printf 'Repository criscore: %s\n' "${repo_url}"
 printf 'Storage, utente e locale volutamente assenti: verranno completati interattivamente in Agama.\n'
 printf 'Servizi/logging: verra applicato agama/post-install.sh a installazione conclusa.\n'
