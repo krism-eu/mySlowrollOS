@@ -133,6 +133,7 @@
       "systemd-presets-branding-openSUSE",
       "systemsettings6",
       "timezone",
+      "transactional-update",
       "ucode-amd",
       "udisks2",
       "unar",
@@ -198,6 +199,28 @@
           # This workstation has no WWAN modem. Keep ModemManager installed if pulled as
           # a dependency, but do not start it by default. It can be enabled later.
           systemctl disable ModemManager.service >/dev/null 2>&1 || true
+
+          # Full Slowroll upgrades are manual and guarded by core/myslowroll-atomic-dup.
+          # Never let transactional-update start an unattended distribution upgrade.
+          systemctl disable transactional-update.timer >/dev/null 2>&1 || true
+          systemctl mask transactional-update.timer >/dev/null 2>&1 || true
+
+          # Keep the project's solver policy explicit instead of relying on distro
+          # defaults. This also controls the zypper instance run inside
+          # transactional-update, which does not accept our dup policy as extra args.
+          set_zypp_option() {
+              local key="$1" value="$2" file=/etc/zypp/zypp.conf escaped
+              escaped="${key//./\\.}"
+
+              if grep -Eq "^[[:space:]]*${escaped}[[:space:]]*=" "${file}"; then
+                  sed -i -E "s|^[[:space:]]*${escaped}[[:space:]]*=.*$|${key} = ${value}|" "${file}"
+              else
+                  printf '\n%s = %s\n' "${key}" "${value}" >> "${file}"
+              fi
+          }
+
+          set_zypp_option solver.onlyRequires true
+          set_zypp_option solver.dupAllowVendorChange false
 
           # Keep the journal useful for diagnostics and rollback, but bounded.
           install -d -m 0755 /etc/systemd/journald.conf.d
