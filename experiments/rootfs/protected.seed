@@ -124,8 +124,6 @@ systemsettings6
 kde-cli-tools6
 plasma6-systemmonitor
 plasma6-disks
-plasma6-branding-openSUSE
-plasma6-theme-openSUSE
 
 # Compatibilita e greeter; nessuna sessione Plasma X11
 xwayland
