@@ -26,6 +26,10 @@ plasma6-branding-openSUSE
 plasma6-theme-openSUSE
 xwayland
 
+# Xorg limitato al greeter SDDM; nessuna sessione Plasma X11
+xorg-x11-server
+xf86-input-libinput
+
 # Integrazione rete, sicurezza, audio e portali
 plasma6-nm
 plasma6-firewall
