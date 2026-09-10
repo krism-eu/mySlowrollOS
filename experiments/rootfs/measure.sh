@@ -86,8 +86,8 @@ printf 'Runtime: %s\nMode:    %s\nTarget:  %s\nLayers:  %s\n' \
                 install --dry-run --no-recommends "${seeds[@]}" \
                 > /report/solver.xml
             grep -o "<solvable[^>]*>" /report/solver.xml \
-                | grep "kind=\\\"package\\\"" \
-                | sed -E "s/.* name=\\\"([^\\\"]*)\\\".*/\\1/" \
+                | grep "kind=\"package\"" \
+                | sed -E "s/.* name=\"([^\"]*)\".*/\1/" \
                 | LC_ALL=C sort -u > /report/resolved.names
             grep -o "<install-summary[^>]*>" /report/solver.xml \
                 > /report/transaction-summary.xml
