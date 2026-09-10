@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd -- "${script_dir}/.." && pwd)"
+seed="${repo_dir}/experiments/rootfs/protected.seed"
+output="${1:-${script_dir}/criscore.spec}"
+
+if [[ ! -f "${seed}" ]]; then
+    printf 'Manifesto non trovato: %s\n' "${seed}" >&2
+    exit 2
+fi
+
+tmp_packages="$(mktemp)"
+tmp_spec="$(mktemp)"
+trap 'rm -f -- "${tmp_packages}" "${tmp_spec}"' EXIT
+
+if ! awk '
+    /^[[:space:]]*(#|$)/ { next }
+    {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+        if ($0 !~ /^[A-Za-z0-9][A-Za-z0-9+_.:@~-]*$/) {
+            printf "Voce non valida in protected.seed: %s\n", $0 > "/dev/stderr"
+            bad = 1
+            next
+        }
+        if (!seen[$0]++) print $0
+    }
+    END { exit bad ? 1 : 0 }
+' "${seed}" | LC_ALL=C sort > "${tmp_packages}"; then
+    exit 2
+fi
+
+if [[ ! -s "${tmp_packages}" ]]; then
+    printf 'protected.seed non contiene pacchetti.\n' >&2
+    exit 2
+fi
+
+emit_requires() {
+    while IFS= read -r package; do
+        printf 'Requires:       %s\n' "${package}"
+    done < "${tmp_packages}"
+}
+
+{
+    cat <<'EOF'
+# GENERATED FILE - DO NOT EDIT BY HAND.
+# Source of common Requires: experiments/rootfs/protected.seed
+# Regenerate with: core/generate-criscore-spec
+
+Name:           criscore1
+Version:        0.1
+Release:        0
+Summary:        Protected core anchor 1 for mySlowrollOS
+License:        MIT
+BuildArch:      noarch
+Source0:        criscore-clean-orphans
+
+# Keep the two anchors on exactly the same build without creating an ordering loop.
+Requires(meta): criscore2 = %{version}-%{release}
+EOF
+    emit_requires
+    cat <<'EOF'
+
+%description
+criscore1 is one of two deliberately redundant dependency anchors used by
+mySlowrollOS. It protects the approved core package set from accidental removal.
+The package contains no application payload beyond the guarded orphan-cleanup
+helper and a marker file.
+
+%package -n criscore2
+Summary:        Protected core anchor 2 for mySlowrollOS
+BuildArch:      noarch
+Requires(meta): criscore1 = %{version}-%{release}
+EOF
+    emit_requires
+    cat <<'EOF'
+
+%description -n criscore2
+criscore2 is the second dependency anchor used by mySlowrollOS. It carries the
+same approved Requires as criscore1 and is version-locked to its peer.
+
+%prep
+
+%build
+
+%install
+install -Dm0755 %{SOURCE0} %{buildroot}%{_sbindir}/criscore-clean-orphans
+install -d %{buildroot}%{_datadir}/criscore
+printf '%s\n' 'mySlowrollOS protected core anchor 1' > %{buildroot}%{_datadir}/criscore/criscore1
+printf '%s\n' 'mySlowrollOS protected core anchor 2' > %{buildroot}%{_datadir}/criscore/criscore2
+
+%preun
+if [ "$1" -eq 0 ] && [ ! -e /run/criscore.allow-removal ]; then
+    echo "Refusing to remove protected package criscore1." >&2
+    echo "For intentional removal, create /run/criscore.allow-removal first." >&2
+    exit 1
+fi
+
+%preun -n criscore2
+if [ "$1" -eq 0 ] && [ ! -e /run/criscore.allow-removal ]; then
+    echo "Refusing to remove protected package criscore2." >&2
+    echo "For intentional removal, create /run/criscore.allow-removal first." >&2
+    exit 1
+fi
+
+%files
+%{_sbindir}/criscore-clean-orphans
+%{_datadir}/criscore/criscore1
+
+%files -n criscore2
+%{_datadir}/criscore/criscore2
+
+%changelog
+EOF
+} > "${tmp_spec}"
+
+mkdir -p -- "$(dirname -- "${output}")"
+mv -- "${tmp_spec}" "${output}"
+printf 'Generato %s da %s pacchetti protetti.\n' "${output}" "$(wc -l < "${tmp_packages}")"
