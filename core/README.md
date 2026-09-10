@@ -1,209 +1,170 @@
-# Protezione con `criscore1` e `criscore2`
+# Protezione e aggiornamenti di mySlowrollOS
 
-## Scopo
+## Criscore
 
 `criscore1` e `criscore2` sostituiscono lo “scudo” offerto dai pattern generici
 openSUSE e KDE, senza importarli e senza ereditarne il contenuto sovrabbondante.
+Sono due metapacchetti generati dallo stesso sorgente e dichiarano lo stesso
+insieme di dipendenze forti.
 
-Sono metapacchetti: non contengono copie delle applicazioni e non installano due
-volte nulla. Entrambi dichiarano lo stesso insieme di dipendenze; RPM/Zypper
-installa una sola istanza di ciascun pacchetto richiesto.
+In aggiunta:
 
-## Struttura concordata
+- `criscore1` richiede esattamente la stessa versione-release di `criscore2`;
+- `criscore2` richiede esattamente la stessa versione-release di `criscore1`;
+- `experiments/rootfs/protected.seed` è l'unica fonte modificabile dei `Requires`;
+- `core/generate-criscore-spec` genera materialmente entrambe le liste nello spec;
+- `criscore1` installa anche `/usr/sbin/myslowroll-atomic-dup`.
 
-Un solo progetto sorgente genera due RPM binari:
+Se si tenta di rimuovere un pacchetto richiesto, il solver deve quindi proporre
+anche la rimozione delle due ancore. Ogni ancora ha inoltre un `%preun` che:
 
-- `criscore1`;
-- `criscore2`.
+- consente gli aggiornamenti;
+- rifiuta una vera disinstallazione;
+- permette una rimozione intenzionale soltanto dopo la creazione di
+  `/run/criscore.allow-removal`;
+- lascia passare esclusivamente l'erase sintetico di OBS quando
+  `YAST_IS_RUNNING=instsys`.
 
-Entrambi ricevono lo stesso elenco approvato di `Requires`. In aggiunta:
+La protezione vale anche attraverso i `Requires` transitivi. Non serve elencare
+ogni libreria; vanno invece dichiarati direttamente i componenti essenziali che
+potrebbero arrivare solo come `Recommends`, provider sostituibili o integrazioni
+runtime.
 
-- `criscore1` richiede la stessa versione-release di `criscore2`;
-- `criscore2` richiede la stessa versione-release di `criscore1`.
+Questo protegge dalle normali operazioni RPM/Zypper/YaST. Non pretende di
+fermare root che usi `--noscripts`, cancelli file a mano o modifichi il sistema
+fuori dal package manager.
 
-L'elenco comune avrà una sola fonte modificabile. Lo spec generato ripeterà
-materialmente i `Requires` nei due sottopacchetti, evitando che le due liste
-possano divergere.
+## Build locale e OBS
 
-## Cosa protegge davvero
-
-Se si tenta di rimuovere un pacchetto richiesto, il solver deve proporre anche la
-rimozione di entrambe le ancore. La dipendenza circolare rende evidente
-l'operazione e impedisce di eliminare una sola ancora lasciando l'altra.
-
-Ogni ancora avrà inoltre un controllo `%preun`:
-
-- gli aggiornamenti del pacchetto sono consentiti;
-- una disinstallazione reale viene rifiutata;
-- la rimozione volontaria richiede la creazione preventiva di un file di
-  sblocco sotto `/run`.
-
-Questo protegge dagli errori nelle normali operazioni Zypper/RPM. Non pretende di
-fermare root che usi `rpm --nodeps`, cancelli file manualmente o modifichi lo
-spec: non è immutabilità e non è atomicità.
-
-La protezione vale anche lungo i `Requires` forti transitivi. Non è quindi
-necessario elencare ogni libreria. Devono invece essere dichiarati direttamente
-i componenti indispensabili che arriverebbero soltanto come `Recommends`, come
-provider sostituibili o per integrazione runtime. Tra questi rientrano firmware,
-plugin Snapper/Zypper, bridge PipeWire, portali KDE, input del greeter, KWallet e
-integrazioni di rete/Bluetooth. Prima del rilascio, un audit del solver proverà
-la rimozione simulata dei nodi critici e dovrà vedere entrambe le ancore nella
-transazione proposta.
-
-## Contenuto del core
-
-Non si importano automaticamente pacchetti dalle vecchie liste. Le liste
-storiche restano un memorandum per individuare funzioni dimenticate.
-
-Il manifesto verrà costruito per funzioni osservabili:
-
-1. avvio e Secure Boot;
-2. RPM/Zypper e identità Slowroll;
-3. root Btrfs, Snapper e ripristino;
-4. rete necessaria alla macchina;
-5. firmware e input necessari alla macchina;
-6. audio essenziale;
-7. sessione Plasma Wayland realmente avviabile, inclusi i componenti necessari
-   al greeter;
-8. amministrazione grafica essenziale scelta esplicitamente.
-
-Applicazioni aggiungibili in seguito, strumenti occasionali e funzioni non
-usate sulla macchina non entrano nel core solo perché comparivano in una
-vecchia installazione.
-
-## Locale oppure OBS
-
-### Fase di sviluppo: repository locale
-
-È la scelta iniziale:
-
-- ciclo modifica/build/test rapido;
-- nessuna pubblicazione di prove;
-- i due RPM vengono installati o aggiornati nella stessa transazione;
-- un piccolo repository locale è preferibile a due file RPM sciolti, perché
-  Zypper conserva una sorgente aggiornabile.
-
-Comando concettuale per la prima installazione:
+Il build locale rigenera sempre lo spec e include il tool atomico come `Source1`:
 
 ```sh
-sudo zypper install criscore1 criscore2
+bash core/build-criscore-local
 ```
 
-Il comando concreto dipenderà dal percorso e dalla firma del repository locale.
+Per preparare le sorgenti OBS:
 
-### Fase stabile: OBS
+```sh
+bash core/prepare-criscore-obs
+```
 
-Quando il manifesto è approvato, OBS diventa utile:
+La directory di staging contiene entrambi i file richiesti da OBS:
 
-- costruisce entrambi i binari dallo stesso sorgente;
-- pubblica un repository firmato;
-- segnala quando una dipendenza non è più risolvibile;
-- rende più semplice reinstallare e aggiornare la coppia.
+```text
+criscore1.spec
+myslowroll-atomic-dup
+```
 
-OBS non sceglie il sostituto di un pacchetto rinominato: quel cambiamento resta
-una decisione nostra. Per questo non conviene pubblicare la selezione ancora
-mobile.
-
-Decisione proposta: **locale durante la definizione; OBS quando il core supera i
-test in VM e sulla macchina**.
-
-## Installazione del sistema
-
-La protezione è indipendente dal modo con cui nasce il sistema. Il percorso
-proposto è:
-
-1. KIWI risolve e valida le liste `system` e `plasma`;
-2. decidiamo il sottoinsieme realmente da proteggere;
-3. generiamo e testiamo localmente `criscore1` e `criscore2`;
-4. il profilo d'installazione installa le liste approvate e le due ancore;
-5. il partizionamento resta interattivo, così `/home` separata può essere
-   selezionata e conservata;
-6. solo dopo scegliamo se distribuire il profilo tramite supporto per Agama o
-   incorporarlo in una ISO KIWI personalizzata.
-
-Il metapacchetto non deve coincidere con l'intero profilo d'installazione:
-quest'ultimo può includere software utile ma liberamente rimovibile.
-
-## Prossimo passo
-
-Prima di scrivere lo spec definitivo occorre produrre tre elenchi separati:
-
-- `system.seed`: ciò che deve essere installato nel sistema;
-- `plasma.seed`: desktop e applicazioni installate;
-- `protected.seed`: solo ciò che non deve essere rimosso accidentalmente.
-
-`protected.seed` sarà l'unica fonte per i `Requires` comuni delle due ancore.
+Un solo package sorgente OBS, `criscore1`, continua a produrre i due RPM binari
+`criscore1` e `criscore2`.
 
 ## Pulizia protetta dei pacchetti non necessari
 
-Il prototipo [`criscore-clean-orphans`](criscore-clean-orphans) applica tre
-controlli:
+`core/criscore-clean-orphans` applica controlli fail-closed prima di rimuovere
+pacchetti che Zypper considera non necessari:
 
-1. richiede che entrambe le ancore siano installate;
-2. esclude esplicitamente `criscore1` e `criscore2` dall'elenco restituito da
-   `zypper packages --unneeded`;
-3. esegue un `remove --dry-run --clean-deps` e annulla tutto se la sezione
-   `<to-remove>` del piano XML contiene una delle due ancore.
+1. richiede entrambe le ancore;
+2. le esclude dall'elenco iniziale;
+3. esegue un `remove --dry-run --clean-deps` in XML;
+4. annulla se il piano coinvolge una delle ancore.
 
-Finché le ancore restano installate, le loro dipendenze non sono orfane per il
-solver. Il filtro e la simulazione sono controlli ulteriori; il `%preun` dei due
-RPM rimane l'ultima barriera. Lo script verrà installato con permessi eseguibili
-dal pacchetto definitivo.
+Il `%preun` rimane comunque l'ultima barriera.
 
-## Profilo Agama online e ISO
+## Aggiornamento atomico della workstation RW
 
-Agama può caricare tramite URL un profilo remoto JSON, Jsonnet oppure direttamente AutoYaST. Il
-profilo può dichiarare:
+La workstation resta **openSUSE Slowroll tradizionale con root Btrfs
+read-write**. Non viene trasformata in MicroOS e non viene adottato il ruolo
+Transactional Server.
 
-- i pacchetti `criscore1` e `criscore2`;
-- `onlyRequired: true`;
-- un repository RPM aggiuntivo mediante `software.extraRepositories`.
+Per i soli distribution upgrade completi usiamo però il motore ufficiale
+`transactional-update`: il `zypper dup` viene eseguito dentro una nuova snapshot
+Btrfs e la root corrente non viene modificata. Il nuovo stato diventa la root di
+default soltanto per il reboot successivo.
 
-L'URL del profilo non sostituisce il repository: Agama scarica il profilo da un
-URL, ma i due RPM devono trovarsi in un repository RPM indicizzato, locale o
-online. Quando saranno su OBS, il profilo potrà puntare direttamente al
-repository firmato.
+Questo modello è compatibile con una root read-write, ma ha una conseguenza
+importante: dopo la creazione della nuova snapshot, ulteriori modifiche alla
+root attualmente in esecuzione non fanno parte della snapshot preparata e
+andrebbero perse al cambio di root. Per questo il wrapper del progetto non
+restituisce una shell dopo un upgrade riuscito: verifica il target e ordina
+subito il reboot.
 
-Per caricare la configurazione senza iniziare automaticamente l'installazione,
-il supporto di avvio previsto da Agama è concettualmente:
+### Guardrail del wrapper
 
-```text
-inst.auto=https://…/profilo.xml inst.install=0
+`core/myslowroll-atomic-dup` lavora in modalità fail-closed. Prima di creare una
+transazione richiede:
+
+- openSUSE Slowroll;
+- root Btrfs montata read-write e subvolume con proprietà `ro=false`;
+- Snapper configurato per `/` e `/.snapshots` disponibile;
+- `/var` montata separatamente dalla root snapshot;
+- systemd-boot gestito da `sdbootutil`;
+- snapshot attiva uguale alla snapshot di default;
+- `criscore1` e `criscore2` entrambi installati;
+- assenza di `/run/criscore.allow-removal`;
+- `solver.onlyRequires = true`;
+- `solver.dupAllowVendorChange = false`;
+- `transactional-update.timer` disabilitato;
+- nessuna transazione precedente ancora da confermare;
+- nessun altro processo ZYpp attivo.
+
+La policy Agama imposta i due valori ZYpp e disabilita/maska il timer automatico.
+Gli upgrade completi restano quindi intenzionalmente manuali.
+
+### Comandi
+
+```sh
+sudo myslowroll-atomic-dup status
+sudo myslowroll-atomic-dup check
+sudo myslowroll-atomic-dup plan
+sudo myslowroll-atomic-dup upgrade
+sudo myslowroll-atomic-dup confirm
+sudo myslowroll-atomic-dup rollback [SNAPSHOT]
 ```
 
-`inst.install=0` è essenziale nel nostro caso: consente di controllare e
-modificare graficamente il partizionamento, soprattutto il riuso di `/home`,
-prima di avviare l'installazione.
+`plan` aggiorna i metadati, esegue un dry-run leggibile e poi un dry-run XML con
+`--download-only`, `--no-recommends` e `--no-allow-vendor-change`. In questo modo
+gli RPM vengono pre-scaricati e Zypper può anche eseguire il controllo dei
+conflitti di file senza modificare il sistema. Il piano viene rifiutato se
+prevede la rimozione di componenti critici.
 
-Decisione proposta:
+`upgrade` ripete sempre il piano, richiede una conferma esplicita, crea prima una
+snapshot di recupero read-only e ne verifica la presenza nel bootloader. Solo a
+quel punto esegue:
 
-- metodo principale: ISO Agama ufficiale + profilo remoto versionato +
-  repository OBS firmato;
-- ISO KIWI personalizzata: seconda modalità, utile per installazione offline,
-  congelamento di una versione verificata dell'installer o personalizzazioni
-  necessarie già nell'ambiente live.
+```text
+transactional-update --no-selfupdate --non-interactive --drop-if-no-change dup
+```
 
-Per una sola macchina non conviene mantenere subito una ISO se il percorso
-online supera una reinstallazione completa in VM e riconosce rete, dischi,
-Secure Boot e `/home` come previsto.
+Dopo il completamento verifica che la nuova snapshot:
 
-## Politica degli aggiornamenti
+- sia ancora Slowroll;
+- contenga criscore, kernel, RPM/Zypper, Snapper, transactional-update e
+  systemd-boot;
+- sia considerata bootable da `sdbootutil`;
+- sia ancora read-write (`ro=false`).
 
-La macchina resta una Slowroll tradizionale. Non usa il ruolo Transactional
-Server e non tenta di mescolare il modello MicroOS con installazioni RPM live.
+Se tutto è coerente, registra il target sotto `/var/lib/myslowroll/atomic-dup` e
+riavvia immediatamente. Dopo un boot riuscito `confirm` controlla che snapshot
+attiva e default coincidano con il target e marca la transazione come confermata.
+La snapshot di recupero viene conservata.
 
-Il flusso previsto per l'upgrade completo è:
+`rollback` usa, per default, proprio il punto di recupero registrato. È
+intenzionalmente meno dipendente dallo stato software della nuova root: deve
+restare utilizzabile anche se il target appena avviato ha un package set
+incompleto. Il rollback prepara una nuova snapshot RW tramite il meccanismo
+ufficiale e riavvia immediatamente.
 
-1. aggiornare i metadati e risolvere il piano;
-2. scaricare in anticipo tutti i pacchetti;
-3. lasciare che `snapper-zypp-plugin` crei le snapshot pre/post;
-4. eseguire il normale `zypper dup`;
-5. non effettuare altre modifiche al sistema e riavviare subito;
-6. in caso di problema, avviare la snapshot precedente e fare rollback.
+## Stato di validazione
 
-Il riavvio immediato è una nostra regola operativa: non rende il `dup` atomico e
-non significa che l'aggiornamento venga applicato soltanto al boot. Una vera
-attivazione transazionale al riavvio richiederebbe adottare coerentemente
-MicroOS oppure mantenere una nostra infrastruttura offline, che qui
-aggiungerebbe più rischio e manutenzione del beneficio.
+Sono già validati sul percorso reale Agama/Slowroll in VM:
+
+- installazione del profilo senza pattern distro/desktop;
+- avvio e SDDM;
+- installazione di `criscore1` e `criscore2` dal repository OBS;
+- blocco reale della rimozione di un pacchetto protetto (`dolphin`).
+
+Per il wrapper atomico sono stati eseguiti controlli statici e test del parser
+fail-closed del piano. La VM corrente usa ext4: lì `check` deve e può soltanto
+rifiutare l'operazione senza modificare nulla. La validazione dell'upgrade e del
+rollback atomico richiede una VM dedicata con root Btrfs, Snapper e systemd-boot.
+La procedura precisa è in `core/atomic-upgrade-test.md`.
