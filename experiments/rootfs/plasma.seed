@@ -53,6 +53,13 @@ partitionmanager
 kwalletmanager
 pam_kwallet6
 
+# Backend archivi per Ark; utili ma non protetti da criscore
+7zip
+unar
+zip
+unzip
+zstd
+
 # Flatpak; nessun backend PackageKit
 flatpak
 discover6
