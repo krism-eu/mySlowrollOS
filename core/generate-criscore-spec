@@ -89,15 +89,18 @@ install -d %{buildroot}%{_datadir}/criscore
 printf '%s\n' 'mySlowrollOS protected core anchor 1' > %{buildroot}%{_datadir}/criscore/criscore1
 printf '%s\n' 'mySlowrollOS protected core anchor 2' > %{buildroot}%{_datadir}/criscore/criscore2
 
+# openSUSE post-build-checks performs a synthetic erase test with
+# YAST_IS_RUNNING=instsys. Permit that build-root cleanup without weakening
+# the guard for normal installed-system RPM/Zypper operations.
 %preun
-if [ "$1" -eq 0 ] && [ ! -e /run/criscore.allow-removal ]; then
+if [ "$1" -eq 0 ] && [ ! -e /run/criscore.allow-removal ] && [ "${YAST_IS_RUNNING:-}" != "instsys" ]; then
     echo "Refusing to remove protected package criscore1." >&2
     echo "For intentional removal, create /run/criscore.allow-removal first." >&2
     exit 1
 fi
 
 %preun -n criscore2
-if [ "$1" -eq 0 ] && [ ! -e /run/criscore.allow-removal ]; then
+if [ "$1" -eq 0 ] && [ ! -e /run/criscore.allow-removal ] && [ "${YAST_IS_RUNNING:-}" != "instsys" ]; then
     echo "Refusing to remove protected package criscore2." >&2
     echo "For intentional removal, create /run/criscore.allow-removal first." >&2
     exit 1
