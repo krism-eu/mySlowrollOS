@@ -1,40 +1,39 @@
 # mySlowrollOS
 
-Workstation personale, minimale e riproducibile basata su **openSUSE Slowroll**, Plasma Wayland, Btrfs e Snapper.
+Configurazione personale, minimale e riproducibile basata su **openSUSE Slowroll**, Plasma Wayland, Btrfs e Snapper.
 
-L'obiettivo non è creare un fork di Slowroll, ma descrivere e costruire tramite Open Build Service un sistema resistente alle modifiche accidentali.
+L'obiettivo non è creare una distribuzione pubblica, ma descrivere un'installazione resistente alle modifiche accidentali per una sola macchina.
 
 ## Decisioni fissate
 
 - base: openSUSE Slowroll;
+- installazione dalla ISO ufficiale di Agama;
+- profilo Agama dichiarativo, inizialmente ricavato dagli XML AutoYaST già provati;
+- partizionamento scelto interattivamente nell'installer;
+- `/home` su partizione separata, riutilizzata senza formattarla;
 - desktop: Plasma su Wayland;
 - Xwayland incluso per la compatibilità con applicazioni legacy;
 - nessuna sessione Plasma X11 e nessun server Xorg completo;
-- partizionamento scelto interattivamente nell'installer grafico;
-- `/home` su partizione separata, riutilizzabile senza formattarla;
 - root Btrfs con Snapper e integrazione ZYpp;
 - AppArmor; nessuna policy SELinux attiva;
 - YaST grafico mantenuto finché disponibile;
 - niente installazione automatica delle dipendenze raccomandate;
 - pacchetti necessari all'uso normale dichiarati esplicitamente;
-- un RPM `myslowroll-core` proteggerà il nucleo dalla rimozione accidentale;
+- un RPM locale `myslowroll-core` proteggerà il nucleo dalla rimozione accidentale;
 - applicazioni e accessori non essenziali resteranno rimovibili.
 
-Il profilo di build non imporrà uno schema di partizionamento né formatterà automaticamente `/home`.
+Il profilo non imporrà uno schema di partizionamento e non formatterà automaticamente `/home`.
 
-## Build
+## Percorso minimo
 
-L'utente OBS del progetto è `krism`. OBS userà direttamente i repository di `openSUSE:Slowroll`.
+1. ripulire e convertire la selezione software in un profilo parziale per Agama;
+2. installare Slowroll con la ISO Agama ufficiale, scegliendo il disco manualmente;
+3. costruire e installare localmente `myslowroll-core.rpm`;
+4. verificare aggiornamento, rollback Snapper e tentativi di rimozione in VM;
+5. usare OBS o costruire una ISO personalizzata soltanto se emerge un vantaggio concreto.
 
-Il progetto avrà inizialmente due soli componenti:
-
-1. `myslowroll-core`: metapacchetto RPM con le dipendenze indispensabili e una protezione esplicita dalla disinstallazione accidentale;
-2. `myslowroll-image`: descrizione dichiarativa della workstation e immagine di verifica.
-
-Il formato dell'immagine installabile va scelto senza perdere il partizionatore grafico. Una semplice ISO live KIWI e una ISO OEM KIWI non equivalgono al DVD di installazione YaST: la seconda distribuisce un'immagine disco predefinita. Valuteremo quindi un media con installer interattivo, mantenendo separata l'immagine KIWI usata per verificare in modo riproducibile la selezione dei pacchetti.
-
-La pipeline ufficiale del DVD Slowroll basata su product-builder non verrà duplicata finché non sarà dimostrato che serve davvero.
+OBS non è necessario per la prima versione. L'account `krism` resta disponibile per eventuali build remote o per pubblicare in seguito il pacchetto, ma il metapacchetto può rimanere esclusivamente locale.
 
 ## Stato
 
-Il materiale proveniente dagli esperimenti precedenti verrà analizzato come insieme di fonti indipendenti. Nessuna vecchia configurazione verrà importata integralmente senza revisione.
+Il materiale proveniente dagli esperimenti precedenti viene trattato come insieme di fonti indipendenti. Nessuna vecchia configurazione sarà importata integralmente senza revisione.
