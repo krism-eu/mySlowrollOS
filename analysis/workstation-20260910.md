@@ -49,3 +49,26 @@ della chiusura funzionale Plasma e non un pattern desktop openSUSE.
 3. valutare se accettare ModemManager/WWAN come dipendenza di `plasma6-nm`;
 4. risolvere separatamente `system.seed` per misurare il delta Plasma;
 5. solo dopo costruire e avviare la prima immagine KIWI.
+
+
+## Separazione sistema e desktop
+
+La risoluzione del solo `system.seed` produce:
+
+- 667 pacchetti;
+- 631.008.170 byte di download;
+- 1.632.400.350 byte installati.
+
+Il livello Plasma e applicazioni aggiunge quindi 659 pacchetti e circa
+1.307.666.764 byte. La divisione è quasi esattamente a metà.
+
+## Correzioni dopo la revisione
+
+- aggiunto `zram-generator`, già usato con successo sulla macchina;
+- aggiunti `xorg-x11-server` e `xf86-input-libinput` esclusivamente per un
+  greeter SDDM affidabile;
+- restano escluse la sessione Plasma X11 e `kwin6-x11`;
+- non aggiunto `wireless-tools`: NetworkManager e wpa_supplicant gestiscono
+  la scheda MediaTek;
+- lo stack audio contiene i moduli del kernel, ALSA UCM, PipeWire e WirePlumber;
+- `plasma6-desktop` entra come dipendenza pur non essendo un seed esplicito.
