@@ -38,7 +38,6 @@ Requires:       NetworkManager
 Requires:       sddm
 Requires:       plasma6-session
 Requires:       plasma6-workspace
-Requires:       plasma6-desktop
 Requires:       kwin6
 Requires:       xwayland
 Requires:       kscreenlocker6
