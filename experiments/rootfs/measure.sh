@@ -85,8 +85,10 @@ printf 'Runtime: %s\nMode:    %s\nTarget:  %s\nLayers:  %s\n' \
             zypper --root /target --non-interactive --gpg-auto-import-keys --xmlout \
                 install --dry-run --no-recommends "${seeds[@]}" \
                 > /report/solver.xml
-            grep -o "kind=\"package\" name=\"[^\"]*\"" /report/solver.xml \
-                | cut -d "\"" -f4 | LC_ALL=C sort -u > /report/resolved.names
+            grep -o "<solvable[^>]*>" /report/solver.xml \
+                | grep "kind=\\\"package\\\"" \
+                | sed -E "s/.* name=\\\"([^\\\"]*)\\\".*/\\1/" \
+                | LC_ALL=C sort -u > /report/resolved.names
             grep -o "<install-summary[^>]*>" /report/solver.xml \
                 > /report/transaction-summary.xml
             package_count="$(wc -l < /report/resolved.names)"
