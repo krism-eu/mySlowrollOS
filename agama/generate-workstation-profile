@@ -54,9 +54,9 @@ LC_ALL=C sort -u -o "${tmp}" "${tmp}"
     id: "Slowroll",
   },
 
-  l10n: {
-    locale: "it_IT.UTF-8",
-    keymap: "it",
+  localization: {
+    language: "it_IT.UTF-8",
+    keyboard: "it",
     timezone: "Europe/Rome",
   },
 
