@@ -9,15 +9,17 @@ The project profile is intentionally partial:
 - explicit packages generated from `experiments/rootfs/system.seed` plus `experiments/rootfs/plasma.seed`, exactly like the KIWI workstation description, plus `criscore1` and `criscore2`;
 - `onlyRequired: true`;
 - one OBS repository containing the criscore RPMs;
+- localization preset to `it_IT.UTF-8`, keyboard `it` and timezone `Europe/Rome`;
 - no `storage` section;
-- no users or passwords;
-- no locale or keyboard choice imposed by the profile.
+- no users or passwords.
 
-Omitting storage and identity is deliberate. The profile is loaded with `inst.install=0`, so Agama applies the software/product choices and then stops for review. Storage, user account, password, locale and keyboard are completed manually in the Agama UI, including reuse of an existing `/home` without formatting.
+Omitting storage and identity is deliberate. After loading the profile, storage, user account and passwords are completed manually in the Agama UI, including reuse of an existing `/home` without formatting. Filesystem choice also remains manual, so a small VM can use ext4 while the real workstation can use Btrfs with Snapper.
 
 ## Runtime policy
 
-The profile runs `agama/post-install.sh` as a chrooted post-installation script. It deliberately keeps the policy small and reversible:
+The generated `agama/workstation.jsonnet` embeds the contents of `agama/post-install.sh` as a chrooted post-installation script. Keeping the generated profile self-contained means the same single file works from GitHub or from `usb:///`.
+
+The runtime policy deliberately remains small and reversible:
 
 - sets `graphical.target` as the default target;
 - disables `NetworkManager-wait-online.service`;
@@ -52,20 +54,42 @@ https://download.opensuse.org/repositories/home:/krism/openSUSE_Slowroll/
 
 as `software.extraRepositories[].url`.
 
-## Boot Agama
+## Load from GitHub
 
-Use the official Agama Live ISO. During development prefer an immutable raw GitHub URL pinned to a commit, so the profile and the relative `post-install.sh` come from the same revision.
+During development the profile can be loaded from its raw GitHub URL. Running `agama config generate` first evaluates Jsonnet and then `agama config load` applies the partial configuration without starting the installation:
 
-For the profile committed as `690cb54560d8a784ddc7ea400471919e753ba76e`:
-
-```text
-inst.auto=https://raw.githubusercontent.com/krism-eu/mySlowrollOS/690cb54560d8a784ddc7ea400471919e753ba76e/agama/workstation.jsonnet inst.install=0 inst.systemd_boot_preview=1 inst.remote=0
+```sh
+agama config generate PROFILE_URL > /tmp/myslowroll.json
+agama config load < /tmp/myslowroll.json
 ```
 
-`inst.install=0` is mandatory for this project path: the machine must stop for review instead of immediately installing. `inst.systemd_boot_preview=1` enables Agama's current systemd-boot path for testing and installation testing must verify that Agama did not fall back to GRUB. `inst.remote=0` keeps the local installer UI from being exposed to other machines during this single-workstation installation.
+Then continue in the graphical UI for storage, user and passwords.
 
-The OBS repository key is intentionally not bypassed with `allowUnsigned`. If Agama asks about the OBS project key during the first test, review and trust the presented key interactively; after that test the accepted fingerprint can be pinned in the profile if useful.
+## Load from USB
+
+Copy just this generated file to the root of a USB filesystem:
+
+```text
+workstation.jsonnet
+```
+
+Agama can locate it on attached USB devices through its `usb:///` URL scheme:
+
+```sh
+agama config generate usb:///workstation.jsonnet > /tmp/myslowroll.json
+agama config load < /tmp/myslowroll.json
+```
+
+Because the post-install policy is embedded in the generated Jsonnet profile, no companion script is required on the USB device.
+
+Do not name the file `autoinst.jsonnet` on an `OEMDRV` filesystem unless fully unattended installation is desired. For this workstation the intended flow is to load the partial profile and then review the remaining choices in the GUI.
+
+## Boot Agama
+
+Use the official Agama Live ISO. The profile can also be supplied through `inst.auto` when appropriate, but for interactive workstation installation the tested and preferred workflow is to boot the normal installer, load the profile manually from GitHub or `usb:///`, and then finish storage and identity in the web UI.
+
+The OBS repository key is intentionally not bypassed with `allowUnsigned`.
 
 ## ISO policy
 
-Do not build a custom ISO for the first installation tests. If the remote-profile flow is validated and an offline/single-medium installer becomes useful later, inject the same profile into an official Agama ISO instead of maintaining a fork of the installer image.
+A custom installer ISO is not required. If a single-medium installer becomes useful later, inject the same profile into an official Agama ISO instead of maintaining a fork of the installer image. Keep the profile under a non-special path/name if interactive review is desired rather than automatic unattended installation.
