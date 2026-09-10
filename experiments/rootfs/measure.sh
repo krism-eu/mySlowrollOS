@@ -11,10 +11,15 @@ if [[ ! -f "${seed_file}" ]]; then
     exit 2
 fi
 
+runtime_cmd=()
 if command -v podman >/dev/null 2>&1; then
-    runtime=podman
+    if [[ "${MYSLOWROLL_ROOTFUL:-0}" == 1 ]]; then
+        runtime_cmd=(sudo podman)
+    else
+        runtime_cmd=(podman)
+    fi
 elif command -v docker >/dev/null 2>&1; then
-    runtime=docker
+    runtime_cmd=(docker)
 else
     printf 'Podman or Docker is required.\n' >&2
     exit 2
@@ -28,9 +33,9 @@ mkdir -p "${rootfs_dir}" "${report_dir}"
 
 tool_image="registry.opensuse.org/opensuse/tumbleweed:latest"
 
-printf 'Runtime: %s\nTarget:  %s\n' "${runtime}" "${run_dir}"
+printf 'Runtime: %s\nTarget:  %s\n' "${runtime_cmd[*]}" "${run_dir}"
 
-"${runtime}" run --rm \
+"${runtime_cmd[@]}" run --rm \
     --mount "type=bind,src=${rootfs_dir},dst=/target" \
     --mount "type=bind,src=${report_dir},dst=/report" \
     --mount "type=bind,src=${seed_file},dst=/input/seed,readonly" \
