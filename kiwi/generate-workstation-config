@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd -- "${script_dir}/.." && pwd)"
+description_dir="${script_dir}/workstation"
+output="${description_dir}/config.xml"
+
+seed_files=(
+    "${repo_dir}/experiments/rootfs/system.seed"
+    "${repo_dir}/experiments/rootfs/plasma.seed"
+)
+
+tmp_packages="$(mktemp)"
+tmp_config="$(mktemp)"
+trap 'rm -f -- "${tmp_packages}" "${tmp_config}"' EXIT
+
+for seed in "${seed_files[@]}"; do
+    if [[ ! -f "${seed}" ]]; then
+        printf 'Seed non trovato: %s\n' "${seed}" >&2
+        exit 2
+    fi
+done
+
+if ! awk '
+    /^[[:space:]]*(#|$)/ { next }
+    {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+        if ($0 !~ /^[A-Za-z0-9][A-Za-z0-9+_.:@~-]*$/) {
+            printf "Voce non valida nel seed: %s\n", $0 > "/dev/stderr"
+            bad = 1
+            next
+        }
+        if (!seen[$0]++) print $0
+    }
+    END { exit bad ? 1 : 0 }
+' "${seed_files[@]}" | LC_ALL=C sort > "${tmp_packages}"; then
+    exit 2
+fi
+
+if [[ ! -s "${tmp_packages}" ]]; then
+    printf 'I seed workstation non contengono pacchetti.\n' >&2
+    exit 2
+fi
+
+mkdir -p -- "${description_dir}"
+
+{
+    cat <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<image schemaversion="8.0" name="myslowroll-workstation">
+  <description type="system">
+    <author>krism-eu</author>
+    <contact>krism-eu</contact>
+    <specification>Personal openSUSE Slowroll workstation rootfs for mySlowrollOS</specification>
+  </description>
+
+  <preferences>
+    <version>0.1.0</version>
+    <packagemanager>zypper</packagemanager>
+    <type image="tbz" primary="true"/>
+    <!-- Local criscore RPMs are unsigned during development. -->
+    <rpm-check-signatures>false</rpm-check-signatures>
+  </preferences>
+
+  <!-- Build repositories only. openSUSE-repos-Slowroll configures the installed system. -->
+  <repository type="rpm-md" alias="slowroll-oss">
+    <source path="https://download.opensuse.org/slowroll/repo/oss/"/>
+  </repository>
+  <repository type="rpm-md" alias="slowroll-update">
+    <source path="https://download.opensuse.org/update/slowroll/repo/oss/"/>
+  </repository>
+
+  <!-- Minimal bootstrap needed by KIWI/Zypper before the image package phase. -->
+  <packages type="bootstrap">
+    <package name="filesystem"/>
+    <package name="glibc-locale"/>
+    <package name="cracklib-dict-full"/>
+    <package name="ca-certificates"/>
+    <package name="ca-certificates-mozilla"/>
+    <package name="openSUSE-release"/>
+    <package name="zypper"/>
+  </packages>
+
+  <!-- GENERATED from experiments/rootfs/system.seed + plasma.seed. -->
+  <packages type="image">
+EOF
+    while IFS= read -r package; do
+        printf '    <package name="%s"/>\n' "${package}"
+    done < "${tmp_packages}"
+    cat <<'EOF'
+    <!-- Local/OBS package source supplies both anchors. -->
+    <package name="criscore1"/>
+    <package name="criscore2"/>
+  </packages>
+</image>
+EOF
+} > "${tmp_config}"
+
+mv -- "${tmp_config}" "${output}"
+printf 'Generato %s con %s seed workstation + 2 criscore.\n' \
+    "${output}" "$(wc -l < "${tmp_packages}")"
