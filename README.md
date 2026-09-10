@@ -26,13 +26,15 @@ Il profilo non imporrà uno schema di partizionamento e non formatterà automati
 
 ## Percorso minimo
 
-1. ripulire e convertire la selezione software in un profilo parziale per Agama;
-2. installare Slowroll con la ISO Agama ufficiale, scegliendo il disco manualmente;
-3. costruire e installare localmente `myslowroll-core.rpm`;
-4. verificare aggiornamento, rollback Snapper e tentativi di rimozione in VM;
-5. usare OBS o costruire una ISO personalizzata soltanto se emerge un vantaggio concreto.
+1. costruire con KIWI una baseline Slowroll partendo da pacchetti radice espliciti e `onlyRequired`, senza pattern desktop;
+2. confrontare la chiusura reale delle dipendenze prodotta da KIWI con le liste degli esperimenti precedenti;
+3. scegliere insieme quali pacchetti appartengono al core protetto e quali soltanto al profilo d'installazione;
+4. generare un profilo Agama parziale e modificabile, senza sezione `storage`;
+5. installare con la ISO Agama ufficiale scegliendo il disco manualmente, oppure produrre successivamente una ISO personalizzata;
+6. costruire e installare localmente `myslowroll-core.rpm` solo dopo l'approvazione della selezione;
+7. verificare aggiornamento, rollback Snapper e tentativi di rimozione in VM.
 
-OBS non è necessario per la prima versione. L'account `krism` resta disponibile per eventuali build remote o per pubblicare in seguito il pacchetto, ma il metapacchetto può rimanere esclusivamente locale.
+OBS non è necessario per la prima versione. L'account `krism` resta disponibile per eventuali build remote, controlli periodici o per pubblicare in seguito il pacchetto, ma il metapacchetto può rimanere esclusivamente locale. OBS segnala dipendenze non più risolvibili, ma non corregge automaticamente pacchetti rinominati.
 
 ## Stato
 
