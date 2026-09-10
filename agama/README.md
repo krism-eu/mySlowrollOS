@@ -6,9 +6,9 @@ The project profile is intentionally partial:
 
 - product: `Slowroll`;
 - no desktop or distribution patterns (`patterns: []`);
-- explicit packages generated from `experiments/rootfs/workstation.seed` plus `criscore1` and `criscore2`;
+- explicit packages generated from `experiments/rootfs/system.seed` plus `experiments/rootfs/plasma.seed`, exactly like the KIWI workstation description, plus `criscore1` and `criscore2`;
 - `onlyRequired: true`;
-- one OBS repository containing the signed criscore RPMs;
+- one OBS repository containing the criscore RPMs;
 - no `storage` section;
 - no users or passwords;
 - no locale or keyboard choice imposed by the profile.
@@ -29,24 +29,42 @@ The service policy is separate from the package protection policy: none of these
 
 ## Generate the profile
 
-After the OBS Slowroll repository for criscore is published:
+The generator accepts either the OBS RPM-MD directory or the `.repo` URL printed by `osc repourls`. A `.repo` URL is normalized to its containing directory.
+
+Current OBS source:
+
+```text
+https://download.opensuse.org/repositories/home:/krism/openSUSE_Slowroll/home:krism.repo
+```
+
+Generate with:
 
 ```sh
 bash agama/generate-workstation-profile \
-  https://download.opensuse.org/repositories/home:USER/openSUSE_Slowroll/
+  https://download.opensuse.org/repositories/home:/krism/openSUSE_Slowroll/home:krism.repo
 ```
 
-Commit the resulting `agama/workstation.jsonnet`. During development the raw GitHub URL can then be used with `inst.auto`; after merge, prefer the `main` URL.
+The generated `agama/workstation.jsonnet` uses:
+
+```text
+https://download.opensuse.org/repositories/home:/krism/openSUSE_Slowroll/
+```
+
+as `software.extraRepositories[].url`.
 
 ## Boot Agama
 
-Use the official Agama Live ISO and add these kernel parameters to the installer entry:
+Use the official Agama Live ISO. During development prefer an immutable raw GitHub URL pinned to a commit, so the profile and the relative `post-install.sh` come from the same revision.
+
+For the profile committed as `690cb54560d8a784ddc7ea400471919e753ba76e`:
 
 ```text
-inst.auto=PROFILE_URL inst.install=0 inst.systemd_boot_preview=1
+inst.auto=https://raw.githubusercontent.com/krism-eu/mySlowrollOS/690cb54560d8a784ddc7ea400471919e753ba76e/agama/workstation.jsonnet inst.install=0 inst.systemd_boot_preview=1 inst.remote=0
 ```
 
-`inst.install=0` is mandatory for this project path: the machine must stop for review instead of immediately installing. `inst.systemd_boot_preview=1` enables Agama's current systemd-boot path; installation testing must verify that Agama did not fall back to GRUB.
+`inst.install=0` is mandatory for this project path: the machine must stop for review instead of immediately installing. `inst.systemd_boot_preview=1` enables Agama's current systemd-boot path for testing and installation testing must verify that Agama did not fall back to GRUB. `inst.remote=0` keeps the local installer UI from being exposed to other machines during this single-workstation installation.
+
+The OBS repository key is intentionally not bypassed with `allowUnsigned`. If Agama asks about the OBS project key during the first test, review and trust the presented key interactively; after that test the accepted fingerprint can be pinned in the profile if useful.
 
 ## ISO policy
 
