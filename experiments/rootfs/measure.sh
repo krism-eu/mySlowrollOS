@@ -54,7 +54,7 @@ printf 'Runtime: %s\nTarget:  %s\n' "${runtime_cmd[*]}" "${run_dir}"
             install --no-recommends "${seeds[@]}"
 
         rpm --root /target -qa \
-            --qf "%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\t%{ARCH}\t%{INSTALLSIZE}\n" \
+            --qf "%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}\t%{ARCH}\t%{SIZE}\n" \
             | sort > /report/installed.tsv
         cut -f1 /report/installed.tsv > /report/installed.names
 
