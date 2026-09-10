@@ -1,9 +1,15 @@
 // GENERATED FILE - DO NOT EDIT BY HAND.
-// Sources: experiments/rootfs/system.seed + experiments/rootfs/plasma.seed.
-// Profilo intenzionalmente parziale: storage, utenti, password e locale restano manuali.
+// Sources: experiments/rootfs/system.seed + experiments/rootfs/plasma.seed + agama/post-install.sh.
+// Profilo intenzionalmente parziale: storage, utenti e password restano manuali.
 {
   product: {
     id: "Slowroll",
+  },
+
+  l10n: {
+    locale: "it_IT.UTF-8",
+    keymap: "it",
+    timezone: "Europe/Rome",
   },
 
   software: {
@@ -167,12 +173,44 @@
     onlyRequired: true,
   },
 
+  // La policy post-install e incorporata per rendere workstation.jsonnet
+  // autosufficiente anche quando viene caricato con usb:///.
   scripts: {
     post: [
       {
         name: "myslowroll-system-policy",
         chroot: true,
-        url: "./post-install.sh",
+        content: |||
+          #!/usr/bin/env bash
+          set -euo pipefail
+          
+          # mySlowrollOS conservative runtime policy.
+          # User, storage and passwords are deliberately left to Agama UI.
+          # Locale, keymap and timezone are preset by the Agama profile.
+          
+          # Desktop target; package presets remain responsible for the concrete services.
+          systemctl set-default graphical.target
+          
+          # A desktop does not need to block boot waiting for network-online.
+          systemctl disable NetworkManager-wait-online.service >/dev/null 2>&1 || true
+          
+          # This workstation has no WWAN modem. Keep ModemManager installed if pulled as
+          # a dependency, but do not start it by default. It can be enabled later.
+          systemctl disable ModemManager.service >/dev/null 2>&1 || true
+          
+          # Keep the journal useful for diagnostics and rollback, but bounded.
+          install -d -m 0755 /etc/systemd/journald.conf.d
+          cat > /etc/systemd/journald.conf.d/10-myslowroll.conf <<'EOF'
+          [Journal]
+          Compress=yes
+          SystemMaxUse=128M
+          RuntimeMaxUse=64M
+          MaxRetentionSec=7day
+          EOF
+          
+          # Do not disable NetworkManager, firewalld, AppArmor, Bluetooth, CUPS/Avahi,
+          # Snapper or Btrfs maintenance here: they are intentional workstation features.
+        |||,
       },
     ],
   },
