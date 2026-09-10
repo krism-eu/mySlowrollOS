@@ -64,12 +64,10 @@ printf 'Runtime: %s\nTarget:  %s\n' "${runtime_cmd[*]}" "${run_dir}"
             > /report/unneeded.txt || true
 
         package_count="$(wc -l < /report/installed.names)"
-        installed_bytes="$(awk -F "\t" "{ total += \\$4 } END { print total + 0 }" /report/installed.tsv)"
         rootfs_bytes="$(du -sx -B1 /target | cut -f1)"
         {
             printf "stage=%s\n" "'"${stage}"'"
             printf "packages=%s\n" "${package_count}"
-            printf "rpm_install_bytes=%s\n" "${installed_bytes}"
             printf "rootfs_bytes=%s\n" "${rootfs_bytes}"
         } > /report/summary.txt
     '
