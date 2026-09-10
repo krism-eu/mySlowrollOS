@@ -79,6 +79,9 @@ pipewire-alsa
 pipewire-pulseaudio
 wireplumber
 
+# Memoria compressa, gia usata con successo sulla macchina
+zram-generator
+
 # Amministrazione openSUSE
 yast2
 yast2-control-center-qt
