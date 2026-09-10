@@ -10,27 +10,31 @@ bash "${script_dir}/generate-criscore-spec"
 rm -rf -- "${stage}"
 mkdir -p -- "${stage}"
 cp -- "${script_dir}/criscore.spec" "${stage}/criscore1.spec"
+cp -- "${script_dir}/myslowroll-atomic-dup" "${stage}/myslowroll-atomic-dup"
 
 cat <<EOF
 OBS source pronto in:
   ${stage}
 
-Creare nel proprio home project OBS un solo package sorgente chiamato:
+Creare/aggiornare nel proprio home project OBS un solo package sorgente chiamato:
   criscore1
 
-e caricare:
+e caricare entrambi i file:
   ${stage}/criscore1.spec
+  ${stage}/myslowroll-atomic-dup
 
 Lo spec produce entrambi i binari:
   criscore1
   criscore2
 
-Se si usa osc, dopo avere configurato il target Slowroll:
-  osc checkout home:<utenteOBS>
-  cd home:<utenteOBS>
-  osc mkpac criscore1
-  cp '${stage}/criscore1.spec' criscore1/
-  cd criscore1
-  osc add criscore1.spec
-  osc commit -m 'Add mySlowrollOS criscore anchors'
+e criscore1 installa:
+  /usr/sbin/myslowroll-atomic-dup
+
+Per un checkout osc gia esistente:
+  cp '${stage}/criscore1.spec' /work/home:krism/criscore1/
+  cp '${stage}/myslowroll-atomic-dup' /work/home:krism/criscore1/
+  cd /work/home:krism/criscore1
+  osc addremove
+  osc status
+  osc commit -m 'Update criscore and atomic Slowroll upgrade wrapper'
 EOF
