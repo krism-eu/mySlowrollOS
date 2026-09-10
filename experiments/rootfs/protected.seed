@@ -33,6 +33,7 @@ btrfsprogs
 btrfsmaintenance
 snapper
 snapper-zypp-plugin
+transactional-update
 
 # Filesystem e diagnostica della macchina
 dosfstools
