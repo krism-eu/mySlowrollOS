@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd -- "${script_dir}/.." && pwd)"
+description_dir="${script_dir}/workstation"
+criscore_repo="${repo_dir}/out/criscore-repo"
+target_dir="${repo_dir}/out/kiwi-workstation-rootfs"
+rpm_dir="${repo_dir}/out/criscore-rpmbuild/RPMS/noarch"
+
+for command in rpmbuild createrepo_c kiwi-ng; do
+    if ! command -v "${command}" >/dev/null 2>&1; then
+        printf 'Comando richiesto non trovato: %s\n' "${command}" >&2
+        printf 'Nel container Tumbleweed installare: zypper in rpm-build createrepo_c python3-kiwi\n' >&2
+        exit 2
+    fi
+done
+
+bash "${repo_dir}/core/build-criscore-local"
+bash "${script_dir}/generate-workstation-config"
+
+rpm1="$(find "${rpm_dir}" -maxdepth 1 -type f -name 'criscore1-*.rpm' -print -quit)"
+rpm2="$(find "${rpm_dir}" -maxdepth 1 -type f -name 'criscore2-*.rpm' -print -quit)"
+
+if [[ -z "${rpm1}" || -z "${rpm2}" ]]; then
+    printf 'RPM criscore non trovati sotto %s\n' "${rpm_dir}" >&2
+    exit 3
+fi
+
+rm -rf -- "${criscore_repo}" "${target_dir}"
+mkdir -p -- "${criscore_repo}" "${target_dir}"
+cp -- "${rpm1}" "${rpm2}" "${criscore_repo}/"
+createrepo_c "${criscore_repo}"
+
+local_repo="file://${criscore_repo}"
+
+printf '\nKIWI description: %s\n' "${description_dir}"
+printf 'criscore repository: %s\n' "${local_repo}"
+printf 'target: %s\n\n' "${target_dir}"
+
+kiwi-ng system build \
+    --description="${description_dir}" \
+    --target-dir="${target_dir}" \
+    --add-repo="${local_repo},rpm-md,criscore-local,1,false,false,{},,,false,baseurl"
+
+printf '\nRisultati KIWI:\n'
+find "${target_dir}" -maxdepth 1 -type f -print | LC_ALL=C sort
