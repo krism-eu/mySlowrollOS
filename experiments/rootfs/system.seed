@@ -1,0 +1,101 @@
+# Sistema Slowroll personale: base, hardware, sicurezza e amministrazione.
+# Nessun pattern, nessun desktop e nessuna applicazione utente.
+
+# Identita e gestione pacchetti
+openSUSE-release
+openSUSE-repos-Slowroll
+systemd-presets-branding-openSUSE
+rpm
+zypper
+systemd
+dbus-broker
+kernel-default
+dracut
+bash-completion
+ca-certificates-mozilla
+curl
+polkit
+sudo
+timezone
+glibc-locale
+xdg-user-dirs
+xdg-utils
+
+# UEFI, Secure Boot, Btrfs e recupero
+systemd-boot
+shim
+efibootmgr
+sdbootutil
+sdbootutil-kernel-install
+sdbootutil-snapper
+btrfsprogs
+btrfsmaintenance
+snapper
+snapper-zypp-plugin
+
+# Filesystem e diagnostica della macchina
+dosfstools
+e2fsprogs
+exfatprogs
+ntfs-3g
+ntfsprogs
+udisks2
+nvme-cli
+smartmontools
+pciutils
+usbutils
+
+# AMD Cezanne/Radeon, MediaTek MT7921 e Realtek LAN
+ucode-amd
+kernel-firmware-amdgpu
+kernel-firmware-mediatek
+kernel-firmware-realtek
+Mesa-dri
+Mesa-vulkan-device-select
+libvulkan_radeon
+
+# Rete e Bluetooth di base; nessun demone server
+NetworkManager
+NetworkManager-bluetooth
+wpa_supplicant
+firewalld
+bluez
+bluez-obexd
+cifs-utils
+avahi
+nss-mdns
+iproute2
+iputils
+
+# AppArmor, non policy SELinux
+apparmor-parser
+apparmor-utils
+
+# Audio di sistema
+alsa-ucm-conf
+alsa-utils
+pipewire
+pipewire-alsa
+pipewire-pulseaudio
+wireplumber
+
+# Amministrazione openSUSE
+yast2
+yast2-control-center-qt
+yast2-packager
+yast2-storage-ng
+yast2-snapper
+yast2-apparmor
+yast2-services-manager
+yast2-sysconfig
+yast2-bootloader
+myrlyn
+
+# Firmware, alimentazione e avvio grafico
+fwupd
+fwupd-efi
+power-profiles-daemon
+upower
+plymouth
+plymouth-dracut
+plymouth-branding-openSUSE
