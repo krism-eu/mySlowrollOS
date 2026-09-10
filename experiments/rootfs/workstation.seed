@@ -1,0 +1,175 @@
+# Candidato workstation completo, ancora da validare.
+# Nessun pattern openSUSE. Nessuna sessione Plasma X11.
+# Nota: la sorgente autorevole per Agama/KIWI resta system.seed + plasma.seed.
+
+# Identita del sistema e gestione pacchetti
+openSUSE-release
+openSUSE-repos-Slowroll
+systemd-presets-branding-openSUSE
+rpm
+zypper
+systemd
+dbus-broker
+kernel-default
+dracut
+bash-completion
+ca-certificates-mozilla
+curl
+polkit
+sudo
+timezone
+glibc-locale
+xdg-user-dirs
+xdg-utils
+
+# UEFI, Secure Boot, Btrfs, snapshot e recupero
+systemd-boot
+shim
+efibootmgr
+sdbootutil
+sdbootutil-kernel-install
+sdbootutil-snapper
+btrfsprogs
+btrfsmaintenance
+snapper
+snapper-zypp-plugin
+transactional-update
+zram-generator
+
+# Filesystem e diagnostica dischi usati dalla macchina
+dosfstools
+e2fsprogs
+exfatprogs
+ntfs-3g
+ntfsprogs
+udisks2
+nvme-cli
+smartmontools
+pciutils
+usbutils
+
+# Hardware specifico: AMD Cezanne, Radeon, MediaTek MT7921, Realtek LAN
+ucode-amd
+kernel-firmware-amdgpu
+kernel-firmware-mediatek
+kernel-firmware-realtek
+Mesa-dri
+Mesa-vulkan-device-select
+libvulkan_radeon
+
+# Rete locale, Wi-Fi e Bluetooth; nessun demone server
+NetworkManager
+NetworkManager-bluetooth
+wpa_supplicant
+firewalld
+plasma6-nm
+plasma6-firewall
+bluez
+bluez-obexd
+bluedevil6
+cifs-utils
+avahi
+nss-mdns
+iproute2
+iputils
+
+# AppArmor, non SELinux
+apparmor-parser
+apparmor-utils
+
+# Audio
+alsa-ucm-conf
+alsa-utils
+pipewire
+pipewire-alsa
+pipewire-pulseaudio
+wireplumber
+plasma6-pa
+
+# Plasma 6 Wayland costruito per componenti
+sddm-qt6
+sddm-qt6-branding-openSUSE
+sddm-kcm6
+plasma6-session
+plasma6-workspace
+plasma6-integration-plugin
+kwin6
+kscreenlocker6
+kglobalacceld6
+powerdevil6
+breeze6
+breeze6-cursors
+breeze6-decoration
+breeze6-style
+polkit-kde-agent-6
+systemsettings6
+kde-cli-tools6
+kde-gtk-config6
+plasma6-systemmonitor
+plasma6-disks
+xwayland
+xorg-x11-server
+xf86-input-libinput
+xdg-desktop-portal
+xdg-desktop-portal-kde6
+
+# Desktop quotidiano essenziale
+dolphin
+kio-admin
+kio-extras
+kio-fuse
+ark
+gwenview
+kate
+konsole
+okular
+spectacle
+partitionmanager
+kwalletmanager
+pam_kwallet6
+
+# Backend archivi per Ark; utili ma non protetti da criscore
+7zip
+unar
+zip
+unzip
+zstd
+
+# Gestione grafica: RPM con YaST/Myrlyn, applicazioni con Flatpak
+yast2
+yast2-control-center-qt
+yast2-packager
+libyui-qt-pkg16
+yast2-storage-ng
+yast2-snapper
+yast2-apparmor
+yast2-services-manager
+yast2-sysconfig
+yast2-bootloader
+myrlyn
+flatpak
+discover6
+discover6-backend-flatpak
+
+# Integrazione desktop e firmware
+fwupd
+fwupd-efi
+power-profiles-daemon
+upower
+plymouth
+plymouth-dracut
+plymouth-branding-openSUSE
+plasma6-branding-openSUSE
+plasma6-theme-openSUSE
+google-noto-coloremoji-fonts
+google-noto-sans-fonts
+liberation-fonts
+
+# Stampa e scansione presenti nelle liste personali
+cups
+cups-filters
+cups-pk-helper
+plasma6-print-manager
+gutenprint
+skanlite
+yast2-scanner

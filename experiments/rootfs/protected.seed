@@ -1,0 +1,145 @@
+# Pacchetti protetti da criscore1 e criscore2.
+# Prima proposta ampia: tutto il sistema scelto + Plasma essenziale.
+# Non contiene applicazioni desktop opzionali, Flatpak, stampa o scansione.
+
+# Identita, gestione pacchetti e base
+openSUSE-release
+openSUSE-repos-Slowroll
+systemd-presets-branding-openSUSE
+rpm
+zypper
+systemd
+dbus-broker
+kernel-default
+dracut
+bash-completion
+ca-certificates-mozilla
+curl
+polkit
+sudo
+timezone
+glibc-locale
+xdg-user-dirs
+xdg-utils
+
+# UEFI, Secure Boot, Btrfs, snapshot e recupero
+systemd-boot
+shim
+efibootmgr
+sdbootutil
+sdbootutil-kernel-install
+sdbootutil-snapper
+btrfsprogs
+btrfsmaintenance
+snapper
+snapper-zypp-plugin
+transactional-update
+
+# Filesystem e diagnostica della macchina
+dosfstools
+e2fsprogs
+exfatprogs
+ntfs-3g
+udisks2
+nvme-cli
+smartmontools
+pciutils
+usbutils
+
+# Hardware effettivo: AMD, MediaTek e Realtek
+ucode-amd
+kernel-firmware-amdgpu
+kernel-firmware-mediatek
+kernel-firmware-realtek
+Mesa-dri
+Mesa-vulkan-device-select
+libvulkan_radeon
+
+# Rete, Bluetooth e condivisioni
+NetworkManager
+NetworkManager-bluetooth
+wpa_supplicant
+firewalld
+bluez
+bluez-obexd
+cifs-utils
+avahi
+nss-mdns
+iproute2
+iputils
+
+# Sicurezza
+apparmor-parser
+apparmor-utils
+
+# Audio essenziale
+alsa-ucm-conf
+alsa-utils
+pipewire
+pipewire-alsa
+pipewire-pulseaudio
+wireplumber
+
+# Memoria compressa
+zram-generator
+
+# Amministrazione openSUSE
+yast2
+yast2-control-center-qt
+yast2-packager
+libyui-qt-pkg16
+yast2-storage-ng
+yast2-snapper
+yast2-apparmor
+yast2-services-manager
+yast2-sysconfig
+yast2-bootloader
+myrlyn
+
+# Firmware, alimentazione e avvio grafico
+fwupd
+fwupd-efi
+power-profiles-daemon
+upower
+plymouth
+plymouth-dracut
+plymouth-branding-openSUSE
+
+# Login e sessione Plasma Wayland
+sddm-qt6
+sddm-qt6-branding-openSUSE
+sddm-kcm6
+plasma6-session
+plasma6-workspace
+plasma6-integration-plugin
+kwin6
+kscreenlocker6
+kglobalacceld6
+powerdevil6
+breeze6
+breeze6-cursors
+breeze6-decoration
+breeze6-style
+polkit-kde-agent-6
+systemsettings6
+kde-cli-tools6
+
+# Compatibilita e greeter; nessuna sessione Plasma X11
+xwayland
+xorg-x11-server
+xf86-input-libinput
+
+# Integrazione del desktop con il sistema
+plasma6-nm
+plasma6-firewall
+bluedevil6
+plasma6-pa
+xdg-desktop-portal
+xdg-desktop-portal-kde6
+pam_kwallet6
+
+# Strumenti minimi per usare e riparare la sessione grafica
+dolphin
+konsole
+kio-admin
+kio-extras

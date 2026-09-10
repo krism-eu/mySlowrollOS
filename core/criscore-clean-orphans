@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Rimuove soltanto i pacchetti che Zypper considera non necessari.
+# criscore1 e criscore2 sono esclusi dalla lista iniziale e il piano del solver
+# viene verificato fail-closed prima della rimozione reale.
+
+if (( EUID != 0 )); then
+    printf 'Eseguire come root.\n' >&2
+    exit 2
+fi
+
+check_anchors() {
+    local anchor
+    for anchor in criscore1 criscore2; do
+        if ! rpm --quiet -q "${anchor}"; then
+            printf 'Protezione incompleta: %s non e installato. Operazione annullata.\n' "${anchor}" >&2
+            exit 3
+        fi
+    done
+}
+
+check_anchors
+
+tmpdir="$(mktemp -d)"
+trap 'rm -rf -- "${tmpdir}"' EXIT
+unneeded_xml="${tmpdir}/unneeded.xml"
+orphans_unsorted="${tmpdir}/orphans.unsorted"
+orphans_file="${tmpdir}/orphans.names"
+plan="${tmpdir}/remove-plan.xml"
+
+if ! LC_ALL=C zypper --no-refresh --non-interactive --xmlout packages --unneeded > "${unneeded_xml}"; then
+    printf 'Impossibile ottenere la lista dei pacchetti non necessari. Operazione annullata.\n' >&2
+    exit 4
+fi
+
+if ! grep -Eq '<solvable-list([[:space:]>])' "${unneeded_xml}"; then
+    printf 'Formato XML di Zypper non riconosciuto: manca solvable-list. Operazione annullata.\n' >&2
+    exit 6
+fi
+
+if grep -Eq '<solvable[[:space:]][^>]*>' "${unneeded_xml}" && ! grep -Eq '<solvable[[:space:]][^>]*(type|kind)="package"' "${unneeded_xml}"; then
+    printf 'Formato XML di Zypper non riconosciuto: attributo package non riconosciuto. Operazione annullata.\n' >&2
+    exit 6
+fi
+
+if ! awk '
+    /<solvable[[:space:]][^>]*(type|kind)="package"/ {
+        if (match($0, /name="[^"]+"/)) {
+            name = substr($0, RSTART + 6, RLENGTH - 7)
+            if (name != "criscore1" && name != "criscore2") print name
+        } else bad = 1
+    }
+    END { exit bad ? 1 : 0 }
+' "${unneeded_xml}" > "${orphans_unsorted}"; then
+    printf 'Impossibile leggere i nomi dei pacchetti dal formato XML di Zypper. Operazione annullata.\n' >&2
+    exit 6
+fi
+LC_ALL=C sort -u "${orphans_unsorted}" > "${orphans_file}"
+mapfile -t orphans < "${orphans_file}"
+
+if (( ${#orphans[@]} == 0 )); then
+    printf 'Nessun pacchetto non necessario da rimuovere.\n'
+    exit 0
+fi
+
+if ! LC_ALL=C zypper --no-refresh --non-interactive --xmlout remove --dry-run --clean-deps "${orphans[@]}" > "${plan}"; then
+    printf 'Il solver non ha prodotto un piano valido. Nessuna modifica eseguita.\n' >&2
+    exit 4
+fi
+
+if ! grep -Eq '<install-summary([[:space:]>])' "${plan}"; then
+    printf 'Formato XML del piano non riconosciuto: manca install-summary. Operazione annullata.\n' >&2
+    exit 6
+fi
+
+remove_block="$(sed -n '/<to-remove>/,/<\/to-remove>/p' "${plan}")"
+if [[ -z "${remove_block}" ]]; then
+    printf 'Impossibile leggere la sezione to-remove del piano. Operazione annullata.\n' >&2
+    exit 6
+fi
+
+if ! grep -Eq '<solvable[[:space:]][^>]*(type|kind)="package"' <<< "${remove_block}"; then
+    printf 'La sezione to-remove non contiene pacchetti riconoscibili. Operazione annullata.\n' >&2
+    exit 6
+fi
+
+if grep -Eq 'name="criscore(1|2)"' <<< "${remove_block}"; then
+    printf 'Il piano coinvolge criscore1 o criscore2. Operazione annullata.\n' >&2
+    exit 5
+fi
+
+check_anchors
+
+printf 'Pacchetti non necessari proposti: %s\n' "${#orphans[@]}"
+printf 'Il comando seguente mostrera il riepilogo definitivo prima della conferma.\n'
+zypper --no-refresh remove --clean-deps "${orphans[@]}"

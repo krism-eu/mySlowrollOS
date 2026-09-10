@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (( $# != 1 )); then
+    printf 'Uso: bash agama/generate-workstation-profile URL_REPO_OBS_CRISCORE\n' >&2
+    printf 'Accetta sia la directory RPM-MD sia il file .repo pubblicato da OBS.\n' >&2
+    exit 2
+fi
+
+input_url="$1"
+case "${input_url}" in
+    *.repo) repo_url="${input_url%/*}/" ;;
+    *)      repo_url="${input_url%/}/" ;;
+esac
+
+case "${repo_url}" in
+    https://*|http://*) ;;
+    *)
+        printf 'URL repository non supportato: %s\n' "${repo_url}" >&2
+        exit 2
+        ;;
+esac
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd -- "${script_dir}/.." && pwd)"
+system_seed="${repo_dir}/experiments/rootfs/system.seed"
+plasma_seed="${repo_dir}/experiments/rootfs/plasma.seed"
+post_script="${script_dir}/post-install.sh"
+out="${script_dir}/workstation.jsonnet"
+
+for required in "${system_seed}" "${plasma_seed}" "${post_script}"; do
+    if [[ ! -f "${required}" ]]; then
+        printf 'File necessario non trovato: %s\n' "${required}" >&2
+        exit 2
+    fi
+done
+
+tmp="$(mktemp)"
+trap 'rm -f -- "$tmp"' EXIT
+
+for seed in "${system_seed}" "${plasma_seed}"; do
+    sed -E '/^[[:space:]]*(#|$)/d; s/[[:space:]]+$//' "${seed}" >> "${tmp}"
+done
+printf '%s\n' criscore1 criscore2 >> "${tmp}"
+LC_ALL=C sort -u -o "${tmp}" "${tmp}"
+
+{
+    cat <<EOF
+// GENERATED FILE - DO NOT EDIT BY HAND.
+// Sources: experiments/rootfs/system.seed + experiments/rootfs/plasma.seed + agama/post-install.sh.
+// Profilo intenzionalmente parziale: storage, utenti e password restano manuali.
+{
+  product: {
+    id: "Slowroll",
+  },
+
+  localization: {
+    language: "it_IT.UTF-8",
+    keyboard: "it",
+    timezone: "Europe/Rome",
+  },
+
+  software: {
+    patterns: [],
+    packages: [
+EOF
+
+    while IFS= read -r package; do
+        printf '      "%s",\n' "${package}"
+    done < "${tmp}"
+
+    cat <<EOF
+    ],
+    extraRepositories: [
+      {
+        alias: "criscore",
+        name: "mySlowrollOS criscore",
+        url: "${repo_url}",
+        priority: 90,
+      },
+    ],
+    onlyRequired: true,
+  },
+
+  // La policy post-install e incorporata per rendere workstation.jsonnet
+  // autosufficiente anche quando viene caricato con usb:///.
+  scripts: {
+    post: [
+      {
+        name: "myslowroll-system-policy",
+        chroot: true,
+        content: |||
+EOF
+    sed 's/^/          /' "${post_script}"
+    cat <<'EOF'
+        |||,
+      },
+    ],
+  },
+}
+EOF
+} > "${out}"
+
+printf 'Generato %s con %s pacchetti espliciti.\n' "${out}" "$(wc -l < "${tmp}")"
+printf 'Repository criscore: %s\n' "${repo_url}"
+printf 'Localizzazione: it_IT.UTF-8, tastiera it, fuso Europe/Rome.\n'
+printf 'Storage, utente e password volutamente assenti: verranno completati interattivamente in Agama.\n'
+printf 'Servizi/logging: agama/post-install.sh e incorporato nel profilo generato.\n'

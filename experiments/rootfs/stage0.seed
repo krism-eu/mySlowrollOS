@@ -1,0 +1,9 @@
+# Stage 0: pavimento del solver, non ancora sistema avviabile completo.
+# Nessun pattern e nessun pacchetto desktop.
+filesystem
+openSUSE-release
+rpm
+zypper
+systemd
+kernel-default
+dracut
