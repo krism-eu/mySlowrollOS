@@ -23,7 +23,7 @@ LC_ALL=C sort -u -o "$tmp" "$tmp"
 {
     cat <<EOF
 // Generato da experiments/rootfs/workstation.seed.
-// Profilo intenzionalmente parziale: niente storage, utenti o password.
+// Profilo intenzionalmente parziale: niente storage, utenti, password o locale.
 // Avviare Agama con inst.install=0 per rivedere e completare manualmente l'installazione.
 {
   product: {
@@ -52,9 +52,22 @@ EOF
     ],
     onlyRequired: true,
   },
+
+  // Politica macchina applicata solo dopo l'installazione. Lo script non
+  // imposta utenti, password, storage o localizzazione.
+  scripts: {
+    post: [
+      {
+        name: "myslowroll-system-policy",
+        chroot: true,
+        url: "./post-install.sh",
+      },
+    ],
+  },
 }
 EOF
 } > "$out"
 
 printf 'Generato %s con %s pacchetti espliciti.\n' "$out" "$(wc -l < "$tmp")"
-printf 'Storage volutamente assente: verra completato interattivamente in Agama.\n'
+printf 'Storage, utente e locale volutamente assenti: verranno completati interattivamente in Agama.\n'
+printf 'Servizi/logging: verra applicato agama/post-install.sh a installazione conclusa.\n'
