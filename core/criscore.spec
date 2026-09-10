@@ -276,9 +276,11 @@ if [ "$1" -eq 0 ] && [ ! -e /run/criscore.allow-removal ]; then
 fi
 
 %files
+%dir %{_datadir}/criscore
 %{_datadir}/criscore/criscore1
 
 %files -n criscore2
+%dir %{_datadir}/criscore
 %{_datadir}/criscore/criscore2
 
 %changelog
