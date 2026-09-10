@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd -- "${script_dir}/.." && pwd)"
+stage="${repo_dir}/out/obs/criscore1"
+
+bash "${script_dir}/generate-criscore-spec"
+
+rm -rf -- "${stage}"
+mkdir -p -- "${stage}"
+cp -- "${script_dir}/criscore.spec" "${stage}/criscore1.spec"
+
+cat <<EOF
+OBS source pronto in:
+  ${stage}
+
+Creare nel proprio home project OBS un solo package sorgente chiamato:
+  criscore1
+
+e caricare:
+  ${stage}/criscore1.spec
+
+Lo spec produce entrambi i binari:
+  criscore1
+  criscore2
+
+Se si usa osc, dopo avere configurato il target Slowroll:
+  osc checkout home:<utenteOBS>
+  cd home:<utenteOBS>
+  osc mkpac criscore1
+  cp '${stage}/criscore1.spec' criscore1/
+  cd criscore1
+  osc add criscore1.spec
+  osc commit -m 'Add mySlowrollOS criscore anchors'
+EOF
