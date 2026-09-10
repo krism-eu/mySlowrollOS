@@ -86,6 +86,7 @@ zram-generator
 yast2
 yast2-control-center-qt
 yast2-packager
+libyui-qt-pkg16
 yast2-storage-ng
 yast2-snapper
 yast2-apparmor
