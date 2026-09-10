@@ -10,9 +10,22 @@ The project profile is intentionally partial:
 - `onlyRequired: true`;
 - one OBS repository containing the signed criscore RPMs;
 - no `storage` section;
-- no users or passwords.
+- no users or passwords;
+- no locale or keyboard choice imposed by the profile.
 
-Omitting storage is deliberate. The profile is loaded with `inst.install=0`, so Agama applies the software/product choices and then stops for review. Storage is completed manually in the Agama UI, including reuse of an existing `/home` without formatting.
+Omitting storage and identity is deliberate. The profile is loaded with `inst.install=0`, so Agama applies the software/product choices and then stops for review. Storage, user account, password, locale and keyboard are completed manually in the Agama UI, including reuse of an existing `/home` without formatting.
+
+## Runtime policy
+
+The profile runs `agama/post-install.sh` as a chrooted post-installation script. It deliberately keeps the policy small and reversible:
+
+- sets `graphical.target` as the default target;
+- disables `NetworkManager-wait-online.service`;
+- disables `ModemManager.service` on this workstation with no WWAN modem;
+- keeps journald enabled for diagnostics but caps persistent usage at 128 MiB, runtime usage at 64 MiB and retention at seven days;
+- does not disable NetworkManager, firewalld, AppArmor, Bluetooth, CUPS/Avahi, Snapper or Btrfs maintenance.
+
+The service policy is separate from the package protection policy: none of these runtime choices changes `protected.seed` or the criscore dependency graph.
 
 ## Generate the profile
 
