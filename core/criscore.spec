@@ -55,7 +55,6 @@ Requires:       kernel-firmware-realtek
 Requires:       kglobalacceld6
 Requires:       kio-admin
 Requires:       kio-extras
-Requires:       kio-fuse
 Requires:       konsole
 Requires:       kscreenlocker6
 Requires:       kwin6
@@ -63,7 +62,6 @@ Requires:       libvulkan_radeon
 Requires:       myrlyn
 Requires:       nss-mdns
 Requires:       ntfs-3g
-Requires:       ntfsprogs
 Requires:       nvme-cli
 Requires:       openSUSE-release
 Requires:       openSUSE-repos-Slowroll
@@ -72,13 +70,11 @@ Requires:       pciutils
 Requires:       pipewire
 Requires:       pipewire-alsa
 Requires:       pipewire-pulseaudio
-Requires:       plasma6-disks
 Requires:       plasma6-firewall
 Requires:       plasma6-integration-plugin
 Requires:       plasma6-nm
 Requires:       plasma6-pa
 Requires:       plasma6-session
-Requires:       plasma6-systemmonitor
 Requires:       plasma6-workspace
 Requires:       plymouth
 Requires:       plymouth-branding-openSUSE
@@ -182,7 +178,6 @@ Requires:       kernel-firmware-realtek
 Requires:       kglobalacceld6
 Requires:       kio-admin
 Requires:       kio-extras
-Requires:       kio-fuse
 Requires:       konsole
 Requires:       kscreenlocker6
 Requires:       kwin6
@@ -190,7 +185,6 @@ Requires:       libvulkan_radeon
 Requires:       myrlyn
 Requires:       nss-mdns
 Requires:       ntfs-3g
-Requires:       ntfsprogs
 Requires:       nvme-cli
 Requires:       openSUSE-release
 Requires:       openSUSE-repos-Slowroll
@@ -199,13 +193,11 @@ Requires:       pciutils
 Requires:       pipewire
 Requires:       pipewire-alsa
 Requires:       pipewire-pulseaudio
-Requires:       plasma6-disks
 Requires:       plasma6-firewall
 Requires:       plasma6-integration-plugin
 Requires:       plasma6-nm
 Requires:       plasma6-pa
 Requires:       plasma6-session
-Requires:       plasma6-systemmonitor
 Requires:       plasma6-workspace
 Requires:       plymouth
 Requires:       plymouth-branding-openSUSE
