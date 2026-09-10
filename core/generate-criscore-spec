@@ -4,10 +4,19 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd -- "${script_dir}/.." && pwd)"
 seed="${repo_dir}/experiments/rootfs/protected.seed"
+atomic_tool="${script_dir}/myslowroll-atomic-dup"
 output="${1:-${script_dir}/criscore.spec}"
 
 if [[ ! -f "${seed}" ]]; then
     printf 'Manifesto non trovato: %s\n' "${seed}" >&2
+    exit 2
+fi
+if [[ ! -f "${atomic_tool}" ]]; then
+    printf 'Tool atomico non trovato: %s\n' "${atomic_tool}" >&2
+    exit 2
+fi
+if ! bash -n "${atomic_tool}"; then
+    printf 'Sintassi non valida nel tool atomico: %s\n' "${atomic_tool}" >&2
     exit 2
 fi
 
@@ -54,6 +63,8 @@ Release:        0
 Summary:        Protected core anchor 1 for mySlowrollOS
 License:        MIT
 BuildArch:      noarch
+Source1:        myslowroll-atomic-dup
+BuildRequires:  bash
 
 # A meta dependency keeps both anchors on exactly the same build without
 # introducing an artificial install/erase ordering dependency.
@@ -65,8 +76,7 @@ EOF
 %description
 criscore1 is one of two deliberately redundant dependency anchors used by
 mySlowrollOS. It protects the approved core package set from accidental removal.
-It contains only a marker file; the protection is expressed by RPM dependencies
-and the erase guard.
+It also installs the guarded myslowroll-atomic-dup upgrade command.
 
 %package -n criscore2
 Summary:        Protected core anchor 2 for mySlowrollOS
@@ -88,6 +98,10 @@ same approved Requires as criscore1 and is version-locked to its peer.
 install -d %{buildroot}%{_datadir}/criscore
 printf '%s\n' 'mySlowrollOS protected core anchor 1' > %{buildroot}%{_datadir}/criscore/criscore1
 printf '%s\n' 'mySlowrollOS protected core anchor 2' > %{buildroot}%{_datadir}/criscore/criscore2
+install -D -m 0755 %{SOURCE1} %{buildroot}%{_sbindir}/myslowroll-atomic-dup
+
+%check
+bash -n %{SOURCE1}
 
 # openSUSE post-build-checks performs a synthetic erase test with
 # YAST_IS_RUNNING=instsys. Permit that build-root cleanup without weakening
@@ -109,6 +123,7 @@ fi
 %files
 %dir %{_datadir}/criscore
 %{_datadir}/criscore/criscore1
+%{_sbindir}/myslowroll-atomic-dup
 
 %files -n criscore2
 %dir %{_datadir}/criscore
@@ -120,4 +135,5 @@ EOF
 
 mkdir -p -- "$(dirname -- "${output}")"
 mv -- "${tmp_spec}" "${output}"
-printf 'Generato %s da %s pacchetti protetti.\n' "${output}" "$(wc -l < "${tmp_packages}")"
+printf 'Generato %s da %s pacchetti protetti; include myslowroll-atomic-dup.\n' \
+    "${output}" "$(wc -l < "${tmp_packages}")"
