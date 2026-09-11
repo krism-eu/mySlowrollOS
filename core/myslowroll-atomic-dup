@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-# mySlowrollOS guarded distribution upgrade v3.4.6-final
+# mySlowrollOS guarded distribution upgrade v3.4.7-final
 #
 # Model:
 #   - openSUSE Slowroll classic read-write root
@@ -80,6 +80,7 @@ RPMDB_POST_MANIFEST=
 RPMDB_ADDED=
 RPMDB_REMOVED=
 PLAN_OPS=
+POSTCHECK_LOG=
 
 declare -a ZYPPER_LICENSE_ARGS=()
 
@@ -278,6 +279,7 @@ set_tx_paths() {
     RPMDB_ADDED="${TX_CACHE_DIR}/rpmdb-added.tsv"
     RPMDB_REMOVED="${TX_CACHE_DIR}/rpmdb-removed.tsv"
     PLAN_OPS="${TX_CACHE_DIR}/plan-operations.tsv"
+    POSTCHECK_LOG="${TX_CACHE_DIR}/post-dup-checks.log"
 }
 
 reset_state_vars() {
@@ -312,6 +314,7 @@ reset_state_vars() {
     RPMDB_ADDED=
     RPMDB_REMOVED=
     PLAN_OPS=
+    POSTCHECK_LOG=
 }
 
 load_state() {
@@ -1367,6 +1370,23 @@ verify_rpm_payloads() {
     return "${rc}"
 }
 
+postcheck_record() {
+    local result="$1" check="$2" detail="${3:-}" stamp
+
+    [[ -n "${POSTCHECK_LOG}" ]] || return 0
+
+    detail="${detail//$'\n'/; }"
+    detail="${detail//$'\r'/ }"
+    detail="${detail//$'\t'/ }"
+    stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf unknown)"
+
+    if ! printf '%s\t%s\t%s\t%s\n' "${stamp}" "${result}" "${check}" "${detail}" >> "${POSTCHECK_LOG}"; then
+        warn "impossibile scrivere diagnostica post-dup in ${POSTCHECK_LOG}."
+    fi
+
+    return 0
+}
+
 prepare_rollback() {
     local source="$1" reason="$2" out target old_default source_core=0
 
@@ -1494,7 +1514,7 @@ prepare_rollback() {
     STATE_BOOT_ID_BEFORE="$(current_boot_id)"
     STATE_STATUS=rollback-pending
     STATE_FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    STATE_LAST_ERROR=
+    STATE_LAST_ERROR="${reason}"
 
     if ! persist_state; then
         warn 'rollback preparato ma stato rollback-pending non persistibile; NON riavvio automaticamente.'
@@ -1618,65 +1638,164 @@ upgrade() {
         die "rollback automatico non verificabile. NON riavviare; log: ${DUP_LOG}"
     fi
 
-    # From here: read-only checks only. rpm -qa is allowed; ZYpp is not reopened.
+    # From here: package/system checks are read-only; only persistent audit
+    # artifacts below /var are written. ZYpp is not reopened.
     # The delta is attributable to dup under the operational assumption that no
     # privileged process bypasses the ZYpp lock by invoking rpm directly.
-    local pkg post_ok=1
+    local pkg post_ok=1 post_summary actual_os bootloader_out bootable_out
+    local -a post_fail=()
+
+    if : > "${POSTCHECK_LOG}" && chmod 0600 "${POSTCHECK_LOG}"; then
+        postcheck_record PASS begin "source=${STATE_SOURCE} pre=${STATE_PRE}"
+    else
+        warn "post-dup: impossibile creare il log diagnostico ${POSTCHECK_LOG}."
+        post_fail+=("postcheck-log-create")
+        post_ok=0
+    fi
 
     if write_rpmdb_manifest "${RPMDB_POST_MANIFEST}"; then
-        STATE_RPMDB_POST_HASH="$(manifest_hash "${RPMDB_POST_MANIFEST}")" || post_ok=0
-        comm -13 "${RPMDB_PRE_MANIFEST}" "${RPMDB_POST_MANIFEST}" > "${RPMDB_ADDED}" || post_ok=0
-        comm -23 "${RPMDB_PRE_MANIFEST}" "${RPMDB_POST_MANIFEST}" > "${RPMDB_REMOVED}" || post_ok=0
-        sync "${RPMDB_POST_MANIFEST}" "${RPMDB_ADDED}" "${RPMDB_REMOVED}" || post_ok=0
+        postcheck_record PASS rpmdb-manifest-write "path=${RPMDB_POST_MANIFEST}"
 
-        if ! cmp -s "${RPMDB_EXPECTED_MANIFEST}" "${RPMDB_POST_MANIFEST}"; then
+        if STATE_RPMDB_POST_HASH="$(manifest_hash "${RPMDB_POST_MANIFEST}")"; then
+            postcheck_record PASS rpmdb-manifest-hash "actual=${STATE_RPMDB_POST_HASH}"
+        else
+            warn 'post-dup: impossibile calcolare hash del manifest RPM finale.'
+            postcheck_record FAIL rpmdb-manifest-hash 'hash non calcolabile'
+            post_fail+=("rpmdb-manifest-hash")
+            post_ok=0
+        fi
+
+        if comm -13 "${RPMDB_PRE_MANIFEST}" "${RPMDB_POST_MANIFEST}" > "${RPMDB_ADDED}"; then
+            postcheck_record PASS rpmdb-added-delta "path=${RPMDB_ADDED}"
+        else
+            warn 'post-dup: impossibile costruire il delta RPM aggiunto.'
+            postcheck_record FAIL rpmdb-added-delta 'comm -13 fallito'
+            post_fail+=("rpmdb-added-delta")
+            post_ok=0
+        fi
+
+        if comm -23 "${RPMDB_PRE_MANIFEST}" "${RPMDB_POST_MANIFEST}" > "${RPMDB_REMOVED}"; then
+            postcheck_record PASS rpmdb-removed-delta "path=${RPMDB_REMOVED}"
+        else
+            warn 'post-dup: impossibile costruire il delta RPM rimosso.'
+            postcheck_record FAIL rpmdb-removed-delta 'comm -23 fallito'
+            post_fail+=("rpmdb-removed-delta")
+            post_ok=0
+        fi
+
+        if sync "${RPMDB_POST_MANIFEST}" "${RPMDB_ADDED}" "${RPMDB_REMOVED}"; then
+            postcheck_record PASS rpmdb-artifacts-sync 'manifest e delta durevoli'
+        else
+            warn 'post-dup: sync di manifest/delta RPM fallito.'
+            postcheck_record FAIL rpmdb-artifacts-sync 'sync fallito'
+            post_fail+=("rpmdb-artifacts-sync")
+            post_ok=0
+        fi
+
+        if cmp -s "${RPMDB_EXPECTED_MANIFEST}" "${RPMDB_POST_MANIFEST}"; then
+            postcheck_record PASS rpmdb-expected-match "hash=${STATE_RPMDB_POST_HASH:-unknown}"
+        else
             warn 'post-dup: il manifest RPM reale non coincide con il risultato atteso dal piano.'
+            postcheck_record FAIL rpmdb-expected-match 'manifest reale diverso da atteso'
+            post_fail+=("rpmdb-expected-match")
             post_ok=0
         fi
     else
         warn 'post-dup: impossibile salvare il manifest RPM finale.'
+        postcheck_record FAIL rpmdb-manifest-write 'scrittura fallita'
+        post_fail+=("rpmdb-manifest-write")
         post_ok=0
     fi
 
     for pkg in "${CRITICAL_PKGS[@]}"; do
-        if ! rpm --quiet -q "${pkg}"; then
+        if rpm --quiet -q "${pkg}"; then
+            postcheck_record PASS critical-package "name=${pkg}"
+        else
             warn "post-dup: pacchetto critico mancante: ${pkg}"
+            postcheck_record FAIL critical-package "missing=${pkg}"
+            post_fail+=("critical-package:${pkg}")
             post_ok=0
         fi
     done
 
-    if ! verify_rpm_payloads "${PLAN_OPS}"; then
+    if verify_rpm_payloads "${PLAN_OPS}"; then
+        postcheck_record PASS rpm-payloads "policy=${VERIFY_PAYLOADS}"
+    else
         warn 'post-dup: verifica payload RPM fallita.'
+        postcheck_record FAIL rpm-payloads "policy=${VERIFY_PAYLOADS}"
+        post_fail+=("rpm-payloads")
         post_ok=0
     fi
 
-    [[ "$(os_id)" == "${REQUIRED_OS_ID}" ]] || { warn 'post-dup: OS ID inatteso.'; post_ok=0; }
+    actual_os="$(os_id)"
+    if [[ "${actual_os}" == "${REQUIRED_OS_ID}" ]]; then
+        postcheck_record PASS os-id "actual=${actual_os}"
+    else
+        warn "post-dup: OS ID inatteso: ${actual_os:-vuoto}."
+        postcheck_record FAIL os-id "actual=${actual_os:-empty} expected=${REQUIRED_OS_ID}"
+        post_fail+=("os-id")
+        post_ok=0
+    fi
 
-    if ! read_snapshot_state; then
+    if read_snapshot_state; then
+        if [[ "${ACTIVE_SNAPSHOT}" == "${STATE_SOURCE}" && "${DEFAULT_SNAPSHOT}" == "${STATE_SOURCE}" ]]; then
+            postcheck_record PASS snapshot-state "active=${ACTIVE_SNAPSHOT} default=${DEFAULT_SNAPSHOT} expected=${STATE_SOURCE}"
+        else
+            warn "post-dup: snapshot attiva/default inattesa (attiva=${ACTIVE_SNAPSHOT}, default=${DEFAULT_SNAPSHOT}, attesa=${STATE_SOURCE})."
+            postcheck_record FAIL snapshot-state "active=${ACTIVE_SNAPSHOT:-empty} default=${DEFAULT_SNAPSHOT:-empty} expected=${STATE_SOURCE}"
+            post_fail+=("snapshot-state")
+            post_ok=0
+        fi
+    else
         warn 'post-dup: impossibile determinare snapshot attiva/default.'
-        post_ok=0
-    elif [[ "${ACTIVE_SNAPSHOT}" != "${STATE_SOURCE}" || "${DEFAULT_SNAPSHOT}" != "${STATE_SOURCE}" ]]; then
-        warn "post-dup: snapshot attiva/default inattesa (attiva=${ACTIVE_SNAPSHOT}, default=${DEFAULT_SNAPSHOT}, attesa=${STATE_SOURCE})."
+        postcheck_record FAIL snapshot-state "active=${ACTIVE_SNAPSHOT:-empty} default=${DEFAULT_SNAPSHOT:-empty} expected=${STATE_SOURCE}"
+        post_fail+=("snapshot-state-unreadable")
         post_ok=0
     fi
 
-    if ! systemd_boot_detected; then
-        warn 'post-dup: systemd-boot non rilevato da sdbootutil.'
+    if bootloader_out="$(LC_ALL=C sdbootutil bootloader 2>&1)" && grep -qi 'systemd-boot' <<<"${bootloader_out}"; then
+        postcheck_record PASS systemd-boot-detected "${bootloader_out}"
+    else
+        warn "post-dup: systemd-boot non rilevato da sdbootutil: ${bootloader_out//$'\n'/; }"
+        postcheck_record FAIL systemd-boot-detected "${bootloader_out:-no output}"
+        post_fail+=("systemd-boot-detected")
         post_ok=0
-    elif ! snapshot_is_bootable_report "${STATE_SOURCE}" post-dup; then
+    fi
+
+    if bootable_out="$(LC_ALL=C sdbootutil is-bootable "${STATE_SOURCE}" 2>&1)"; then
+        postcheck_record PASS source-bootable "snapshot=${STATE_SOURCE}; ${bootable_out}"
+    else
+        warn "post-dup: snapshot source ${STATE_SOURCE} non bootable: ${bootable_out//$'\n'/; }"
+        postcheck_record FAIL source-bootable "snapshot=${STATE_SOURCE}; ${bootable_out:-no output}"
+        post_fail+=("source-bootable")
         post_ok=0
+    fi
+
+    if [[ -f "${POSTCHECK_LOG}" ]]; then
+        if ! sync "${POSTCHECK_LOG}"; then
+            warn 'post-dup: sync del log diagnostico fallito.'
+            post_fail+=("postcheck-log-sync")
+            post_ok=0
+        fi
     fi
 
     if (( post_ok == 0 )); then
-        STATE_LAST_ERROR='verifica post-dup fallita'
-        persist_state || true
+        post_summary="$(IFS=,; printf '%s' "${post_fail[*]}")"
+        [[ -n "${post_summary}" ]] || post_summary=unknown
 
-        if prepare_rollback "${STATE_PRE}" 'verifica post-dup fallita; preparo rollback conservativo'; then
+        STATE_LAST_ERROR="verifica post-dup fallita: ${post_summary}"
+        persist_state || true
+        history_or_warn post-dup-failed "checks=${post_summary} log=${POSTCHECK_LOG}"
+
+        if prepare_rollback "${STATE_PRE}" "verifica post-dup fallita (${post_summary}); preparo rollback conservativo"; then
             reboot_now_and_wait
         fi
 
-        die "rollback automatico non verificabile. NON riavviare; log: ${DUP_LOG}"
+        die "rollback automatico non verificabile. NON riavviare; log dup: ${DUP_LOG}; log check: ${POSTCHECK_LOG}"
     fi
+
+    postcheck_record PASS complete "rpmdb_post_hash=${STATE_RPMDB_POST_HASH}"
+    sync "${POSTCHECK_LOG}" || warn 'impossibile sincronizzare il log post-dup completato.'
 
     history_or_warn dup-verified "rpmdb_post_hash=${STATE_RPMDB_POST_HASH}"
 
@@ -2036,6 +2155,7 @@ show_status() {
         [[ -n "${DUP_LOG}" ]] && printf 'Log dup: %s\n' "${DUP_LOG}"
         [[ -n "${RPMDB_PRE_MANIFEST}" ]] && printf 'Manifest RPM pre: %s\n' "${RPMDB_PRE_MANIFEST}"
         [[ -n "${RPMDB_POST_MANIFEST}" ]] && printf 'Manifest RPM post: %s\n' "${RPMDB_POST_MANIFEST}"
+        [[ -n "${POSTCHECK_LOG}" ]] && printf 'Log verifiche post-dup: %s\n' "${POSTCHECK_LOG}"
     else
         printf 'Stato: nessuna transazione registrata\n'
     fi
