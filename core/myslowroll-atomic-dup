@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-# mySlowrollOS guarded distribution upgrade v3.4.7-final
+# mySlowrollOS guarded distribution upgrade v3.4.8-final
 #
 # Model:
 #   - openSUSE Slowroll classic read-write root
@@ -1665,7 +1665,7 @@ upgrade() {
             post_ok=0
         fi
 
-        if comm -13 "${RPMDB_PRE_MANIFEST}" "${RPMDB_POST_MANIFEST}" > "${RPMDB_ADDED}"; then
+        if LC_ALL=C comm -13 "${RPMDB_PRE_MANIFEST}" "${RPMDB_POST_MANIFEST}" > "${RPMDB_ADDED}"; then
             postcheck_record PASS rpmdb-added-delta "path=${RPMDB_ADDED}"
         else
             warn 'post-dup: impossibile costruire il delta RPM aggiunto.'
@@ -1674,7 +1674,7 @@ upgrade() {
             post_ok=0
         fi
 
-        if comm -23 "${RPMDB_PRE_MANIFEST}" "${RPMDB_POST_MANIFEST}" > "${RPMDB_REMOVED}"; then
+        if LC_ALL=C comm -23 "${RPMDB_PRE_MANIFEST}" "${RPMDB_POST_MANIFEST}" > "${RPMDB_REMOVED}"; then
             postcheck_record PASS rpmdb-removed-delta "path=${RPMDB_REMOVED}"
         else
             warn 'post-dup: impossibile costruire il delta RPM rimosso.'
