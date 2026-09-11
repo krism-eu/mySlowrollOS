@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-# mySlowrollOS guarded distribution upgrade v3.4.5-final
+# mySlowrollOS guarded distribution upgrade v3.4.6-final
 #
 # Model:
 #   - openSUSE Slowroll classic read-write root
@@ -819,6 +819,14 @@ plan_hash() {
         }
         printf '</myslowroll-plan>\n'
     } > "${tmp}"
+
+    # download-size is cache-state dependent: after download-only Zypper reports
+    # zero although the solver result is unchanged. It remains authoritative for
+    # the initial space check, but must not enter the semantic plan fingerprint.
+    LC_ALL=C sed -E -i 's/[[:space:]]+download-size="[0-9]+"//' "${tmp}" || {
+        rm -f -- "${tmp}"
+        return 1
+    }
 
     hash="$(LC_ALL=C xmllint --c14n "${tmp}" 2>/dev/null | sha256sum | awk '{print $1}')"
     rm -f -- "${tmp}"
@@ -2044,7 +2052,7 @@ main() {
         check)
             (( $# == 1 )) || die 'check non accetta argomenti.'
             preflight_new_transaction
-            log 'Preflight superato: Slowroll RW/Btrfs, Snapper, /var fuori root snapshot, RPMDB nella root snapshot, systemd-boot, criscore e policy ZYpp coerenti.'
+            log 'Preflight superato: Slowroll RW/Btrfs, Snapper, state/cache/log fuori root snapshot, RPMDB nella root snapshot, systemd-boot, criscore e policy ZYpp coerenti.'
             ;;
         plan)
             (( $# == 1 )) || die 'plan non accetta argomenti.'
