@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-# mySlowrollOS guarded distribution upgrade v3.4.3-final
+# mySlowrollOS guarded distribution upgrade v3.4.4-final
 #
 # Model:
 #   - openSUSE Slowroll classic read-write root
@@ -185,8 +185,51 @@ os_id() {
         /etc/os-release 2>/dev/null || true
 }
 
+zypp_config_files() {
+    local vendor_root=/usr/etc/zypp system_root=/etc/zypp
+    local path name system_path vendor_path
+
+    # A system main file replaces the vendor main file, even when it is an
+    # empty file or a symlink to /dev/null.
+    if [[ -e "${system_root}/zypp.conf" || -L "${system_root}/zypp.conf" ]]; then
+        printf '%s\n' "${system_root}/zypp.conf"
+    elif [[ -e "${vendor_root}/zypp.conf" || -L "${vendor_root}/zypp.conf" ]]; then
+        printf '%s\n' "${vendor_root}/zypp.conf"
+    fi
+
+    # Merge drop-in names lexicographically. A system drop-in with the same
+    # basename replaces its vendor counterpart, matching libzypp/econf.
+    {
+        for path in "${vendor_root}"/zypp.conf.d/*.conf "${system_root}"/zypp.conf.d/*.conf; do
+            [[ -e "${path}" || -L "${path}" ]] || continue
+            printf '%s\n' "${path##*/}"
+        done
+    } | LC_ALL=C sort -u | while IFS= read -r name; do
+        [[ -n "${name}" ]] || continue
+        system_path="${system_root}/zypp.conf.d/${name}"
+        vendor_path="${vendor_root}/zypp.conf.d/${name}"
+
+        if [[ -e "${system_path}" || -L "${system_path}" ]]; then
+            printf '%s\n' "${system_path}"
+        elif [[ -e "${vendor_path}" || -L "${vendor_path}" ]]; then
+            printf '%s\n' "${vendor_path}"
+        fi
+    done
+}
+
 zypp_value() {
     local wanted="$1"
+    local -a config_files=()
+
+    mapfile -t config_files < <(zypp_config_files)
+
+    if (( ${#config_files[@]} == 0 )); then
+        case "${wanted}" in
+            solver.onlyRequires|solver.dupAllowVendorChange) printf 'false\n' ;;
+        esac
+        return 0
+    fi
+
     awk -F= -v wanted="${wanted}" '
         /^[[:space:]]*#/ { next }
         NF >= 2 {
@@ -197,12 +240,18 @@ zypp_value() {
                 sub(/[[:space:]]*#.*/, "", value)
                 gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
                 found=tolower(value)
+                seen=1
             }
         }
-        END { if (found != "") print found }
-    ' /etc/zypp/zypp.conf 2>/dev/null || true
+        END {
+            if (seen) {
+                print found
+            } else if (wanted == "solver.onlyRequires" || wanted == "solver.dupAllowVendorChange") {
+                print "false"
+            }
+        }
+    ' "${config_files[@]}" 2>/dev/null || true
 }
-
 bool_true() {
     case "${1:-}" in 1|yes|true|on) return 0 ;; *) return 1 ;; esac
 }
