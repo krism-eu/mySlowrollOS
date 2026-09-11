@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-# mySlowrollOS guarded distribution upgrade v3.4.1-final
+# mySlowrollOS guarded distribution upgrade v3.4.2-final
 #
 # Model:
 #   - openSUSE Slowroll classic read-write root
@@ -125,7 +125,7 @@ acquire_lock() {
 
 require_recovery_commands() {
     local cmd
-    for cmd in awk btrfs cat chmod date df findmnt flock grep install mktemp mv rm rpm sleep snapper \
+    for cmd in awk btrfs cat chmod date df findmnt flock grep install mktemp mv readlink rm rpm sleep snapper \
                sdbootutil sync systemctl tr; do
         command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
     done
@@ -134,7 +134,7 @@ require_recovery_commands() {
 require_confirm_commands() {
     local cmd
     require_recovery_commands
-    for cmd in rpm; do
+    for cmd in rpm sort sha256sum; do
         command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
     done
 }
@@ -465,6 +465,19 @@ find_pre_snapshots_for_txid() {
              list --disable-used-space --columns number,userdata 2>/dev/null)
 }
 
+find_all_atomic_pre_snapshots() {
+    local line number
+
+    while IFS= read -r line; do
+        [[ "${line}" == *"myslowroll=atomic-pre"* ]] || continue
+        number="${line%%,*}"
+        number="${number//\"/}"
+        number="${number//[[:space:]]/}"
+        [[ "${number}" =~ ^[0-9]+$ ]] && printf '%s\n' "${number}"
+    done < <(LC_ALL=C snapper --csvout --no-headers -c "${SNAPPER_CONFIG}" \
+             list --disable-used-space --columns number,userdata 2>/dev/null)
+}
+
 snapshot_has_atomic_pre_userdata() {
     local snap="$1" line number
 
@@ -549,33 +562,55 @@ root_is_btrfs_rw() {
     [[ "$(LC_ALL=C btrfs property get / ro 2>/dev/null || true)" == 'ro=false' ]]
 }
 
-state_is_outside_root_snapshot() {
-    local root_dev var_dev root_fs var_fs root_id var_id
+nearest_existing_storage_path() {
+    local probe="$1" resolved
+
+    [[ "${probe}" == /* ]] || return 1
+
+    # If the leaf does not exist yet, its nearest existing ancestor determines
+    # where it will be stored. A dangling symlink is rejected fail-closed.
+    while [[ ! -e "${probe}" && ! -L "${probe}" ]]; do
+        [[ "${probe}" != / ]] || break
+        probe="${probe%/*}"
+        [[ -n "${probe}" ]] || probe=/
+    done
+
+    resolved="$(readlink -f -- "${probe}" 2>/dev/null || true)"
+    [[ -n "${resolved}" && -e "${resolved}" ]] || return 1
+    printf '%s\n' "${resolved}"
+}
+
+path_is_outside_root_snapshot() {
+    local requested="$1" path root_dev path_dev root_fs path_fs root_id path_id
+
+    path="$(nearest_existing_storage_path "${requested}")" || return 1
 
     root_dev="$(findmnt -n -o MAJ:MIN --target / 2>/dev/null || true)"
-    var_dev="$(findmnt -n -o MAJ:MIN --target /var 2>/dev/null || true)"
-    [[ -n "${root_dev}" && -n "${var_dev}" ]] || return 1
+    path_dev="$(findmnt -n -o MAJ:MIN --target "${path}" 2>/dev/null || true)"
+    [[ -n "${root_dev}" && -n "${path_dev}" ]] || return 1
 
-    # A distinct backing filesystem/device cannot be part of the Btrfs root
-    # snapshot and is therefore acceptable for durable transaction state.
-    if [[ "${root_dev}" != "${var_dev}" ]]; then
+    # A distinct backing filesystem/device cannot be part of the root snapshot.
+    if [[ "${root_dev}" != "${path_dev}" ]]; then
         return 0
     fi
 
-    # Same backing Btrfs filesystem: prove /var is a distinct nested/mounted
-    # subvolume. Btrfs snapshots are non-recursive across nested subvolumes.
+    # On the same Btrfs filesystem, the effective path must belong to a
+    # different subvolume: Btrfs snapshots do not recurse into it.
     root_fs="$(findmnt -n -o FSTYPE --target / 2>/dev/null || true)"
-    var_fs="$(findmnt -n -o FSTYPE --target /var 2>/dev/null || true)"
-    [[ "${root_fs}" == btrfs && "${var_fs}" == btrfs ]] || return 1
+    path_fs="$(findmnt -n -o FSTYPE --target "${path}" 2>/dev/null || true)"
+    [[ "${root_fs}" == btrfs && "${path_fs}" == btrfs ]] || return 1
 
     root_id="$(btrfs inspect-internal rootid / 2>/dev/null || true)"
-    var_id="$(btrfs inspect-internal rootid /var 2>/dev/null || true)"
-    [[ "${root_id}" =~ ^[0-9]+$ && "${var_id}" =~ ^[0-9]+$ ]] || return 1
-    [[ "${root_id}" != "${var_id}" ]] || return 1
-
-    btrfs subvolume show /var >/dev/null 2>&1 || return 1
+    path_id="$(btrfs inspect-internal rootid "${path}" 2>/dev/null || true)"
+    [[ "${root_id}" =~ ^[0-9]+$ && "${path_id}" =~ ^[0-9]+$ ]] || return 1
+    [[ "${root_id}" != "${path_id}" ]]
 }
 
+state_is_outside_root_snapshot() {
+    path_is_outside_root_snapshot "${STATE_DIR}" &&
+        path_is_outside_root_snapshot "${CACHE_ROOT}" &&
+        path_is_outside_root_snapshot "${LOG_ROOT}"
+}
 rpmdb_is_in_root_snapshot() {
     local db_path root_dev db_dev root_id db_id
 
@@ -921,10 +956,18 @@ generate_xml_plan() {
 }
 
 check_state_allows_new_transaction() {
+    local orphan_pre=
+
     load_state
 
     case "${STATE_STATUS}" in
-        ''|planned|confirmed|rolled-back|aborted)
+        '')
+            orphan_pre="$(find_all_atomic_pre_snapshots | tr '\n' ' ')" || true
+            [[ -z "${orphan_pre}" ]] || \
+                die "state assente ma esistono PRE marcate: ${orphan_pre}; usare '${PROG} recover' e verificare manualmente."
+            return 0
+            ;;
+        planned|confirmed|rolled-back|aborted)
             return 0
             ;;
         planning)
@@ -956,7 +999,8 @@ preflight_recovery() {
     root_is_btrfs_rw || die 'la root deve essere Btrfs read-write.'
     [[ -d /.snapshots ]] || die 'manca /.snapshots: Snapper root non e configurato.'
     snapper -c "${SNAPPER_CONFIG}" get-config >/dev/null 2>&1 || die "config Snapper '${SNAPPER_CONFIG}' non disponibile."
-    state_is_outside_root_snapshot || die '/var non e dimostrabilmente fuori dalla snapshot della root; recovery state non affidabile.'
+    state_is_outside_root_snapshot || \
+        die 'state/cache/log non sono tutti dimostrabilmente fuori dalla snapshot della root; persistenza non affidabile.'
     verify_systemd_boot
 }
 
@@ -1203,6 +1247,8 @@ prepare_upgrade_plan() {
 create_recovery_snapshot() {
     local snap userdata
 
+    check_esp_space || die 'spazio ESP/boot insufficiente immediatamente prima della creazione PRE.'
+
     userdata="myslowroll=atomic-pre,myslowroll_txid=${STATE_TXID},important=yes"
 
     # Flush pending writes before freezing the known-good point.
@@ -1266,6 +1312,14 @@ prepare_rollback() {
     local source="$1" reason="$2" out target old_default source_core=0
 
     STATE_LAST_ERROR="${reason}"
+
+    if ! check_esp_space; then
+        STATE_STATUS=rollback-unverified
+        STATE_LAST_ERROR="spazio ESP/boot insufficiente prima del rollback: ${reason}"
+        persist_state || true
+        warn 'Spazio ESP/boot insufficiente prima del rollback; NON procedo e NON riavvio.'
+        return 1
+    fi
 
     if snapshot_has_atomic_pre_userdata "${source}"; then
         verify_snapshot_core "${source}" || {
@@ -1803,7 +1857,16 @@ recover() {
             fi
             ;;
 
-        confirmed|rolled-back|aborted|'')
+        '')
+            orphan_pre="$(find_all_atomic_pre_snapshots | tr '\n' ' ')" || true
+            if [[ -n "${orphan_pre}" ]]; then
+                warn "State file assente ma sono presenti PRE marcate: ${orphan_pre}."
+                warn 'Non e possibile stabilire automaticamente se una transazione RPM sia rimasta incompleta.'
+                die 'recovery fail-closed: ispezionare snapshot, rpmdb e log prima di rimuovere o riclassificare le PRE.'
+            fi
+            log 'Nessuna recovery pendente e nessuna PRE marcata trovata.'
+            ;;
+        confirmed|rolled-back|aborted)
             log 'Nessuna recovery pendente.'
             ;;
     esac
