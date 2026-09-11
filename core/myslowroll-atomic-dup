@@ -364,6 +364,7 @@ append_history() {
         "${STATE_PRE:-none}" "${STATE_TARGET:-none}" "${detail}" >> "${HISTORY_FILE}" || return 1
     chmod 0600 "${HISTORY_FILE}" || return 1
     sync "${HISTORY_FILE}" || return 1
+    sync "${STATE_DIR}" || return 1
 }
 
 history_or_warn() {
@@ -1252,6 +1253,7 @@ upgrade() {
         STATE_RPMDB_POST_HASH="$(manifest_hash "${RPMDB_POST_MANIFEST}")" || post_ok=0
         comm -13 "${RPMDB_PRE_MANIFEST}" "${RPMDB_POST_MANIFEST}" > "${RPMDB_ADDED}" || post_ok=0
         comm -23 "${RPMDB_PRE_MANIFEST}" "${RPMDB_POST_MANIFEST}" > "${RPMDB_REMOVED}" || post_ok=0
+        sync "${RPMDB_POST_MANIFEST}" "${RPMDB_ADDED}" "${RPMDB_REMOVED}" || post_ok=0
         if ! cmp -s "${RPMDB_EXPECTED_MANIFEST}" "${RPMDB_POST_MANIFEST}"; then
             warn 'post-dup: il manifest RPM reale non coincide con il risultato atteso dal piano.'
             post_ok=0
@@ -1531,6 +1533,8 @@ prune_artifacts() {
     [[ "${answer}" == "PRUNE ARTEFATTI ${days}" ]] || die 'prune annullato.'
     for path in "${cache_candidates[@]}"; do rm -rf -- "${path}"; done
     for path in "${log_candidates[@]}"; do rm -f -- "${path}"; done
+    [[ ! -d "${CACHE_ROOT}" ]] || sync "${CACHE_ROOT}"
+    [[ ! -d "${LOG_ROOT}" ]] || sync "${LOG_ROOT}"
     history_or_warn prune "days=${days} cache=${#cache_candidates[@]} logs=${#log_candidates[@]} snapshots=preserved"
     log "Prune completato: cache=${#cache_candidates[@]}, log=${#log_candidates[@]}; PRE conservate."
 }
