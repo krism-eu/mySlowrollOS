@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-# mySlowrollOS guarded distribution upgrade v3.4.8-final
+# mySlowrollOS guarded distribution upgrade v3.4.9-final
 #
 # Model:
 #   - openSUSE Slowroll classic read-write root
@@ -1198,6 +1198,23 @@ make_plan_after_preflight() {
 
     sync "${RPMDB_PRE_MANIFEST}" "${RPMDB_EXPECTED_MANIFEST}" "${PLAN_OPS}" || \
         abort_planning 'impossibile rendere durevoli manifest e operazioni attese.'
+
+    if [[ ! -s "${PLAN_OPS}" ]]; then
+        STATE_STATUS=confirmed
+        STATE_SOURCE="${initial_source}"
+        STATE_PLAN_HASH="${hash_b}"
+        STATE_RPMDB_HASH="${rpm_b}"
+        STATE_ZYPP_HASH="${zypp_b}"
+        STATE_CACHE_HASH="${cache_b}"
+        STATE_RPMDB_POST_HASH="${rpm_b}"
+        STATE_FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        STATE_LAST_ERROR=
+
+        persist_state_or_die
+        history_or_warn plan-noop "source=${STATE_SOURCE} rpmdb_hash=${STATE_RPMDB_HASH}"
+        log 'Nessun aggiornamento disponibile: transazione chiusa senza PRE, modifiche RPM o reboot.'
+        return 0
+    fi
 
     log 'Dry-run leggibile finale con payload gia presente in cache...'
     set +e

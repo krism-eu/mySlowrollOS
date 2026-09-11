@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+readonly PROG="${0##*/}"
+readonly ATOMIC=/usr/local/sbin/myslowroll-atomic-dup
+readonly STATE_FILE=/var/lib/myslowroll/atomic-dup/state
+
+log()  { printf '[%s] %s\n' "${PROG}" "$*"; }
+warn() { printf '[%s] ATTENZIONE: %s\n' "${PROG}" "$*" >&2; }
+die()  { printf '[%s] ERRORE: %s\n' "${PROG}" "$*" >&2; exit 1; }
+
+pause_terminal() {
+    printf '\nPremi Invio per chiudere...'
+    IFS= read -r _ || true
+}
+
+state_status() {
+    [[ -f "${STATE_FILE}" ]] || return 0
+    awk -F= '$1 == "status" { value=$2 } END { print value }' "${STATE_FILE}" 2>/dev/null || true
+}
+
+confirm_after_reboot() {
+    local answer failed
+
+    "${ATOMIC}" status
+    printf '\nControllo unità systemd fallite:\n'
+    failed="$(systemctl --failed --no-legend --plain 2>/dev/null || true)"
+    if [[ -n "${failed}" ]]; then
+        printf '%s\n' "${failed}"
+        warn 'Sono presenti unità systemd fallite: non confermo automaticamente.'
+    else
+        log 'Nessuna unità systemd fallita.'
+    fi
+
+    printf '\nVerifica che desktop, rete, grafica e applicazioni essenziali funzionino.\n'
+    printf 'Per confermare scrivi esattamente: CONFERMA UPGRADE\n> '
+    if ! IFS= read -r answer; then
+        die 'EOF durante la conferma; stato pending-reboot conservato.'
+    fi
+    [[ "${answer}" == 'CONFERMA UPGRADE' ]] || die 'conferma annullata; stato pending-reboot conservato.'
+
+    "${ATOMIC}" confirm
+    "${ATOMIC}" status
+    log 'Aggiornamento atomico confermato.'
+}
+
+start_or_resume_upgrade() {
+    local status
+
+    status="$(state_status)"
+    case "${status}" in
+        planned)
+            "${ATOMIC}" status
+            "${ATOMIC}" upgrade
+            ;;
+        pending-reboot)
+            confirm_after_reboot
+            ;;
+        planning|prepared|in-progress|rollback-pending|rollback-unverified)
+            warn "Transazione in stato ${status}; avvio il percorso di recovery controllato."
+            "${ATOMIC}" status
+            "${ATOMIC}" recover
+            "${ATOMIC}" status
+            ;;
+        ''|confirmed|rolled-back|aborted)
+            "${ATOMIC}" check
+            "${ATOMIC}" plan
+            status="$(state_status)"
+            if [[ "${status}" == planned ]]; then
+                "${ATOMIC}" status
+                "${ATOMIC}" upgrade
+            elif [[ "${status}" == confirmed ]]; then
+                "${ATOMIC}" status
+                log 'Nessun aggiornamento da applicare.'
+            else
+                die "stato inatteso dopo il piano: ${status:-vuoto}"
+            fi
+            ;;
+        *)
+            die "stato persistente sconosciuto: ${status}"
+            ;;
+    esac
+}
+
+(( EUID == 0 )) || die 'il launcher deve essere eseguito tramite sudo/polkit.'
+[[ -x "${ATOMIC}" ]] || die "tool atomico non trovato o non eseguibile: ${ATOMIC}"
+
+trap 'rc=$?; warn "operazione terminata con rc=${rc}"; pause_terminal; exit "${rc}"' ERR
+start_or_resume_upgrade
+pause_terminal

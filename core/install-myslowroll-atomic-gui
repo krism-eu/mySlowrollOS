@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 022
+
+readonly PROG="${0##*/}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+
+die() { printf '[%s] ERRORE: %s\n' "${PROG}" "$*" >&2; exit 1; }
+
+(( EUID == 0 )) || die 'eseguire come root.'
+[[ -f "${REPO_ROOT}/core/myslowroll-atomic-dup" ]] || die 'myslowroll-atomic-dup non trovato.'
+[[ -f "${REPO_ROOT}/core/myslowroll-atomic-launcher" ]] || die 'launcher non trovato.'
+[[ -f "${REPO_ROOT}/desktop/myslowroll-atomic-upgrade.desktop" ]] || die 'file desktop non trovato.'
+
+install -D -m 0755 "${REPO_ROOT}/core/myslowroll-atomic-dup" /usr/local/sbin/myslowroll-atomic-dup
+install -D -m 0755 "${REPO_ROOT}/core/myslowroll-atomic-launcher" /usr/local/sbin/myslowroll-atomic-launcher
+install -D -m 0644 "${REPO_ROOT}/desktop/myslowroll-atomic-upgrade.desktop" \
+    /usr/share/applications/myslowroll-atomic-upgrade.desktop
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database /usr/share/applications || true
+fi
+
+printf 'Installazione completata. Cerca “Aggiornamento atomico Slowroll” nel menu applicazioni.\n'
+printf 'La stessa icona avvia upgrade, conferma post-reboot o recovery in base allo stato.\n'

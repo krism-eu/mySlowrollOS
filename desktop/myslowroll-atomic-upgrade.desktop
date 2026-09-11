@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Aggiornamento atomico Slowroll
+GenericName=Aggiornamento di distribuzione
+Comment=Pianifica, verifica e applica un upgrade Slowroll con rollback automatico
+Icon=system-software-update
+Exec=/usr/bin/sudo /usr/local/sbin/myslowroll-atomic-launcher
+Terminal=true
+StartupNotify=true
+Categories=System;PackageManager;
+Keywords=Slowroll;upgrade;update;atomic;snapshot;rollback;
