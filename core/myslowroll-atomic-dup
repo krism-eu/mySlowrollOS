@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-# mySlowrollOS guarded distribution upgrade v3.4.4-final
+# mySlowrollOS guarded distribution upgrade v3.4.5-final
 #
 # Model:
 #   - openSUSE Slowroll classic read-write root
@@ -591,7 +591,8 @@ verify_snapshot_basics() {
 }
 
 verify_snapshot_core() {
-    local snap="$1" root="/.snapshots/${snap}/snapshot" pkg
+    local snap="$1" root pkg
+    root="/.snapshots/${snap}/snapshot"
 
     verify_snapshot_basics "${snap}" || return 1
 
@@ -699,7 +700,8 @@ check_zypp_lock_hint() {
 }
 
 write_rpmdb_manifest() {
-    local out="$1" tmp="${out}.tmp"
+    local out="$1" tmp
+    tmp="${out}.tmp"
 
     rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}|%{ARCH}\n' \
         | LC_ALL=C sort -u > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
