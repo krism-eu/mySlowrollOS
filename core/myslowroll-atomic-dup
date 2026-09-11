@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-# mySlowrollOS guarded distribution upgrade v3.4.2-final
+# mySlowrollOS guarded distribution upgrade v3.4.3-final
 #
 # Model:
 #   - openSUSE Slowroll classic read-write root
@@ -652,7 +652,7 @@ check_zypp_lock_hint() {
 write_rpmdb_manifest() {
     local out="$1" tmp="${out}.tmp"
 
-    rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}:|%{VERSION}-%{RELEASE}|%{ARCH}\n' \
+    rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}|%{ARCH}\n' \
         | LC_ALL=C sort -u > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
 
     mv -f -- "${tmp}" "${out}"
@@ -664,7 +664,7 @@ manifest_hash() {
 }
 
 rpmdb_hash() {
-    rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}:|%{VERSION}-%{RELEASE}|%{ARCH}\n' \
+    rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}|%{ARCH}\n' \
         | LC_ALL=C sort -u \
         | sha256sum \
         | awk '{print $1}'
