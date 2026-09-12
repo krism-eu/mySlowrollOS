@@ -21,6 +21,7 @@ timezone
 glibc-locale
 xdg-user-dirs
 xdg-utils
+xauth
 
 # UEFI, Secure Boot, Btrfs, snapshot e recupero
 systemd-boot
@@ -33,7 +34,6 @@ btrfsprogs
 btrfsmaintenance
 snapper
 snapper-zypp-plugin
-transactional-update
 zram-generator
 
 # Filesystem e diagnostica dischi usati dalla macchina
@@ -124,7 +124,6 @@ kate
 konsole
 okular
 spectacle
-partitionmanager
 kwalletmanager
 pam_kwallet6
 
