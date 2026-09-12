@@ -15,6 +15,8 @@ dracut
 bash-completion
 ca-certificates-mozilla
 curl
+libxml2-tools
+openssh-clients
 polkit
 sudo
 timezone
@@ -88,12 +90,10 @@ yast2
 yast2-control-center-qt
 yast2-packager
 libyui-qt-pkg16
-yast2-storage-ng
 yast2-snapper
 yast2-apparmor
 yast2-services-manager
 yast2-sysconfig
-yast2-bootloader
 myrlyn
 
 # Firmware, alimentazione e avvio grafico
