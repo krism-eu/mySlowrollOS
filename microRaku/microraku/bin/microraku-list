@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+
+STATE="/var/lib/microraku"
+PACKAGES_LIST="$STATE/packages.list"
+BASE_DB="$STATE/base-rpmdb"
+
+if [[ ! -s "$PACKAGES_LIST" ]]; then
+    echo "No packages are tracked by microRaku."
+    exit 0
+fi
+
+printf '%-32s %s\n' PACKAGE STATUS
+printf '%-32s %s\n' '--------------------------------' '----------------'
+while IFS= read -r pkg; do
+    [[ -z "$pkg" || "$pkg" == \#* ]] && continue
+    if rpm --dbpath "$BASE_DB" -q -- "$pkg" >/dev/null 2>&1; then
+        status="provided-by-base"
+    elif rpm -q -- "$pkg" >/dev/null 2>&1; then
+        status="overlay"
+    else
+        status="missing"
+    fi
+    printf '%-32s %s\n' "$pkg" "$status"
+done < "$PACKAGES_LIST"
