@@ -1,0 +1,19 @@
+#!/bin/bash
+set -euo pipefail
+
+STATE="/var/lib/microraku"
+
+if [[ ${EUID} -ne 0 ]]; then
+    echo "ERROR: run as root" >&2
+    exit 1
+fi
+
+if [[ "${1:-}" != "--yes" ]]; then
+    echo "This schedules a complete microRaku overlay reset for the next boot."
+    read -r -p "Type 'yes' to continue: " answer
+    [[ "$answer" == "yes" ]] || { echo "Aborted."; exit 0; }
+fi
+
+mkdir -p "$STATE"
+touch "$STATE/reset-pending"
+echo "microRaku reset scheduled. Reboot to apply it safely."
