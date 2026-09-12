@@ -4,22 +4,30 @@ set -euo pipefail
 STATE="/var/lib/microraku"
 PACKAGES_LIST="$STATE/packages.list"
 BASE_DB="$STATE/base-rpmdb"
+MODIFIED_BASE="$STATE/state/modified-base.tsv"
 
 if [[ ! -s "$PACKAGES_LIST" ]]; then
     echo "No packages are tracked by microRaku."
-    exit 0
+else
+    printf '%-28s %-18s %-34s %s\n' PACKAGE STATUS INSTALLED BASE
+    printf '%-28s %-18s %-34s %s\n' '----------------------------' '------------------' '----------------------------------' '----------------------------------'
+    while IFS= read -r pkg; do
+        [[ -z "$pkg" || "$pkg" == \#* ]] && continue
+        live="$(rpm -q --qf '%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}' -- "$pkg" 2>/dev/null || true)"
+        base="$(rpm --dbpath "$BASE_DB" -q --qf '%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}' -- "$pkg" 2>/dev/null || true)"
+        if [[ -n "$base" ]]; then
+            status="provided-by-base"
+        elif [[ -n "$live" ]]; then
+            status="overlay"
+        else
+            status="missing"
+        fi
+        printf '%-28s %-18s %-34s %s\n' "$pkg" "$status" "${live:--}" "${base:--}"
+    done < "$PACKAGES_LIST"
 fi
 
-printf '%-32s %s\n' PACKAGE STATUS
-printf '%-32s %s\n' '--------------------------------' '----------------'
-while IFS= read -r pkg; do
-    [[ -z "$pkg" || "$pkg" == \#* ]] && continue
-    if rpm --dbpath "$BASE_DB" -q -- "$pkg" >/dev/null 2>&1; then
-        status="provided-by-base"
-    elif rpm -q -- "$pkg" >/dev/null 2>&1; then
-        status="overlay"
-    else
-        status="missing"
-    fi
-    printf '%-32s %s\n' "$pkg" "$status"
-done < "$PACKAGES_LIST"
+if [[ -s "$MODIFIED_BASE" ]]; then
+    echo
+    echo "Base packages currently overridden by the overlay:"
+    awk -F '\t' '{ printf "  %-28s base=%s overlay=%s\n", $1, $2, $3 }' "$MODIFIED_BASE"
+fi
