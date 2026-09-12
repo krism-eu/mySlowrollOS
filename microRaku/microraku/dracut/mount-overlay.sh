@@ -61,8 +61,12 @@ fi
 # This avoids OverlayFS whiteouts over files owned by the immutable lower.
 if [[ -e "$RECREATE_PENDING" ]]; then
     mr_info "clean rebuild requested"
-    rm -rf "$PREVIOUS"
-    if [[ -d "$UPPER" && -n "$(find "$UPPER" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+    if [[ -d "$PREVIOUS" && -n "$(find "$PREVIOUS" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+        # A prior base-change backup is more valuable than a partial failed
+        # rebuild. Keep it and discard only the active partial upper.
+        rm -rf "$UPPER"
+    elif [[ -d "$UPPER" && -n "$(find "$UPPER" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+        rm -rf "$PREVIOUS"
         mv "$UPPER" "$PREVIOUS"
     else
         rm -rf "$UPPER"

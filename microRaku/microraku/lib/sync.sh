@@ -17,8 +17,20 @@ fi
 [[ -e "$PENDING" ]] || exit 0
 [[ -f "$PACKAGES" ]] || touch "$PACKAGES"
 
-exec 9>/run/microraku.lock
-flock -x 9
+LOCKDIR="/run/microraku.lock"
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    log "ERROR: another microRaku operation is active"
+    exit 75
+fi
+cleanup() { rmdir "$LOCKDIR" 2>/dev/null || true; }
+on_error() {
+    local rc=$?
+    touch "$STATE/recreate-pending"
+    log "reconciliation failed; a clean rebuild is scheduled for next boot"
+    return "$rc"
+}
+trap cleanup EXIT
+trap on_error ERR
 
 mapfile -t DESIRED < <(grep -Ev '^[[:space:]]*(#|$)' "$PACKAGES" | sort -u)
 TO_INSTALL=()
@@ -43,7 +55,7 @@ else
     log "no overlay packages need installation for this base"
 fi
 
-rm -f "$PENDING"
+rm -f "$PENDING" "$STATE/recreate-pending"
 rm -rf "$PREVIOUS"
 date -Iseconds > "$STATE/state/last-sync"
 log "reconciliation complete"

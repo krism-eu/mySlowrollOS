@@ -14,8 +14,12 @@ if (( $# == 0 )); then
     exit 1
 fi
 
-exec 9>/run/microraku.lock
-flock -x 9
+LOCKDIR="/run/microraku.lock"
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    echo "ERROR: another microRaku operation is active" >&2
+    exit 75
+fi
+trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT
 
 TMP="$(mktemp)"
 cp "$PACKAGES_LIST" "$TMP"

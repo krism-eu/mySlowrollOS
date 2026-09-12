@@ -19,7 +19,7 @@ if ! findmnt -n -o FSTYPE /usr 2>/dev/null | grep -qx overlay; then
 fi
 
 for pkg in "$@"; do
-    if [[ ! "$pkg" =~ ^[A-Za-z0-9_.+:-]+$ ]]; then
+    if [[ ! "$pkg" =~ ^[A-Za-z0-9][A-Za-z0-9_.+:-]*$ ]]; then
         echo "ERROR: v0.1 accepts package names only: $pkg" >&2
         exit 2
     fi
@@ -30,8 +30,12 @@ for pkg in "$@"; do
     fi
 done
 
-exec 9>/run/microraku.lock
-flock -x 9
+LOCKDIR="/run/microraku.lock"
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    echo "ERROR: another microRaku operation is active" >&2
+    exit 75
+fi
+trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT
 
 zypper --non-interactive install --no-recommends -- "$@"
 
