@@ -14,12 +14,15 @@ dracut
 bash-completion
 ca-certificates-mozilla
 curl
+libxml2-tools
+openssh-clients
 polkit
 sudo
 timezone
 glibc-locale
 xdg-user-dirs
 xdg-utils
+xauth
 
 # UEFI, Secure Boot, Btrfs, snapshot e recupero
 systemd-boot
@@ -32,7 +35,6 @@ btrfsprogs
 btrfsmaintenance
 snapper
 snapper-zypp-plugin
-transactional-update
 
 # Filesystem e diagnostica della macchina
 dosfstools
@@ -88,12 +90,10 @@ yast2
 yast2-control-center-qt
 yast2-packager
 libyui-qt-pkg16
-yast2-storage-ng
 yast2-snapper
 yast2-apparmor
 yast2-services-manager
 yast2-sysconfig
-yast2-bootloader
 myrlyn
 
 # Firmware, alimentazione e avvio grafico
