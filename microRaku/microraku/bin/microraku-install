@@ -4,6 +4,11 @@ set -euo pipefail
 STATE="/var/lib/microraku"
 PACKAGES_LIST="$STATE/packages.list"
 BASE_DB="$STATE/base-rpmdb"
+ZYPP_CACHE="$STATE/cache/zypp"
+PKG_CACHE="$STATE/cache/packages"
+MODIFIED_BASE="$STATE/state/modified-base.tsv"
+ETC_DRIFT="$STATE/state/etc-drift.log"
+RECREATE="$STATE/recreate-pending"
 
 if [[ ${EUID} -ne 0 ]]; then
     echo "ERROR: run as root" >&2
@@ -15,6 +20,10 @@ if (( $# == 0 )); then
 fi
 if ! findmnt -n -o FSTYPE /usr 2>/dev/null | grep -qx overlay; then
     echo "ERROR: microRaku overlay is not active; reboot after installation." >&2
+    exit 1
+fi
+if [[ ! -d "$BASE_DB" || -z "$(find "$BASE_DB" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+    echo "ERROR: base RPM database snapshot is missing; reboot before installing packages." >&2
     exit 1
 fi
 
@@ -37,11 +46,74 @@ if ! mkdir "$LOCKDIR" 2>/dev/null; then
 fi
 trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT
 
-zypper --non-interactive install --no-recommends -- "$@"
+mkdir -p "$STATE/state" "$ZYPP_CACHE" "$PKG_CACHE"
+touch "$PACKAGES_LIST" "$PKG_CACHE/.keep_packages" "$PKG_CACHE/.no_auto_prune"
+
+etc_signature() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        LC_ALL=C find /etc -xdev -printf '%P\t%y\t%s\t%T@\n' 2>/dev/null | LC_ALL=C sort | sha256sum | awk '{print $1}'
+    else
+        printf 'unavailable\n'
+    fi
+}
+
+refresh_modified_base() {
+    local tmp name base_evr live_evr
+    tmp="$(mktemp)"
+    while IFS=$'\t' read -r name base_evr; do
+        [[ -n "$name" ]] || continue
+        live_evr="$(rpm -q --qf '%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\n' -- "$name" 2>/dev/null || true)"
+        if ! grep -qxF "$base_evr" <<< "$live_evr"; then
+            live_evr="$(tr '\n' ',' <<< "$live_evr" | sed 's/,$//')"
+            printf '%s\t%s\t%s\n' "$name" "$base_evr" "${live_evr:-<missing>}" >> "$tmp"
+        fi
+    done < <(rpm --dbpath "$BASE_DB" -qa --qf '%{NAME}\t%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}\n' | LC_ALL=C sort -u)
+    mv "$tmp" "$MODIFIED_BASE"
+}
+
+critical_override_present() {
+    [[ -s "$MODIFIED_BASE" ]] || return 1
+    awk -F '\t' '$1 ~ /^(filesystem|glibc|rpm|libzypp|zypper|transactional-update|systemd|dracut|snapper|btrfsprogs|grub2|grub2-.*|shim|kernel|kernel-.*|aaa_base)$/ { found=1 } END { exit !found }' "$MODIFIED_BASE"
+}
+
+ZYPPER=(zypper --non-interactive --cache-dir "$ZYPP_CACHE" --pkg-cache-dir "$PKG_CACHE" --userdata microraku)
+ETC_BEFORE="$(etc_signature)"
+
+set +e
+"${ZYPPER[@]}" install --solver-focus Installed --no-force-resolution --no-recommends -- "$@"
+RC=$?
+set -e
+
+if (( RC != 0 )); then
+    touch "$RECREATE"
+    echo "ERROR: zypper returned $RC. A clean overlay rebuild was scheduled for next boot." >&2
+    exit "$RC"
+fi
+
+refresh_modified_base
+if critical_override_present; then
+    touch "$RECREATE"
+    echo "ERROR: this transaction overrode a critical MicroOS base package." >&2
+    echo "       The request was NOT added to desired state; reboot to discard the transaction." >&2
+    echo "       Details: $MODIFIED_BASE" >&2
+    exit 4
+fi
 
 for pkg in "$@"; do
     grep -qxF "$pkg" "$PACKAGES_LIST" 2>/dev/null || echo "$pkg" >> "$PACKAGES_LIST"
 done
-sort -u -o "$PACKAGES_LIST" "$PACKAGES_LIST"
+LC_ALL=C sort -u -o "$PACKAGES_LIST" "$PACKAGES_LIST"
+
+ETC_AFTER="$(etc_signature)"
+if [[ "$ETC_BEFORE" != "unavailable" && "$ETC_AFTER" != "unavailable" && "$ETC_BEFORE" != "$ETC_AFTER" ]]; then
+    printf '%s\tinstall\t%s\n' "$(date -Iseconds)" "$*" >> "$ETC_DRIFT"
+    echo "WARNING: /etc changed during the RPM transaction; see $ETC_DRIFT" >&2
+fi
+
+if [[ -s "$MODIFIED_BASE" ]]; then
+    echo "WARNING: non-critical base packages were overridden in the overlay." >&2
+    echo "         Details: $MODIFIED_BASE" >&2
+fi
 
 echo "microRaku: installed and tracked: $*"
+echo "microRaku: package cache: $PKG_CACHE"
