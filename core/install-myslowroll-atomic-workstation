@@ -5,6 +5,9 @@ umask 022
 readonly PROG="${0##*/}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+ATOMIC_SOURCE=
+LAUNCHER_SOURCE=
+DESKTOP_SOURCE=
 
 die()  { printf '[%s] ERRORE: %s\n' "${PROG}" "$*" >&2; exit 1; }
 warn() { printf '[%s] ATTENZIONE: %s\n' "${PROG}" "$*" >&2; }
@@ -63,16 +66,28 @@ for cmd in awk bootctl cp install mktemp mv snapper systemctl; do
     command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
 done
 
-[[ -f "${REPO_ROOT}/core/myslowroll-atomic-dup" ]] || die 'myslowroll-atomic-dup non trovato.'
-[[ -f "${REPO_ROOT}/core/myslowroll-atomic-launcher" ]] || die 'launcher non trovato.'
-[[ -f "${REPO_ROOT}/desktop/myslowroll-atomic-upgrade.desktop" ]] || die 'file desktop non trovato.'
+if [[ -f "${SCRIPT_DIR}/myslowroll-atomic-dup" \
+   && -f "${SCRIPT_DIR}/myslowroll-atomic-launcher" \
+   && -f "${SCRIPT_DIR}/myslowroll-atomic-upgrade.desktop" ]]; then
+    ATOMIC_SOURCE="${SCRIPT_DIR}/myslowroll-atomic-dup"
+    LAUNCHER_SOURCE="${SCRIPT_DIR}/myslowroll-atomic-launcher"
+    DESKTOP_SOURCE="${SCRIPT_DIR}/myslowroll-atomic-upgrade.desktop"
+elif [[ -f "${REPO_ROOT}/core/myslowroll-atomic-dup" \
+     && -f "${REPO_ROOT}/core/myslowroll-atomic-launcher" \
+     && -f "${REPO_ROOT}/desktop/myslowroll-atomic-upgrade.desktop" ]]; then
+    ATOMIC_SOURCE="${REPO_ROOT}/core/myslowroll-atomic-dup"
+    LAUNCHER_SOURCE="${REPO_ROOT}/core/myslowroll-atomic-launcher"
+    DESKTOP_SOURCE="${REPO_ROOT}/desktop/myslowroll-atomic-upgrade.desktop"
+else
+    die 'sorgenti atomic dup/launcher/desktop non trovati nella cartella piatta o nel repository.'
+fi
 snapper -c root get-config >/dev/null 2>&1 || die "configurazione Snapper 'root' non disponibile."
 
-install -D -o root -g root -m 0755 "${REPO_ROOT}/core/myslowroll-atomic-dup" \
+install -D -o root -g root -m 0755 "${ATOMIC_SOURCE}" \
     /usr/local/sbin/myslowroll-atomic-dup
-install -D -o root -g root -m 0755 "${REPO_ROOT}/core/myslowroll-atomic-launcher" \
+install -D -o root -g root -m 0755 "${LAUNCHER_SOURCE}" \
     /usr/local/sbin/myslowroll-atomic-launcher
-install -D -o root -g root -m 0644 "${REPO_ROOT}/desktop/myslowroll-atomic-upgrade.desktop" \
+install -D -o root -g root -m 0644 "${DESKTOP_SOURCE}" \
     /usr/share/applications/myslowroll-atomic-upgrade.desktop
 
 snapper -c root set-config \
