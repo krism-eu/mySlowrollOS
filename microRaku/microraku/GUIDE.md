@@ -6,14 +6,14 @@ microRaku changes early boot and overlays `/usr`. v0.1 is experimental. Test on 
 
 ## Install
 
-From the `microraku/` payload directory:
+From the payload directory:
 
 ```bash
 sudo ./install.sh
 sudo reboot
 ```
 
-The installer does not write directly into the running read-only `/usr`. It stages files through `transactional-update run`, then rebuilds initrd in the same transactional chain. Persistent state is prepared separately under `/var/lib/microraku`.
+The installer stages its `/usr` files through `transactional-update run`, rebuilds initrd in the same transactional chain and prepares persistent state/cache separately under `/var/lib/microraku`.
 
 ## Verify first boot
 
@@ -26,7 +26,7 @@ systemctl status microraku-sync.service
 
 `findmnt /usr` should report `overlay` as the filesystem type.
 
-Useful boot logs:
+Useful logs:
 
 ```bash
 journalctl -b | grep -i microraku
@@ -35,14 +35,31 @@ journalctl -b -u microraku-sync.service
 
 ## Install a native package
 
-Use a package that is not part of the MicroOS base:
+Start with a simple user-space package not present in the MicroOS base:
 
 ```bash
 sudo microraku-install htop
 microraku-list
 ```
 
-Do not use plain `zypper install` for microRaku-managed packages in v0.1; it would bypass desired-state tracking.
+The wrapper keeps libzypp metadata and repository RPMs in:
+
+```text
+/var/lib/microraku/cache/
+```
+
+Do not use plain `zypper install` for microRaku-managed packages; it bypasses desired-state and safety tracking.
+
+## Inspect safety state
+
+```bash
+cat /var/lib/microraku/state/modified-base.tsv 2>/dev/null || true
+cat /var/lib/microraku/state/etc-drift.log 2>/dev/null || true
+```
+
+`modified-base.tsv` shows lower packages shadowed by different versions in the overlay. Critical package-manager/update/boot/kernel overrides are rejected automatically and schedule a clean rebuild.
+
+`etc-drift.log` means an RPM transaction changed `/etc`. This is a warning requiring inspection, not an automatic rollback.
 
 ## Remove a package
 
@@ -60,17 +77,17 @@ sudo microraku-reset
 sudo reboot
 ```
 
-The command only schedules the reset. The initrd deletes the old layer safely before mounting `/usr`.
+The command only schedules the reset. The initrd deletes the active package layer safely before mounting `/usr`.
 
 ## Disable for one boot
 
-Add one of these kernel arguments temporarily from the bootloader:
+Add one of these kernel arguments temporarily:
 
 ```text
 microraku=0
 ```
 
-or
+or:
 
 ```text
 nomicroraku
@@ -82,15 +99,19 @@ The system should boot the clean MicroOS base without the persistent overlay.
 
 1. Confirm a microRaku package is installed.
 2. Perform the normal MicroOS transactional update.
-3. Reboot into the new snapshot.
+3. **Reboot** into the new snapshot; do not use `transactional-update apply` for this v0.1 test.
 4. Confirm `/usr` is overlaid again.
 5. Confirm `base-id` changed.
-6. Confirm the tracked package was restored (unless the new base itself now provides it).
-7. Inspect `journalctl -b -u microraku-sync.service`.
+6. Confirm the tracked package was restored, unless the new base now provides it.
+7. Inspect `microraku-list`, `modified-base.tsv`, `etc-drift.log` and the sync journal.
 
 ## Rollback test
 
-Rollback MicroOS using its normal supported mechanism, reboot, and repeat the checks above. microRaku treats rollback exactly like any other base change: fresh upper, new lower RPM DB snapshot, desired-state reconciliation.
+Rollback MicroOS using its supported mechanism, reboot, and repeat the checks above. microRaku treats rollback as another base change: fresh upper, new lower RPM DB snapshot and desired-state reconciliation.
+
+## Network/cache test
+
+After one successful installation, confirm RPM files exist below `/var/lib/microraku/cache/packages`. A rebuild will reuse retained metadata/packages when possible. Do not yet treat this as a guaranteed offline restore: repository metadata and dependency compatibility can still invalidate old artifacts.
 
 ## Recovery data
 
@@ -104,4 +125,4 @@ It is removed only after successful reconciliation.
 
 ## Known limitation: package scriptlets
 
-OverlayFS covers `/usr`, not the whole operating system. RPM scriptlets can modify `/etc`, `/var`, users/groups, initrd or boot state. v0.1 does not automatically roll those side effects back. Prefer simple user-space packages during early testing.
+OverlayFS covers `/usr`, not the whole operating system. RPM scriptlets can modify `/etc`, `/var`, users/groups, initrd or boot state. v0.1 detects `/etc` drift but cannot automatically roll back arbitrary side effects. Prefer simple user-space packages during early testing.
