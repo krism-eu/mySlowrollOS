@@ -1,0 +1,43 @@
+#!/bin/bash
+set -euo pipefail
+
+STATE="/var/lib/microraku"
+PACKAGES_LIST="$STATE/packages.list"
+BASE_DB="$STATE/base-rpmdb"
+
+if [[ ${EUID} -ne 0 ]]; then
+    echo "ERROR: run as root" >&2
+    exit 1
+fi
+if (( $# == 0 )); then
+    echo "Usage: microraku-install <package> [package ...]" >&2
+    exit 1
+fi
+if ! findmnt -n -o FSTYPE /usr 2>/dev/null | grep -qx overlay; then
+    echo "ERROR: microRaku overlay is not active; reboot after installation." >&2
+    exit 1
+fi
+
+for pkg in "$@"; do
+    if [[ ! "$pkg" =~ ^[A-Za-z0-9_.+:-]+$ ]]; then
+        echo "ERROR: v0.1 accepts package names only: $pkg" >&2
+        exit 2
+    fi
+    if rpm --dbpath "$BASE_DB" -q -- "$pkg" >/dev/null 2>&1; then
+        echo "ERROR: $pkg belongs to the current MicroOS base." >&2
+        echo "       Manage base packages with transactional-update, not microRaku." >&2
+        exit 3
+    fi
+done
+
+exec 9>/run/microraku.lock
+flock -x 9
+
+zypper --non-interactive install --no-recommends -- "$@"
+
+for pkg in "$@"; do
+    grep -qxF "$pkg" "$PACKAGES_LIST" 2>/dev/null || echo "$pkg" >> "$PACKAGES_LIST"
+done
+sort -u -o "$PACKAGES_LIST" "$PACKAGES_LIST"
+
+echo "microRaku: installed and tracked: $*"
