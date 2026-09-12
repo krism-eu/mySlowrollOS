@@ -62,9 +62,34 @@ set_loader_directive() {
 
 (( EUID == 0 )) || die 'eseguire come root.'
 
-for cmd in awk bootctl cp install mktemp mv snapper systemctl; do
+for cmd in awk bootctl cp getent install mktemp mv runuser snapper systemctl visudo zypper; do
     command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
 done
+
+if ! command -v xauth >/dev/null 2>&1; then
+    zypper --non-interactive install xauth || die 'installazione del pacchetto xauth fallita.'
+fi
+
+TARGET_USER="${SUDO_USER:-kris}"
+[[ "${TARGET_USER}" != root ]] || die 'utente desktop non determinabile: eseguire tramite sudo dall’utente desktop.'
+TARGET_HOME="$(getent passwd "${TARGET_USER}" | awk -F: '{print $6}')"
+[[ -n "${TARGET_HOME}" && -d "${TARGET_HOME}" ]] || die "home dell’utente ${TARGET_USER} non disponibile."
+
+if command -v kwriteconfig6 >/dev/null 2>&1; then
+    runuser -u "${TARGET_USER}" -- kwriteconfig6 \
+        --file kdesurc \
+        --group super-user-command \
+        --key super-user-command \
+        sudo
+else
+    warn 'kwriteconfig6 non disponibile: configurazione kdesu non applicata.'
+fi
+
+KDESU_SUDOERS_TMP="$(mktemp /tmp/myslowroll-kdesu-sudoers.XXXXXX)"
+printf '%s\n' 'Defaults!/usr/libexec/kf6/kdesu_stub !use_pty' > "${KDESU_SUDOERS_TMP}"
+visudo -cf "${KDESU_SUDOERS_TMP}" >/dev/null || die 'regola sudoers kdesu non valida.'
+install -o root -g root -m 0440 "${KDESU_SUDOERS_TMP}" /etc/sudoers.d/kdesu-kf6
+rm -f -- "${KDESU_SUDOERS_TMP}"
 
 if [[ -f "${SCRIPT_DIR}/myslowroll-atomic-dup" \
    && -f "${SCRIPT_DIR}/myslowroll-atomic-launcher" \
@@ -124,4 +149,5 @@ fi
 printf '[%s] Installazione workstation completata.\n' "${PROG}"
 printf '[%s] Retention Snapper: 1 ordinaria + 1 importante; timeline disabilitata.\n' "${PROG}"
 printf '[%s] TTY italiana con font 32 px e systemd-boot console-mode 0.\n' "${PROG}"
+printf '[%s] YaST grafico: xauth presente e kdesu configurato con backend sudo per %s.\n' "${PROG}" "${TARGET_USER}"
 printf '[%s] Le snapshot esistenti non sono state eliminate.\n' "${PROG}"
