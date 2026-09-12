@@ -1,0 +1,14 @@
+[Unit]
+Description=microRaku persistent overlay reconciliation
+Documentation=https://github.com/krism-eu/microRaku
+After=network-online.target local-fs.target
+Wants=network-online.target
+ConditionPathExists=/var/lib/microraku/rebuild-pending
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/microraku/sync.sh
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target
