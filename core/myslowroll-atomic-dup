@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-# mySlowrollOS guarded distribution upgrade v3.4.9-final
+# mySlowrollOS guarded distribution upgrade v3.5.0-final
 #
 # Model:
 #   - openSUSE Slowroll classic read-write root
@@ -1335,6 +1335,7 @@ create_recovery_snapshot() {
 
     snap="$(snapper -c "${SNAPPER_CONFIG}" create \
         --type single --read-only \
+        --cleanup-algorithm number \
         --description "mySlowrollOS pre dup ${STATE_TXID}" \
         --userdata "${userdata}" --print-number)"
 

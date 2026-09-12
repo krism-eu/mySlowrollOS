@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 022
+
+readonly PROG="${0##*/}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+
+die()  { printf '[%s] ERRORE: %s\n' "${PROG}" "$*" >&2; exit 1; }
+warn() { printf '[%s] ATTENZIONE: %s\n' "${PROG}" "$*" >&2; }
+
+set_equals_value() {
+    local file="$1" key="$2" value="$3" dir tmp
+    dir="${file%/*}"
+    install -d -m 0755 "${dir}"
+    [[ ! -e "${file}" || -e "${file}.pre-myslowroll" ]] || cp -a -- "${file}" "${file}.pre-myslowroll"
+    tmp="$(mktemp "${dir}/.${file##*/}.XXXXXX")"
+
+    if [[ -f "${file}" ]]; then
+        awk -F= -v key="${key}" -v value="${value}" '
+            $1 == key {
+                if (!seen++) print key "=" value
+                next
+            }
+            { print }
+            END { if (!seen) print key "=" value }
+        ' "${file}" > "${tmp}"
+    else
+        printf '%s=%s\n' "${key}" "${value}" > "${tmp}"
+    fi
+
+    chmod 0644 "${tmp}"
+    mv -f -- "${tmp}" "${file}"
+}
+
+set_loader_directive() {
+    local file="$1" key="$2" value="$3" dir tmp
+    dir="${file%/*}"
+    install -d -m 0755 "${dir}"
+    [[ ! -e "${file}" || -e "${file}.pre-myslowroll" ]] || cp -a -- "${file}" "${file}.pre-myslowroll"
+    tmp="$(mktemp "${dir}/.${file##*/}.XXXXXX")"
+
+    if [[ -f "${file}" ]]; then
+        awk -v key="${key}" -v value="${value}" '
+            $0 ~ "^[[:space:]]*#?[[:space:]]*" key "[[:space:]]+" {
+                if (!seen++) print key " " value
+                next
+            }
+            { print }
+            END { if (!seen) print key " " value }
+        ' "${file}" > "${tmp}"
+    else
+        printf '%s %s\n' "${key}" "${value}" > "${tmp}"
+    fi
+
+    chmod 0644 "${tmp}"
+    mv -f -- "${tmp}" "${file}"
+}
+
+(( EUID == 0 )) || die 'eseguire come root.'
+
+for cmd in awk bootctl cp install mktemp mv snapper systemctl; do
+    command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
+done
+
+[[ -f "${REPO_ROOT}/core/myslowroll-atomic-dup" ]] || die 'myslowroll-atomic-dup non trovato.'
+[[ -f "${REPO_ROOT}/core/myslowroll-atomic-launcher" ]] || die 'launcher non trovato.'
+[[ -f "${REPO_ROOT}/desktop/myslowroll-atomic-upgrade.desktop" ]] || die 'file desktop non trovato.'
+snapper -c root get-config >/dev/null 2>&1 || die "configurazione Snapper 'root' non disponibile."
+
+install -D -o root -g root -m 0755 "${REPO_ROOT}/core/myslowroll-atomic-dup" \
+    /usr/local/sbin/myslowroll-atomic-dup
+install -D -o root -g root -m 0755 "${REPO_ROOT}/core/myslowroll-atomic-launcher" \
+    /usr/local/sbin/myslowroll-atomic-launcher
+install -D -o root -g root -m 0644 "${REPO_ROOT}/desktop/myslowroll-atomic-upgrade.desktop" \
+    /usr/share/applications/myslowroll-atomic-upgrade.desktop
+
+snapper -c root set-config \
+    NUMBER_CLEANUP=yes \
+    NUMBER_LIMIT=1 \
+    NUMBER_LIMIT_IMPORTANT=1 \
+    TIMELINE_CREATE=no \
+    TIMELINE_CLEANUP=yes \
+    EMPTY_PRE_POST_CLEANUP=yes
+
+systemctl enable --now snapper-cleanup.timer
+
+set_equals_value /etc/locale.conf LANG it_IT.UTF-8
+set_equals_value /etc/vconsole.conf KEYMAP it
+
+if [[ -e /usr/share/kbd/consolefonts/latarcyrheb-sun32.psfu.gz \
+   || -e /usr/share/kbd/consolefonts/latarcyrheb-sun32.psfu ]]; then
+    set_equals_value /etc/vconsole.conf FONT latarcyrheb-sun32.psfu
+else
+    warn 'font latarcyrheb-sun32 non installato: FONT della TTY non modificato.'
+fi
+
+ESP="$(bootctl --print-esp-path 2>/dev/null)" || die 'impossibile determinare il percorso ESP.'
+[[ -n "${ESP}" && -d "${ESP}" ]] || die 'percorso ESP non valido.'
+set_loader_directive "${ESP}/loader/loader.conf" console-mode 0
+
+systemctl restart systemd-vconsole-setup.service || \
+    warn 'impossibile applicare subito la console virtuale; verra applicata al prossimo boot.'
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database /usr/share/applications || true
+fi
+
+printf '[%s] Installazione workstation completata.\n' "${PROG}"
+printf '[%s] Retention Snapper: 1 ordinaria + 1 importante; timeline disabilitata.\n' "${PROG}"
+printf '[%s] TTY italiana con font 32 px e systemd-boot console-mode 0.\n' "${PROG}"
+printf '[%s] Le snapshot esistenti non sono state eliminate.\n' "${PROG}"
