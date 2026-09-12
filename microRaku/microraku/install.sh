@@ -24,11 +24,15 @@ mkdir -p \
     "$STATE_DIR/overlay/upper" \
     "$STATE_DIR/overlay/work" \
     "$STATE_DIR/state" \
-    "$STATE_DIR/base-rpmdb"
+    "$STATE_DIR/base-rpmdb" \
+    "$STATE_DIR/cache/zypp" \
+    "$STATE_DIR/cache/packages"
 touch "$STATE_DIR/packages.list"
-chmod 755 "$STATE_DIR" "$STATE_DIR/state" "$STATE_DIR/base-rpmdb"
+touch "$STATE_DIR/cache/packages/.keep_packages"
+touch "$STATE_DIR/cache/packages/.no_auto_prune"
+chmod 755 "$STATE_DIR" "$STATE_DIR/state" "$STATE_DIR/base-rpmdb" "$STATE_DIR/cache" "$STATE_DIR/cache/zypp" "$STATE_DIR/cache/packages"
 chmod 700 "$STATE_DIR/overlay" "$STATE_DIR/overlay/upper" "$STATE_DIR/overlay/work"
-chmod 644 "$STATE_DIR/packages.list"
+chmod 644 "$STATE_DIR/packages.list" "$STATE_DIR/cache/packages/.keep_packages" "$STATE_DIR/cache/packages/.no_auto_prune"
 
 mkdir -p "$STAGE"
 cp -a "$SCRIPT_DIR/dracut" "$STAGE/"
