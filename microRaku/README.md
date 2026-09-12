@@ -2,18 +2,21 @@
 
 **microRaku** is an experimental persistent `/usr` OverlayFS layer for **openSUSE MicroOS**.
 
-The project borrows the useful idea from RakuOS—keep the immutable base untouched and put native user packages in a persistent upper layer—but adapts it to MicroOS' Btrfs snapshot and `transactional-update` model.
+It borrows the useful idea from RakuOS—keep the immutable base untouched and put native user packages in a persistent upper layer—but adapts it to MicroOS' Btrfs snapshot and `transactional-update` model.
 
-> Status: **v0.1 experimental**. This repository is intended for controlled testing on disposable or recoverable MicroOS systems. It is not production-ready.
+> Status: **v0.1 experimental**. Use only on disposable or recoverable MicroOS systems until the update/rollback test matrix is complete.
 
-## Scope of v0.1
+## What v0.1 does
 
-- openSUSE MicroOS only.
-- `/usr` is the OverlayFS mount point.
-- `/var/lib/microraku` stores persistent state.
-- the lower RPM database is snapshotted before the overlay is mounted.
-- when the MicroOS base changes, the overlay is rebuilt from the desired package list instead of carrying stale files over blindly.
-- reset is deferred to the next boot; the live upper layer is never deleted in place.
+- keeps the MicroOS snapshot as the immutable lower `/usr`;
+- mounts a persistent OverlayFS upper from `/var/lib/microraku/overlay/upper` during initrd `pre-pivot`;
+- snapshots the lower RPM database before mounting the overlay;
+- tracks only explicit user package requests in `packages.list`;
+- rebuilds the upper layer when the MicroOS base snapshot changes or rolls back;
+- keeps zypper metadata and downloaded RPMs in a private persistent cache under `/var/lib/microraku/cache`;
+- records base-package overrides and rejects transactions that replace critical base components;
+- detects and logs `/etc` drift caused by RPM transactions;
+- performs remove/reset as clean rebuilds on the next boot instead of deleting the mounted upper live.
 
 ## Repository layout
 
@@ -44,7 +47,7 @@ microraku/
 
 ## Installation
 
-Read `microraku/GUIDE.md` first. On MicroOS, `install.sh` stages its files under `/var` and uses `transactional-update run` when the running root is read-only.
+Read `microraku/GUIDE.md` first.
 
 ```bash
 cd microraku
@@ -55,15 +58,22 @@ sudo reboot
 After reboot:
 
 ```bash
+findmnt /usr
 sudo microraku-install htop
 microraku-list
 ```
 
 ## Design rule
 
-microRaku does **not** own the MicroOS base. `transactional-update` remains the only mechanism that updates the base snapshot. microRaku owns only its state under `/var/lib/microraku` and the persistent OverlayFS upper layer.
+microRaku does **not** own the MicroOS base. `transactional-update` remains authoritative for the base snapshot. microRaku owns only its persistent state in `/var/lib/microraku` and the OverlayFS upper layer.
 
-See `SPEC.md` and `microraku/ARCHITECTURE.md` for details.
+Do not use `transactional-update apply` as a substitute for reboot while microRaku is active: it can replace the running `/usr` mount view. Stage normal MicroOS updates, then reboot into the new snapshot so the initrd can rebuild the overlay against the correct lower.
+
+## Important limitation
+
+OverlayFS only captures `/usr`. RPM scriptlets may still alter `/etc`, `/var`, users/groups, initrd or boot state. v0.1 detects `/etc` drift but cannot automatically undo arbitrary side effects outside `/usr`.
+
+See `SPEC.md` and `microraku/ARCHITECTURE.md` for the full model.
 
 ## License
 
