@@ -1,0 +1,41 @@
+#!/bin/bash
+set -euo pipefail
+
+STATE="/var/lib/microraku"
+PACKAGES_LIST="$STATE/packages.list"
+RECREATE="$STATE/recreate-pending"
+
+if [[ ${EUID} -ne 0 ]]; then
+    echo "ERROR: run as root" >&2
+    exit 1
+fi
+if (( $# == 0 )); then
+    echo "Usage: microraku-remove <package> [package ...]" >&2
+    exit 1
+fi
+
+exec 9>/run/microraku.lock
+flock -x 9
+
+TMP="$(mktemp)"
+cp "$PACKAGES_LIST" "$TMP"
+CHANGED=0
+for pkg in "$@"; do
+    if grep -qxF "$pkg" "$TMP" 2>/dev/null; then
+        grep -vxF "$pkg" "$TMP" > "$TMP.next" || true
+        mv "$TMP.next" "$TMP"
+        CHANGED=1
+        echo "microRaku: untracked $pkg"
+    else
+        echo "microRaku: $pkg is not tracked; skipping"
+    fi
+done
+sort -u "$TMP" > "$PACKAGES_LIST"
+rm -f "$TMP"
+
+if (( CHANGED == 1 )); then
+    touch "$RECREATE"
+    echo "microRaku: removal will be applied as a clean overlay rebuild on next boot."
+else
+    echo "microRaku: no changes"
+fi
