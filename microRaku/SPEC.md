@@ -14,9 +14,9 @@ microRaku owns only:
 
 - `/var/lib/microraku`;
 - the OverlayFS mount placed on `/usr` at boot;
-- package files written into the OverlayFS upper layer.
+- package files and RPM database copy-ups written into the OverlayFS upper layer.
 
-microRaku does **not** own or directly mutate the active MicroOS lower snapshot.
+microRaku does **not** directly mutate the active MicroOS lower snapshot.
 
 ## Storage layout
 
@@ -24,10 +24,17 @@ microRaku does **not** own or directly mutate the active MicroOS lower snapshot.
 /var/lib/microraku/
 ├── packages.list
 ├── base-rpmdb/
+├── cache/
+│   ├── zypp/
+│   └── packages/
+│       ├── .keep_packages
+│       └── .no_auto_prune
 ├── state/
 │   ├── base-id
 │   ├── last-mount
-│   └── last-sync
+│   ├── last-sync
+│   ├── modified-base.tsv
+│   └── etc-drift.log
 ├── rebuild-pending
 ├── recreate-pending
 ├── reset-pending
@@ -37,57 +44,75 @@ microRaku does **not** own or directly mutate the active MicroOS lower snapshot.
     └── previous-upper/
 ```
 
-`previous-upper` is a single recovery copy retained while a clean rebuild is pending or has failed. It is deleted after successful reconciliation.
+`previous-upper` is a single recovery copy retained while a clean rebuild is pending or has failed. It is deleted only after successful reconciliation.
 
 ## Boot algorithm
 
 1. MicroOS mounts its immutable root and the initrd-visible persistent `/var`.
 2. The microRaku dracut hook runs at `pre-pivot`.
 3. It identifies the active Btrfs root snapshot from the root mount `FSROOT`.
-4. Before overlaying `/usr`, it copies the lower RPM database from `/usr/lib/sysimage/rpm` into `/var/lib/microraku/base-rpmdb` whenever the base snapshot changes.
-5. On a new base or rollback, the old active upper is moved to `previous-upper`, a fresh upper/work pair is created, and reconciliation is marked pending.
-6. OverlayFS is mounted on `/usr` with the immutable `/usr` as lowerdir and `/var/lib/microraku/overlay/upper` as upperdir.
+4. Before overlaying `/usr`, it copies the lower RPM database from `/usr/lib/sysimage/rpm` into `base-rpmdb` whenever the base identity changes.
+5. On a new base or rollback, the old active upper is preserved, a fresh upper/work pair is created, and reconciliation is marked pending.
+6. OverlayFS is mounted on `/usr` with the immutable `/usr` as lowerdir and the persistent upper in `/var`.
 7. systemd starts normally.
-8. If reconciliation is pending, `microraku-sync.service` waits for networking and reconstructs the user layer from `packages.list` using zypper.
+8. If reconciliation is pending, `microraku-sync.service` reconstructs the user layer from `packages.list`.
 
 ## Desired-state model
 
-`packages.list` contains **only explicit package names requested by the user**. Dependencies are deliberately not stored. On reconstruction, zypper resolves dependencies again against the current MicroOS base.
+`packages.list` contains only explicit package names requested by the user. Dependencies are solved again against the current base. A requested package may remain in desired state even if a later MicroOS snapshot starts providing it; in that case microRaku leaves the package to the base. A rollback to a base that no longer provides it makes it eligible for the overlay again.
 
-A package may remain in `packages.list` even when a newer MicroOS snapshot starts shipping it. In that case the package is not installed into the upper layer. If a later rollback removes it from the base, reconciliation installs it again automatically.
+## Package-manager isolation
+
+microRaku reuses the host repository definitions from `/etc/zypp/repos.d`, but it does not reuse the normal libzypp cache. Metadata and downloaded RPMs are redirected to `/var/lib/microraku/cache`.
+
+The package-cache directory contains `.keep_packages` and `.no_auto_prune`, so libzypp retains downloaded repository RPMs. During a rebuild, microRaku first tries to refresh repository metadata; if refresh fails it retries installation with the retained metadata/cache. This is a best-effort offline path, not a complete historical repository snapshot.
 
 ## Install semantics
 
 `microraku-install`:
 
-- accepts package names only in v0.1;
-- refuses a package already provided by the current MicroOS lower RPM database;
-- installs with zypper into the merged `/usr` view;
-- records the explicit package name only after zypper succeeds.
+- accepts package names only;
+- refuses explicit installation of packages already provided by the current lower RPM database;
+- uses zypper with `solver-focus=Installed`, no forced resolution and no recommends;
+- records desired package names only after a successful transaction;
+- compares the merged RPM database against the saved lower RPM database;
+- records overridden base packages in `state/modified-base.tsv`;
+- rejects the transaction if it replaced a critical base component and schedules a clean rebuild for the next boot;
+- fingerprints `/etc` before and after the transaction and logs drift.
+
+Critical-base protection currently covers the package-manager/update/boot core such as glibc, rpm, libzypp, zypper, transactional-update, systemd, dracut, snapper, Btrfs/GRUB/shim/kernel families and `aaa_base`/`filesystem`.
 
 ## Remove semantics
 
-`microraku-remove` does not run `zypper remove` against the live merged filesystem. It removes names from desired state and schedules a clean upper rebuild at the next boot. This avoids producing OverlayFS whiteouts over files provided by the immutable lower layer.
+`microraku-remove` changes desired state and schedules a fresh upper-layer rebuild for the next boot. It intentionally does not call `zypper remove` on the live merged tree, avoiding OverlayFS whiteouts over lower files.
 
 ## Reset semantics
 
-`microraku-reset` only creates a reset marker. The initrd performs the destructive reset before `/usr` is overlaid on the next boot.
+`microraku-reset` only creates a reset marker. The initrd performs the destructive reset before `/usr` is overlaid on the next boot. The package cache is not security-sensitive state and may be retained independently.
 
 ## Failure model
 
-The dracut hook is fail-safe. If prerequisites are missing, the base RPM database cannot be copied, or OverlayFS fails to mount, boot continues with the clean MicroOS base.
+The dracut hook is fail-safe. Missing prerequisites, an unusable lower RPM database, or an OverlayFS mount failure must not make the machine unbootable; boot continues with the clean MicroOS base.
 
-A failed post-boot reconciliation leaves `rebuild-pending` and `previous-upper` intact for diagnosis/retry.
+A failed zypper install/reconciliation schedules a fresh rebuild instead of treating a partially modified upper as authoritative. Desired state and `previous-upper` are retained for diagnosis/retry.
+
+## transactional-update interaction
+
+Normal MicroOS base updates remain owned by `transactional-update`. The expected transition is **stage update → reboot → microRaku detects new lower → rebuild overlay**.
+
+`transactional-update apply` is not part of the supported v0.1 workflow because applying a pending snapshot to the running system can replace the running `/usr` mount view. Reboot is the supported handoff boundary.
 
 ## Important v0.1 limitations
 
 - No support for distributions other than openSUSE MicroOS.
 - No local RPM-file installation.
-- No offline reconstruction/cache guarantee.
-- No package version pinning in desired state.
-- No DKMS/kernel package guarantee.
-- No automatic protection against package scriptlets modifying `/etc`, `/var`, bootloader state, initrd, users/groups, or other paths outside `/usr`.
-- Direct `zypper install/remove` use outside the microRaku wrappers is unsupported because it bypasses desired-state tracking.
+- The persistent cache improves offline recovery but is not a complete offline guarantee or repository snapshot.
+- Desired state is package-name based, not version-pinned.
+- Non-critical base-package overrides are allowed but explicitly reported; this area needs update/rollback testing.
+- No DKMS/kernel-package guarantee.
+- `/etc` drift is detected but not automatically rolled back.
+- No automatic protection against arbitrary package scriptlet changes to `/var`, bootloader state, initrd, users/groups or other paths outside `/usr`.
+- Direct `zypper install/remove` outside the microRaku wrappers is unsupported because it bypasses desired-state and safety tracking.
 - SELinux/AppArmor interactions require dedicated testing.
 
 These limitations are intentional: v0.1 validates the persistent `/usr` overlay and base-reconciliation model before expanding scope.
