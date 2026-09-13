@@ -27,7 +27,7 @@ umask 077
 #     reboot, otherwise changes made later to SOURCE would be absent in TARGET.
 
 readonly PROG="${0##*/}"
-readonly PREVIEW_VERSION='4.0.4-tukit-preview'
+readonly PREVIEW_VERSION='4.0.5-tukit-preview'
 readonly STATE_DIR=/var/lib/myslowroll/atomic-dup-v4-preview
 readonly STATE_FILE="${STATE_DIR}/state"
 readonly HISTORY_FILE="${STATE_DIR}/history.log"
@@ -81,7 +81,18 @@ Comandi sicuri disponibili in questa preview:
   design          mostra il flusso e la recovery previsti
 
 Comandi intenzionalmente bloccati:
-  plan upgrade recover confirm abort
+  plan upgrade recover confirm abort prune
+
+Variabili previste per la versione finale:
+  MYSLOWROLL_TARGET_MAX_AGE_SECONDS  durata massima della finestra TARGET
+                                     (default 3600 secondi).
+  MYSLOWROLL_ESP_MIN_FREE_BYTES      spazio libero minimo sulla ESP
+                                     (default 134217728 byte).
+  MYSLOWROLL_AUTO_AGREE_LICENSES     1 accetta automaticamente le licenze;
+                                     default 0, comportamento fail-closed.
+
+La versione finale includera prune per cache e log v4. Questa preview usa un
+namespace separato dalla v3, ma non elimina automaticamente alcun artefatto.
 
 La v3.4.9 collaudata resta il programma operativo. Questa preview serve per
 revisionare il nuovo motore offline prima del collaudo distruttivo in VM.
@@ -212,9 +223,14 @@ esp_path() {
 }
 
 check_esp_space() {
-    local esp available
+    local esp available options
     esp="$(esp_path)" || return 1
     [[ -n "${esp}" && -d "${esp}" ]] || return 1
+    options="$(findmnt -n -o OPTIONS --target "${esp}" 2>/dev/null || true)"
+    tr ',' '\n' <<<"${options}" | grep -qx rw || {
+        warn "ESP ${esp} non montata read-write."
+        return 1
+    }
     available="$(available_bytes "${esp}")" || return 1
     [[ "${available}" =~ ^[0-9]+$ ]] || return 1
     (( available >= ESP_MIN_FREE_BYTES )) || {
@@ -278,13 +294,15 @@ rpmdb_is_in_root_snapshot() {
 }
 
 check_zypp_lock_hint() {
-    local pid
-    if [[ -r /run/zypp.pid ]]; then
-        read -r pid < /run/zypp.pid || true
+    local pid lock_file
+    for lock_file in /run/zypp.pid /run/zypp-rpm.pid; do
+        [[ -r "${lock_file}" ]] || continue
+        pid=
+        read -r pid < "${lock_file}" || true
         if [[ "${pid:-}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then
-            die "ZYpp risulta gia in uso dal PID ${pid}; chiudere YaST/Zypper."
+            die "ZYpp risulta gia in uso dal PID ${pid} (${lock_file}); chiudere YaST/Zypper e riprovare."
         fi
-    fi
+    done
 }
 
 source_rpmdb_hash() {
@@ -323,7 +341,7 @@ assert_source_unchanged() {
         die 'fingerprint SOURCE all apertura assente o non valido.'
     current="$(source_rpmdb_hash)" || die 'fingerprint RPM SOURCE corrente non calcolabile.'
     [[ "${current}" == "${STATE_SOURCE_OPEN_HASH}" ]] ||
-        die 'RPMDB della SOURCE cambiata dopo tukit open: commit rifiutato.'
+        die 'RPMDB della SOURCE cambiata dopo tukit open: chiudere YaST/Zypper, abortire la TARGET e creare un nuovo piano.'
 }
 
 check_transactional_update_idle() {
@@ -332,6 +350,9 @@ check_transactional_update_idle() {
     fi
     if systemctl is-active --quiet transactional-update.service 2>/dev/null; then
         die 'transactional-update.service e attivo: attendere che termini.'
+    fi
+    if systemctl is-failed --quiet transactional-update.service 2>/dev/null; then
+        die 'transactional-update.service e in stato failed: esaminare systemctl status e journalctl prima di continuare.'
     fi
 }
 
@@ -676,7 +697,7 @@ main() {
         status)  require_root; show_status ;;
         check)   preflight_check ;;
         design)  show_design ;;
-        plan|upgrade|recover|confirm|abort) blocked_mutation ;;
+        plan|upgrade|recover|confirm|abort|prune) blocked_mutation ;;
         -h|--help|help|'') usage ;;
         *) usage >&2; exit 2 ;;
     esac
