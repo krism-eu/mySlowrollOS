@@ -31,6 +31,17 @@ Il progetto avrà inizialmente due soli componenti:
 
 La pipeline ufficiale del DVD Slowroll basata su product-builder non verrà duplicata.
 
+## Atomic updater
+
+Il repository conserva due generazioni dell'updater:
+
+- `myslowroll-atomic-dup-v3.4.9-tested.sh` è la baseline operativa collaudata;
+- `myslowroll-atomic-dup-v4-tukit-preview.sh` è la preview architetturale v4 basata su `tukit`.
+
+La v4 sposta `zypper dup` fuori dalla root live: una TARGET Btrfs offline viene clonata dalla SOURCE, aggiornata e verificata prima di diventare la snapshot predefinita. La preview **non è ancora un updater di produzione**: i comandi mutanti restano intenzionalmente bloccati finché il flusso completo v3.4.9 non viene ribasato e la matrice crash/recovery non viene validata in VM.
+
+Dettagli, vincoli e criteri di promozione: [`RELEASE-v4.0.6-tukit-preview.md`](RELEASE-v4.0.6-tukit-preview.md).
+
 ## Stato
 
 Il materiale proveniente dagli esperimenti precedenti verrà analizzato come insieme di fonti indipendenti. Nessuna vecchia configurazione verrà importata integralmente senza revisione.
