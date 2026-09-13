@@ -1,0 +1,2230 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+# mySlowrollOS guarded distribution upgrade v3.4.9-final
+#
+# Model:
+#   - openSUSE Slowroll classic read-write root
+#   - Btrfs + Snapper
+#   - systemd-boot managed by sdbootutil
+#   - ordinary zypper dup on the active root
+#
+# This does NOT make the in-place RPM transaction mathematically atomic.
+# It is designed to make every ambiguous/failed outcome recoverable from a
+# verified pre-upgrade snapshot, with durable state recorded outside the root
+# snapshot before the first RPM modification.
+
+readonly PROG="${0##*/}"
+readonly STATE_VERSION=4
+readonly MIN_READABLE_STATE_VERSION=3
+readonly STATE_DIR=/var/lib/myslowroll/atomic-dup
+readonly STATE_FILE="${STATE_DIR}/state"
+readonly HISTORY_FILE="${STATE_DIR}/history.log"
+readonly CACHE_ROOT=/var/cache/myslowroll-atomic-dup
+readonly LOG_ROOT=/var/log/myslowroll-atomic-dup
+readonly LOCK_FILE=/run/myslowroll-atomic-dup.lock
+readonly SNAPPER_CONFIG=root
+readonly REQUIRED_OS_ID=opensuse-slowroll
+
+readonly PLAN_MAX_AGE_SECONDS="${MYSLOWROLL_PLAN_MAX_AGE_SECONDS:-86400}"
+readonly CACHE_MIN_MARGIN_BYTES="${MYSLOWROLL_CACHE_MIN_MARGIN_BYTES:-536870912}"
+readonly ROOT_MIN_MARGIN_BYTES="${MYSLOWROLL_ROOT_MIN_MARGIN_BYTES:-1073741824}"
+readonly ESP_MIN_FREE_BYTES="${MYSLOWROLL_ESP_MIN_FREE_BYTES:-134217728}"
+readonly AUTO_AGREE_LICENSES="${MYSLOWROLL_AUTO_AGREE_LICENSES:-0}"
+readonly VERIFY_PAYLOADS="${MYSLOWROLL_VERIFY_PAYLOADS:-0}"
+
+readonly -a CRITICAL_PKGS=(
+    criscore1
+    criscore2
+    btrfsprogs
+    kernel-default
+    rpm
+    sdbootutil
+    sdbootutil-kernel-install
+    sdbootutil-snapper
+    snapper
+    systemd
+    systemd-boot
+    zypper
+)
+
+# State fields. Never "source" STATE_FILE; parse only known keys.
+STATE_STATUS=
+STATE_TXID=
+STATE_SOURCE=
+STATE_PRE=
+STATE_TARGET=
+STATE_BOOT_ID_BEFORE=
+STATE_PLAN_HASH=
+STATE_RPMDB_HASH=
+STATE_ZYPP_HASH=
+STATE_CACHE_HASH=
+STATE_RPMDB_POST_HASH=
+STATE_CREATED=
+STATE_DUP_STARTED=
+STATE_FINISHED=
+STATE_LAST_ERROR=
+
+TX_CACHE_DIR=
+PLAN_TXT=
+PLAN_XML_A=
+PLAN_XML_B=
+PLAN_XML_FINAL=
+DOWNLOAD_LOG=
+TX_PKG_CACHE=
+DUP_LOG=
+SDBOOT_LOG=
+RPMDB_PRE_MANIFEST=
+RPMDB_EXPECTED_MANIFEST=
+RPMDB_POST_MANIFEST=
+RPMDB_ADDED=
+RPMDB_REMOVED=
+PLAN_OPS=
+POSTCHECK_LOG=
+
+declare -a ZYPPER_LICENSE_ARGS=()
+
+log()  { printf '[%s] %s\n' "${PROG}" "$*"; }
+warn() { printf '[%s] ATTENZIONE: %s\n' "${PROG}" "$*" >&2; }
+die()  { printf '[%s] ERRORE: %s\n' "${PROG}" "$*" >&2; exit 1; }
+
+usage() {
+cat <<EOF_USAGE
+Uso: ${PROG} COMMAND
+
+Comandi:
+  status              Stato corrente e ultima transazione registrata.
+  check               Solo preflight, nessuna modifica.
+  plan                Refresh, dry-run, pre-download, ricalcolo e fingerprint.
+  upgrade             Riusa un piano valido, crea PRE, esegue dup e riavvia.
+  confirm             Conferma l'upgrade dopo un reboot riuscito.
+  rollback [SNAPSHOT] Prepara rollback esplicito e riavvia.
+  recover             Gestisce prepared/in-progress/rollback-pending residui.
+  prune [GIORNI]      Elenca artefatti scaduti; non cancella snapshot PRE.
+
+Nessun comando abilita aggiornamenti automatici.
+
+Per default le licenze di terze parti non vengono accettate automaticamente: il
+dup fallisce in modalita fail-closed. L'accettazione automatica richiede l'opt-in
+esplicito indicato sotto, da rivalutare quando si configurano repository terzi.
+
+Variabili opzionali:
+  MYSLOWROLL_PLAN_MAX_AGE_SECONDS  TTL del piano riutilizzabile (default 86400).
+  MYSLOWROLL_AUTO_AGREE_LICENSES   1 accetta licenze terze parti; default 0.
+  MYSLOWROLL_VERIFY_PAYLOADS       1 attiva verifica payload rpm -V non-config; default 0.
+EOF_USAGE
+}
+
+require_root() {
+    (( EUID == 0 )) || die 'eseguire come root.'
+}
+
+acquire_lock() {
+    exec 9>"${LOCK_FILE}"
+    flock -n 9 || die "un'altra istanza di ${PROG} e' gia' in esecuzione."
+}
+
+require_recovery_commands() {
+    local cmd
+    for cmd in awk btrfs cat chmod date df findmnt flock grep install mktemp mv readlink rm rpm sleep snapper \
+               sdbootutil sync systemctl tr; do
+        command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
+    done
+}
+
+require_confirm_commands() {
+    local cmd
+    require_recovery_commands
+    for cmd in rpm sort sha256sum; do
+        command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
+    done
+}
+
+require_update_commands() {
+    local cmd
+    require_recovery_commands
+    for cmd in cmp comm cp df find readlink rpm sed sha256sum sort tee xmllint zypper systemd-inhibit; do
+        command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
+    done
+}
+
+require_prune_commands() {
+    require_recovery_commands
+    local cmd
+    for cmd in find; do
+        command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
+    done
+}
+
+is_uuid() {
+    local value="${1:-}"
+    [[ "${value}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
+}
+
+current_boot_id() {
+    local id
+    id="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
+    is_uuid "${id}" || die 'boot_id corrente non leggibile o non valido.'
+    printf '%s\n' "${id}"
+}
+
+current_boot_id_or_unknown() {
+    local id
+    id="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
+    if is_uuid "${id}"; then printf '%s\n' "${id}"; else printf 'sconosciuto\n'; fi
+}
+
+new_txid() {
+    local id
+    id="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || true)"
+    is_uuid "${id}" || die 'impossibile generare transaction_id valido.'
+    printf '%s\n' "${id}"
+}
+
+os_id() {
+    awk -F= '$1 == "ID" { gsub(/^"|"$/, "", $2); print $2; exit }' \
+        /etc/os-release 2>/dev/null || true
+}
+
+zypp_config_files() {
+    local vendor_root=/usr/etc/zypp system_root=/etc/zypp
+    local path name system_path vendor_path
+
+    # A system main file replaces the vendor main file, even when it is an
+    # empty file or a symlink to /dev/null.
+    if [[ -e "${system_root}/zypp.conf" || -L "${system_root}/zypp.conf" ]]; then
+        printf '%s\n' "${system_root}/zypp.conf"
+    elif [[ -e "${vendor_root}/zypp.conf" || -L "${vendor_root}/zypp.conf" ]]; then
+        printf '%s\n' "${vendor_root}/zypp.conf"
+    fi
+
+    # Merge drop-in names lexicographically. A system drop-in with the same
+    # basename replaces its vendor counterpart, matching libzypp/econf.
+    {
+        for path in "${vendor_root}"/zypp.conf.d/*.conf "${system_root}"/zypp.conf.d/*.conf; do
+            [[ -e "${path}" || -L "${path}" ]] || continue
+            printf '%s\n' "${path##*/}"
+        done
+    } | LC_ALL=C sort -u | while IFS= read -r name; do
+        [[ -n "${name}" ]] || continue
+        system_path="${system_root}/zypp.conf.d/${name}"
+        vendor_path="${vendor_root}/zypp.conf.d/${name}"
+
+        if [[ -e "${system_path}" || -L "${system_path}" ]]; then
+            printf '%s\n' "${system_path}"
+        elif [[ -e "${vendor_path}" || -L "${vendor_path}" ]]; then
+            printf '%s\n' "${vendor_path}"
+        fi
+    done
+}
+
+zypp_value() {
+    local wanted="$1"
+    local -a config_files=()
+
+    mapfile -t config_files < <(zypp_config_files)
+
+    if (( ${#config_files[@]} == 0 )); then
+        case "${wanted}" in
+            solver.onlyRequires|solver.dupAllowVendorChange) printf 'false\n' ;;
+        esac
+        return 0
+    fi
+
+    awk -F= -v wanted="${wanted}" '
+        /^[[:space:]]*#/ { next }
+        NF >= 2 {
+            key=$1
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+            if (key == wanted) {
+                value=$2
+                sub(/[[:space:]]*#.*/, "", value)
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+                found=tolower(value)
+                seen=1
+            }
+        }
+        END {
+            if (seen) {
+                print found
+            } else if (wanted == "solver.onlyRequires" || wanted == "solver.dupAllowVendorChange") {
+                print "false"
+            }
+        }
+    ' "${config_files[@]}" 2>/dev/null || true
+}
+bool_true() {
+    case "${1:-}" in 1|yes|true|on) return 0 ;; *) return 1 ;; esac
+}
+
+bool_false() {
+    case "${1:-}" in 0|no|false|off) return 0 ;; *) return 1 ;; esac
+}
+
+set_tx_paths() {
+    [[ -n "${STATE_TXID}" ]] || return 0
+
+    TX_CACHE_DIR="${CACHE_ROOT}/${STATE_TXID}"
+    PLAN_TXT="${TX_CACHE_DIR}/dup-plan.txt"
+    PLAN_XML_A="${TX_CACHE_DIR}/dup-plan-a.xml"
+    PLAN_XML_B="${TX_CACHE_DIR}/dup-plan-b.xml"
+    PLAN_XML_FINAL="${TX_CACHE_DIR}/dup-plan-final.xml"
+    DOWNLOAD_LOG="${TX_CACHE_DIR}/download.log"
+    TX_PKG_CACHE="${TX_CACHE_DIR}/packages"
+    DUP_LOG="${LOG_ROOT}/${STATE_TXID}.log"
+    SDBOOT_LOG="${LOG_ROOT}/${STATE_TXID}.sdboot.log"
+    RPMDB_PRE_MANIFEST="${TX_CACHE_DIR}/rpmdb-pre.tsv"
+    RPMDB_EXPECTED_MANIFEST="${TX_CACHE_DIR}/rpmdb-expected-post.tsv"
+    RPMDB_POST_MANIFEST="${TX_CACHE_DIR}/rpmdb-post.tsv"
+    RPMDB_ADDED="${TX_CACHE_DIR}/rpmdb-added.tsv"
+    RPMDB_REMOVED="${TX_CACHE_DIR}/rpmdb-removed.tsv"
+    PLAN_OPS="${TX_CACHE_DIR}/plan-operations.tsv"
+    POSTCHECK_LOG="${TX_CACHE_DIR}/post-dup-checks.log"
+}
+
+reset_state_vars() {
+    STATE_STATUS=
+    STATE_TXID=
+    STATE_SOURCE=
+    STATE_PRE=
+    STATE_TARGET=
+    STATE_BOOT_ID_BEFORE=
+    STATE_PLAN_HASH=
+    STATE_RPMDB_HASH=
+    STATE_ZYPP_HASH=
+    STATE_CACHE_HASH=
+    STATE_RPMDB_POST_HASH=
+    STATE_CREATED=
+    STATE_DUP_STARTED=
+    STATE_FINISHED=
+    STATE_LAST_ERROR=
+
+    TX_CACHE_DIR=
+    PLAN_TXT=
+    PLAN_XML_A=
+    PLAN_XML_B=
+    PLAN_XML_FINAL=
+    DOWNLOAD_LOG=
+    TX_PKG_CACHE=
+    DUP_LOG=
+    SDBOOT_LOG=
+    RPMDB_PRE_MANIFEST=
+    RPMDB_EXPECTED_MANIFEST=
+    RPMDB_POST_MANIFEST=
+    RPMDB_ADDED=
+    RPMDB_REMOVED=
+    PLAN_OPS=
+    POSTCHECK_LOG=
+}
+
+load_state() {
+    local key value seen_version=0 file_version=
+
+    reset_state_vars
+    [[ -f "${STATE_FILE}" ]] || return 0
+
+    while IFS='=' read -r key value; do
+        case "${key}" in
+            version)
+                (( seen_version == 0 )) || die 'campo version duplicato nello stato.'
+                seen_version=1
+                file_version="${value}"
+                ;;
+            status)          STATE_STATUS="${value}" ;;
+            txid)            STATE_TXID="${value}" ;;
+            source_snapshot) STATE_SOURCE="${value}" ;;
+            pre_snapshot)    STATE_PRE="${value}" ;;
+            target_snapshot) STATE_TARGET="${value}" ;;
+            boot_id_before)  STATE_BOOT_ID_BEFORE="${value}" ;;
+            plan_hash)       STATE_PLAN_HASH="${value}" ;;
+            rpmdb_hash)      STATE_RPMDB_HASH="${value}" ;;
+            zypp_hash)       STATE_ZYPP_HASH="${value}" ;;
+            cache_hash)      STATE_CACHE_HASH="${value}" ;;
+            rpmdb_post_hash) STATE_RPMDB_POST_HASH="${value}" ;;
+            created_utc)     STATE_CREATED="${value}" ;;
+            dup_started_utc) STATE_DUP_STARTED="${value}" ;;
+            finished_utc)    STATE_FINISHED="${value}" ;;
+            last_error)      STATE_LAST_ERROR="${value}" ;;
+        esac
+    done < "${STATE_FILE}"
+
+    (( seen_version == 1 )) || die 'file di stato privo di versione valida.'
+    [[ "${file_version}" =~ ^[0-9]+$ ]] || die 'versione stato non numerica.'
+    (( file_version >= MIN_READABLE_STATE_VERSION && file_version <= STATE_VERSION )) || \
+        die "versione stato non supportata: ${file_version}"
+
+    [[ -n "${STATE_STATUS}" ]] || die 'file di stato privo di status.'
+    case "${STATE_STATUS}" in
+        planning|planned|prepared|in-progress|pending-reboot|confirmed|rollback-pending|rolled-back|rollback-unverified|aborted) ;;
+        *) die "stato persistente sconosciuto: ${STATE_STATUS}" ;;
+    esac
+
+    [[ -z "${STATE_TXID}" ]] || is_uuid "${STATE_TXID}" || die 'txid non valido nello stato.'
+    [[ -z "${STATE_SOURCE}" || "${STATE_SOURCE}" =~ ^[0-9]+$ ]] || die 'source_snapshot non valido nello stato.'
+    [[ -z "${STATE_PRE}" || "${STATE_PRE}" =~ ^[0-9]+$ ]] || die 'pre_snapshot non valido nello stato.'
+    [[ -z "${STATE_TARGET}" || "${STATE_TARGET}" =~ ^[0-9]+$ ]] || die 'target_snapshot non valido nello stato.'
+    [[ -z "${STATE_BOOT_ID_BEFORE}" ]] || is_uuid "${STATE_BOOT_ID_BEFORE}" || die 'boot_id_before non valido nello stato.'
+    [[ -z "${STATE_PLAN_HASH}" || "${STATE_PLAN_HASH}" =~ ^[0-9a-f]{64}$ ]] || die 'plan_hash non valido nello stato.'
+    [[ -z "${STATE_RPMDB_HASH}" || "${STATE_RPMDB_HASH}" =~ ^[0-9a-f]{64}$ ]] || die 'rpmdb_hash non valido nello stato.'
+    [[ -z "${STATE_ZYPP_HASH}" || "${STATE_ZYPP_HASH}" =~ ^[0-9a-f]{64}$ ]] || die 'zypp_hash non valido nello stato.'
+    [[ -z "${STATE_CACHE_HASH}" || "${STATE_CACHE_HASH}" =~ ^[0-9a-f]{64}$ ]] || die 'cache_hash non valido nello stato.'
+    [[ -z "${STATE_RPMDB_POST_HASH}" || "${STATE_RPMDB_POST_HASH}" =~ ^[0-9a-f]{64}$ ]] || die 'rpmdb_post_hash non valido nello stato.'
+
+    set_tx_paths
+}
+
+persist_state() {
+    local tmp safe_last_error
+
+    install -d -m 0700 "${STATE_DIR}" || return 1
+    tmp="$(mktemp "${STATE_DIR}/.state.XXXXXX")" || return 1
+    chmod 0600 "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+
+    safe_last_error="${STATE_LAST_ERROR//$'\n'/ }"
+    safe_last_error="${safe_last_error//$'\r'/ }"
+    safe_last_error="${safe_last_error//$'\t'/ }"
+
+    {
+        printf 'version=%s\n' "${STATE_VERSION}"
+        printf 'status=%s\n' "${STATE_STATUS}"
+        printf 'txid=%s\n' "${STATE_TXID}"
+        printf 'source_snapshot=%s\n' "${STATE_SOURCE}"
+        printf 'pre_snapshot=%s\n' "${STATE_PRE}"
+        printf 'target_snapshot=%s\n' "${STATE_TARGET}"
+        printf 'boot_id_before=%s\n' "${STATE_BOOT_ID_BEFORE}"
+        printf 'plan_hash=%s\n' "${STATE_PLAN_HASH}"
+        printf 'rpmdb_hash=%s\n' "${STATE_RPMDB_HASH}"
+        printf 'zypp_hash=%s\n' "${STATE_ZYPP_HASH}"
+        printf 'cache_hash=%s\n' "${STATE_CACHE_HASH}"
+        printf 'rpmdb_post_hash=%s\n' "${STATE_RPMDB_POST_HASH}"
+        printf 'created_utc=%s\n' "${STATE_CREATED}"
+        printf 'dup_started_utc=%s\n' "${STATE_DUP_STARTED}"
+        printf 'finished_utc=%s\n' "${STATE_FINISHED}"
+        printf 'last_error=%s\n' "${safe_last_error}"
+    } > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+
+    sync "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+    mv -f -- "${tmp}" "${STATE_FILE}" || { rm -f -- "${tmp}"; return 1; }
+    sync "${STATE_DIR}" || return 1
+    sync -f "${STATE_FILE}" || return 1
+
+    return 0
+}
+
+persist_state_or_die() {
+    persist_state || die 'impossibile rendere persistente lo stato; non procedo oltre.'
+}
+
+mark_aborted() {
+    local reason="$1"
+    STATE_STATUS=aborted
+    STATE_FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    STATE_LAST_ERROR="${reason}"
+    persist_state_or_die
+}
+
+append_history() {
+    local event="$1" detail="${2:-}" stamp
+
+    stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 1
+
+    detail="${detail//$'\n'/ }"
+    detail="${detail//$'\r'/ }"
+    detail="${detail//$'\t'/ }"
+    event="${event//$'\t'/ }"
+
+    install -d -m 0700 "${STATE_DIR}" || return 1
+
+    printf '%s\t%s\t%s\tstatus=%s\tpre=%s\ttarget=%s\t%s\n' \
+        "${stamp}" "${STATE_TXID:-none}" "${event}" "${STATE_STATUS:-none}" \
+        "${STATE_PRE:-none}" "${STATE_TARGET:-none}" "${detail}" >> "${HISTORY_FILE}" || return 1
+
+    chmod 0600 "${HISTORY_FILE}" || return 1
+    sync "${HISTORY_FILE}" || return 1
+    sync "${STATE_DIR}" || return 1
+}
+
+history_or_warn() {
+    append_history "$@" || warn 'impossibile aggiornare history.log; lo state file resta autoritativo.'
+}
+
+abort_planning() {
+    local reason="$1"
+    mark_aborted "${reason}"
+    history_or_warn planning-aborted "${reason}"
+    die "${reason}"
+}
+
+read_exact_or_die() {
+    local prompt_name="$1" var_name="$2" value
+
+    if ! IFS= read -r value; then
+        die "EOF sul prompt ${prompt_name}; operazione annullata."
+    fi
+    printf -v "${var_name}" '%s' "${value}"
+}
+
+validate_policy_numbers() {
+    local name value
+    for name in PLAN_MAX_AGE_SECONDS CACHE_MIN_MARGIN_BYTES ROOT_MIN_MARGIN_BYTES ESP_MIN_FREE_BYTES; do
+        value="${!name}"
+        [[ "${value}" =~ ^[0-9]+$ ]] || die "${name} deve essere un intero non negativo."
+    done
+    (( PLAN_MAX_AGE_SECONDS > 0 )) || die 'PLAN_MAX_AGE_SECONDS deve essere maggiore di zero.'
+}
+
+configure_update_policy() {
+    validate_policy_numbers
+
+    case "${AUTO_AGREE_LICENSES}" in
+        0|no|false|off) ZYPPER_LICENSE_ARGS=() ;;
+        1|yes|true|on)  ZYPPER_LICENSE_ARGS=(--auto-agree-with-licenses) ;;
+        *) die 'MYSLOWROLL_AUTO_AGREE_LICENSES deve essere 0/1, no/yes, false/true oppure off/on.' ;;
+    esac
+
+    case "${VERIFY_PAYLOADS}" in
+        0|no|false|off|1|yes|true|on) ;;
+        *) die 'MYSLOWROLL_VERIFY_PAYLOADS deve essere 0/1, no/yes, false/true oppure off/on.' ;;
+    esac
+}
+
+plan_age_seconds() {
+    local created now
+    created="$(date -u -d "${STATE_CREATED}" +%s 2>/dev/null)" || return 1
+    now="$(date -u +%s)" || return 1
+    (( created <= now )) || return 1
+    printf '%s\n' "$(( now - created ))"
+}
+
+planned_is_fresh() {
+    local age
+    [[ "${STATE_STATUS}" == planned || "${STATE_STATUS}" == prepared ]] || return 1
+    age="$(plan_age_seconds)" || return 1
+    (( age <= PLAN_MAX_AGE_SECONDS ))
+}
+
+find_pre_snapshots_for_txid() {
+    local line number
+    is_uuid "${1:-}" || return 1
+
+    while IFS= read -r line; do
+        [[ "${line}" == *"myslowroll=atomic-pre"* && "${line}" == *"myslowroll_txid=$1"* ]] || continue
+        number="${line%%,*}"
+        number="${number//\"/}"
+        number="${number//[[:space:]]/}"
+        [[ "${number}" =~ ^[0-9]+$ ]] && printf '%s\n' "${number}"
+    done < <(LC_ALL=C snapper --csvout --no-headers -c "${SNAPPER_CONFIG}" \
+             list --disable-used-space --columns number,userdata 2>/dev/null)
+}
+
+find_all_atomic_pre_snapshots() {
+    local line number
+
+    while IFS= read -r line; do
+        [[ "${line}" == *"myslowroll=atomic-pre"* ]] || continue
+        number="${line%%,*}"
+        number="${number//\"/}"
+        number="${number//[[:space:]]/}"
+        [[ "${number}" =~ ^[0-9]+$ ]] && printf '%s\n' "${number}"
+    done < <(LC_ALL=C snapper --csvout --no-headers -c "${SNAPPER_CONFIG}" \
+             list --disable-used-space --columns number,userdata 2>/dev/null)
+}
+
+snapshot_has_atomic_pre_userdata() {
+    local snap="$1" line number
+
+    [[ "${snap}" =~ ^[0-9]+$ ]] || return 1
+
+    while IFS= read -r line; do
+        number="${line%%,*}"
+        number="${number//\"/}"
+        number="${number//[[:space:]]/}"
+
+        [[ "${number}" == "${snap}" ]] || continue
+        [[ "${line}" == *"myslowroll=atomic-pre"* ]] && return 0
+    done < <(LC_ALL=C snapper --csvout --no-headers -c "${SNAPPER_CONFIG}" \
+             list --disable-used-space --columns number,userdata 2>/dev/null)
+
+    return 1
+}
+
+read_snapshot_state() {
+    local line number def active
+    ACTIVE_SNAPSHOT=
+    DEFAULT_SNAPSHOT=
+
+    while IFS= read -r line; do
+        line="${line//\"/}"
+        IFS=',' read -r number def active <<<"${line}"
+        number="${number//[[:space:]]/}"
+        def="${def//[[:space:]]/}"
+        active="${active//[[:space:]]/}"
+
+        [[ "${number}" =~ ^[0-9]+$ ]] || continue
+        [[ "${active}" == yes ]] && ACTIVE_SNAPSHOT="${number}"
+        [[ "${def}" == yes ]] && DEFAULT_SNAPSHOT="${number}"
+    done < <(LC_ALL=C snapper --csvout --no-headers -c "${SNAPPER_CONFIG}" \
+             list --disable-used-space --columns number,default,active)
+
+    [[ -n "${ACTIVE_SNAPSHOT}" && -n "${DEFAULT_SNAPSHOT}" ]]
+}
+
+snapshot_state() {
+    read_snapshot_state || die 'Snapper non identifica in modo univoco snapshot attiva/default.'
+}
+
+snapshot_exists() {
+    [[ "${1:-}" =~ ^[0-9]+$ ]] && [[ -d "/.snapshots/$1/snapshot" ]]
+}
+
+snapshot_ro_value() {
+    LC_ALL=C btrfs property get "/.snapshots/$1/snapshot" ro 2>/dev/null | awk -F= '$1 == "ro" {print $2; exit}'
+}
+
+snapshot_os_id() {
+    awk -F= '$1 == "ID" { gsub(/^"|"$/, "", $2); print $2; exit }' \
+        "/.snapshots/$1/snapshot/usr/lib/os-release" 2>/dev/null || true
+}
+
+verify_snapshot_basics() {
+    local snap="$1"
+    snapshot_exists "${snap}" || return 1
+    [[ "$(snapshot_os_id "${snap}")" == "${REQUIRED_OS_ID}" ]] || return 1
+    return 0
+}
+
+verify_snapshot_core() {
+    local snap="$1" root pkg
+    root="/.snapshots/${snap}/snapshot"
+
+    verify_snapshot_basics "${snap}" || return 1
+
+    for pkg in "${CRITICAL_PKGS[@]}"; do
+        if ! rpm --root "${root}" --quiet -q "${pkg}"; then
+            warn "snapshot ${snap}: pacchetto critico mancante: ${pkg}"
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+root_is_btrfs_rw() {
+    [[ "$(findmnt -n -o FSTYPE --target / 2>/dev/null || true)" == btrfs ]] || return 1
+    findmnt -n -o OPTIONS --target / 2>/dev/null | tr ',' '\n' | grep -qx rw || return 1
+    [[ "$(LC_ALL=C btrfs property get / ro 2>/dev/null || true)" == 'ro=false' ]]
+}
+
+nearest_existing_storage_path() {
+    local probe="$1" resolved
+
+    [[ "${probe}" == /* ]] || return 1
+
+    # If the leaf does not exist yet, its nearest existing ancestor determines
+    # where it will be stored. A dangling symlink is rejected fail-closed.
+    while [[ ! -e "${probe}" && ! -L "${probe}" ]]; do
+        [[ "${probe}" != / ]] || break
+        probe="${probe%/*}"
+        [[ -n "${probe}" ]] || probe=/
+    done
+
+    resolved="$(readlink -f -- "${probe}" 2>/dev/null || true)"
+    [[ -n "${resolved}" && -e "${resolved}" ]] || return 1
+    printf '%s\n' "${resolved}"
+}
+
+path_is_outside_root_snapshot() {
+    local requested="$1" path root_dev path_dev root_fs path_fs root_id path_id
+
+    path="$(nearest_existing_storage_path "${requested}")" || return 1
+
+    root_dev="$(findmnt -n -o MAJ:MIN --target / 2>/dev/null || true)"
+    path_dev="$(findmnt -n -o MAJ:MIN --target "${path}" 2>/dev/null || true)"
+    [[ -n "${root_dev}" && -n "${path_dev}" ]] || return 1
+
+    # A distinct backing filesystem/device cannot be part of the root snapshot.
+    if [[ "${root_dev}" != "${path_dev}" ]]; then
+        return 0
+    fi
+
+    # On the same Btrfs filesystem, the effective path must belong to a
+    # different subvolume: Btrfs snapshots do not recurse into it.
+    root_fs="$(findmnt -n -o FSTYPE --target / 2>/dev/null || true)"
+    path_fs="$(findmnt -n -o FSTYPE --target "${path}" 2>/dev/null || true)"
+    [[ "${root_fs}" == btrfs && "${path_fs}" == btrfs ]] || return 1
+
+    root_id="$(btrfs inspect-internal rootid / 2>/dev/null || true)"
+    path_id="$(btrfs inspect-internal rootid "${path}" 2>/dev/null || true)"
+    [[ "${root_id}" =~ ^[0-9]+$ && "${path_id}" =~ ^[0-9]+$ ]] || return 1
+    [[ "${root_id}" != "${path_id}" ]]
+}
+
+state_is_outside_root_snapshot() {
+    path_is_outside_root_snapshot "${STATE_DIR}" &&
+        path_is_outside_root_snapshot "${CACHE_ROOT}" &&
+        path_is_outside_root_snapshot "${LOG_ROOT}"
+}
+rpmdb_is_in_root_snapshot() {
+    local db_path root_dev db_dev root_id db_id
+
+    db_path="$(rpm --eval '%{_dbpath}' 2>/dev/null || true)"
+    [[ "${db_path}" == /* ]] || return 1
+    db_path="$(readlink -f -- "${db_path}" 2>/dev/null || true)"
+    [[ -n "${db_path}" && -d "${db_path}" ]] || return 1
+
+    root_dev="$(findmnt -n -o MAJ:MIN --target / 2>/dev/null || true)"
+    db_dev="$(findmnt -n -o MAJ:MIN --target "${db_path}" 2>/dev/null || true)"
+    [[ -n "${root_dev}" && "${root_dev}" == "${db_dev}" ]] || return 1
+
+    root_id="$(btrfs inspect-internal rootid / 2>/dev/null || true)"
+    db_id="$(btrfs inspect-internal rootid "${db_path}" 2>/dev/null || true)"
+    [[ "${root_id}" =~ ^[0-9]+$ && "${db_id}" =~ ^[0-9]+$ ]] || return 1
+    [[ "${root_id}" == "${db_id}" ]]
+}
+
+systemd_boot_detected() {
+    local out
+    out="$(LC_ALL=C sdbootutil bootloader 2>/dev/null || true)"
+    grep -qi 'systemd-boot' <<<"${out}"
+}
+
+verify_systemd_boot() {
+    systemd_boot_detected || die 'systemd-boot non rilevato da sdbootutil.'
+}
+
+check_zypp_lock_hint() {
+    local pid
+    if [[ -r /run/zypp.pid ]]; then
+        read -r pid < /run/zypp.pid || true
+        if [[ "${pid:-}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then
+            die "ZYpp risulta gia' in uso dal PID ${pid}. Chiudere YaST/Zypper e riprovare."
+        fi
+    fi
+}
+
+write_rpmdb_manifest() {
+    local out="$1" tmp
+    tmp="${out}.tmp"
+
+    rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}|%{ARCH}\n' \
+        | LC_ALL=C sort -u > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+
+    mv -f -- "${tmp}" "${out}"
+}
+
+manifest_hash() {
+    [[ -f "$1" ]] || return 1
+    sha256sum "$1" | awk '{print $1}'
+}
+
+rpmdb_hash() {
+    rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}|%{ARCH}\n' \
+        | LC_ALL=C sort -u \
+        | sha256sum \
+        | awk '{print $1}'
+}
+
+zypp_semantic_hash() {
+    {
+        printf 'solver.onlyRequires=%s\n' "$(zypp_value solver.onlyRequires)"
+        printf 'solver.dupAllowVendorChange=%s\n' "$(zypp_value solver.dupAllowVendorChange)"
+        LC_ALL=C zypper --non-interactive lr -u -p 2>/dev/null
+    } | sed -E 's/[[:space:]]+$//' | sha256sum | awk '{print $1}'
+}
+
+pkg_cache_hash() {
+    local f
+    [[ -d "${TX_PKG_CACHE}" ]] || return 1
+
+    {
+        while IFS= read -r -d '' f; do
+            sha256sum "${f}" || return 1
+        done < <(find "${TX_PKG_CACHE}" -type f -name '*.rpm' -print0 | LC_ALL=C sort -z)
+    } | sha256sum | awk '{print $1}'
+}
+
+ensure_snapshot_bootable() {
+    local snap="$1" out
+
+    # Current sdbootutil accepts a Snapper snapshot number for both commands.
+    if out="$(LC_ALL=C sdbootutil is-bootable "${snap}" 2>&1)"; then
+        return 0
+    fi
+
+    warn "snapshot ${snap}: nessuna entry kernel registrata; tento add-all-kernels prima di procedere."
+
+    install -d -m 0700 "${LOG_ROOT}" 2>/dev/null || true
+    if [[ -n "${SDBOOT_LOG}" ]]; then
+        printf '[is-bootable %s]\n%s\n' "${snap}" "${out}" >> "${SDBOOT_LOG}" 2>/dev/null || true
+    fi
+
+    if ! check_esp_space; then
+        [[ -n "${SDBOOT_LOG}" ]] && printf '[esp-space FAILED before add-all-kernels %s]\n' "${snap}" >> "${SDBOOT_LOG}" 2>/dev/null || true
+        warn "spazio ESP/boot insufficiente per rendere bootable la snapshot ${snap}."
+        return 1
+    fi
+
+    if ! out="$(LC_ALL=C sdbootutil add-all-kernels "${snap}" 2>&1)"; then
+        [[ -n "${SDBOOT_LOG}" ]] && printf '[add-all-kernels %s FAILED]\n%s\n' "${snap}" "${out}" >> "${SDBOOT_LOG}" 2>/dev/null || true
+        warn "sdbootutil add-all-kernels ${snap}: ${out//$'\n'/; }"
+        return 1
+    fi
+
+    [[ -n "${SDBOOT_LOG}" ]] && printf '[add-all-kernels %s OK]\n%s\n' "${snap}" "${out}" >> "${SDBOOT_LOG}" 2>/dev/null || true
+    sync
+
+    if ! out="$(LC_ALL=C sdbootutil is-bootable "${snap}" 2>&1)"; then
+        [[ -n "${SDBOOT_LOG}" ]] && printf '[is-bootable %s FAILED AFTER ADD]\n%s\n' "${snap}" "${out}" >> "${SDBOOT_LOG}" 2>/dev/null || true
+        warn "sdbootutil is-bootable ${snap}: ${out//$'\n'/; }"
+        return 1
+    fi
+
+    [[ -n "${SDBOOT_LOG}" ]] && sync "${SDBOOT_LOG}" 2>/dev/null || true
+    return 0
+}
+
+snapshot_is_bootable_report() {
+    local snap="$1" context="$2" out
+
+    if out="$(LC_ALL=C sdbootutil is-bootable "${snap}" 2>&1)"; then
+        return 0
+    fi
+
+    warn "${context}: sdbootutil is-bootable ${snap}: ${out//$'\n'/; }"
+
+    if [[ -n "${SDBOOT_LOG}" ]]; then
+        install -d -m 0700 "${LOG_ROOT}" 2>/dev/null || true
+        printf '[%s: is-bootable %s FAILED]\n%s\n' "${context}" "${snap}" "${out}" >> "${SDBOOT_LOG}" 2>/dev/null || true
+        sync "${SDBOOT_LOG}" 2>/dev/null || true
+    fi
+
+    return 1
+}
+
+install_summary_count() {
+    LC_ALL=C xmllint --xpath 'count(//*[local-name()="install-summary"])' "$1" 2>/dev/null
+}
+
+plan_hash() {
+    local plan="$1" count tmp hash
+
+    count="$(install_summary_count "${plan}")" || return 1
+    [[ "${count}" == 1 || "${count}" == '1.0' ]] || return 1
+    [[ -d "${TX_CACHE_DIR}" ]] || return 1
+
+    tmp="$(mktemp "${TX_CACHE_DIR}/.plan-hash.XXXXXX")" || return 1
+
+    {
+        printf '<myslowroll-plan>'
+        LC_ALL=C xmllint --xpath '//*[local-name()="install-summary"]' "${plan}" 2>/dev/null || {
+            rm -f -- "${tmp}"
+            return 1
+        }
+        printf '</myslowroll-plan>\n'
+    } > "${tmp}"
+
+    # download-size is cache-state dependent: after download-only Zypper reports
+    # zero although the solver result is unchanged. It remains authoritative for
+    # the initial space check, but must not enter the semantic plan fingerprint.
+    LC_ALL=C sed -E -i 's/[[:space:]]+download-size="[0-9]+"//' "${tmp}" || {
+        rm -f -- "${tmp}"
+        return 1
+    }
+
+    hash="$(LC_ALL=C xmllint --c14n "${tmp}" 2>/dev/null | sha256sum | awk '{print $1}')"
+    rm -f -- "${tmp}"
+
+    [[ "${hash}" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "${hash}"
+}
+
+extract_plan_operations() {
+    local plan="$1" out="$2"
+
+    LC_ALL=C awk '
+        function attr(s, key,    token) {
+            token=key "=\"[^\"]*\""
+            if (match(s, token)) {
+                token=substr(s, RSTART+length(key)+2, RLENGTH-length(key)-3)
+                return token
+            }
+            return ""
+        }
+
+        /<to-(install|remove|upgrade|downgrade|upgrade-change-arch|downgrade-change-arch|reinstall|change-arch)>/ {
+            line=$0
+            sub(/^.*<to-/, "", line)
+            sub(/>.*/, "", line)
+            op=line
+            next
+        }
+
+        /<\/to-(install|remove|upgrade|downgrade|upgrade-change-arch|downgrade-change-arch|reinstall|change-arch)>/ { op=""; next }
+
+        op != "" && /<solvable[[:space:]]/ {
+            kind=attr($0,"type")
+            if (kind == "") kind=attr($0,"kind")
+            if (kind != "package") next
+
+            name=attr($0,"name"); edition=attr($0,"edition"); arch=attr($0,"arch")
+            oldedition=attr($0,"edition-old"); oldarch=attr($0,"arch-old")
+
+            if (name == "" || edition == "" || arch == "") exit 42
+            print op "\t" name "\t" edition "\t" arch "\t" oldedition "\t" oldarch
+        }
+    ' "${plan}" > "${out}"
+}
+
+build_expected_manifest() {
+    local pre="$1" ops="$2" out="$3" work next
+    local op name edition arch oldedition oldarch oldline newline
+
+    work="${out}.work"
+    next="${out}.next"
+
+    cp -- "${pre}" "${work}" || return 1
+
+    while IFS=$'\t' read -r op name edition arch oldedition oldarch; do
+        [[ -n "${op}" ]] || continue
+
+        newline="${name}|${edition}|${arch}"
+
+        case "${op}" in
+            install)
+                printf '%s\n' "${newline}" >> "${work}" || return 1
+                ;;
+            remove)
+                oldline="${newline}"
+                ;;
+            upgrade|downgrade|upgrade-change-arch|downgrade-change-arch|reinstall|change-arch)
+                [[ -n "${oldedition}" ]] || oldedition="${edition}"
+                [[ -n "${oldarch}" ]] || oldarch="${arch}"
+                oldline="${name}|${oldedition}|${oldarch}"
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+
+        if [[ "${op}" != install ]]; then
+            grep -Fxq -- "${oldline}" "${work}" || return 1
+            awk -v target="${oldline}" '$0 != target' "${work}" > "${next}" || return 1
+            mv -f -- "${next}" "${work}" || return 1
+            [[ "${op}" == remove ]] || printf '%s\n' "${newline}" >> "${work}" || return 1
+        fi
+    done < "${ops}"
+
+    LC_ALL=C sort -u "${work}" > "${out}" || return 1
+    rm -f -- "${work}" "${next}"
+}
+
+xml_summary_attribute() {
+    local plan="$1" attr="$2"
+    LC_ALL=C xmllint --xpath "string(//*[local-name()='install-summary']/@${attr})" "${plan}" 2>/dev/null
+}
+
+available_bytes() {
+    LC_ALL=C df -B1 --output=avail "$1" 2>/dev/null | awk 'NR == 2 {print $1}'
+}
+
+check_plan_space() {
+    local plan="$1" download installed cache_avail root_avail cache_need root_need
+
+    download="$(xml_summary_attribute "${plan}" download-size)" || return 1
+    installed="$(xml_summary_attribute "${plan}" space-usage-installed)" || return 1
+    [[ "${download}" =~ ^[0-9]+$ && "${installed}" =~ ^[0-9]+$ ]] || return 1
+
+    cache_avail="$(available_bytes "${TX_PKG_CACHE}")" || return 1
+    root_avail="$(available_bytes /)" || return 1
+    [[ "${cache_avail}" =~ ^[0-9]+$ && "${root_avail}" =~ ^[0-9]+$ ]] || return 1
+
+    cache_need=$(( download + CACHE_MIN_MARGIN_BYTES ))
+    root_need=$(( installed + ROOT_MIN_MARGIN_BYTES ))
+
+    (( cache_avail >= cache_need )) || {
+        warn "spazio cache insufficiente: disponibile=${cache_avail} richiesto~=${cache_need} byte"
+        return 1
+    }
+
+    (( root_avail >= root_need )) || {
+        warn "spazio root/Btrfs insufficiente: disponibile=${root_avail} richiesto~=${root_need} byte"
+        return 1
+    }
+}
+
+check_esp_space() {
+    local esp= avail mounted
+
+    for esp in /efi /boot/efi /boot; do
+        [[ -d "${esp}" ]] || continue
+
+        mounted="$(findmnt -n -o TARGET --target "${esp}" 2>/dev/null || true)"
+        [[ "${mounted}" == "${esp}" ]] || continue
+
+        avail="$(available_bytes "${esp}")" || continue
+        [[ "${avail}" =~ ^[0-9]+$ ]] || continue
+
+        (( avail >= ESP_MIN_FREE_BYTES )) || {
+            warn "spazio ESP/boot insufficiente su ${esp}: disponibile=${avail}, minimo=${ESP_MIN_FREE_BYTES} byte"
+            return 1
+        }
+
+        return 0
+    done
+
+    warn 'filesystem ESP/boot non determinabile per il controllo spazio.'
+    return 1
+}
+
+validate_plan_operation_count() {
+    local plan="$1" ops="$2" expected actual
+
+    expected="$(xml_summary_attribute "${plan}" packages-to-change)" || return 1
+    actual="$(awk 'END {print NR+0}' "${ops}")" || return 1
+
+    [[ "${expected}" =~ ^[0-9]+$ && "${actual}" =~ ^[0-9]+$ && "${expected}" == "${actual}" ]]
+}
+
+scan_plan_for_critical_removals() {
+    local plan="$1" pkg xpath count summary_count
+
+    summary_count="$(install_summary_count "${plan}")"
+    [[ "${summary_count}" == 1 || "${summary_count}" == '1.0' ]] || {
+        warn 'XML Zypper non riconosciuto: install-summary assente o ambiguo.'
+        return 1
+    }
+
+    for pkg in "${CRITICAL_PKGS[@]}"; do
+        xpath="count(//*[local-name()='install-summary']/*[local-name()='to-remove']//*[local-name()='solvable'][@name='${pkg}'])"
+        count="$(LC_ALL=C xmllint --xpath "${xpath}" "${plan}" 2>/dev/null)" || {
+            warn 'xmllint non riesce a validare il piano Zypper.'
+            return 1
+        }
+
+        case "${count}" in
+            0|0.0) ;;
+            *) warn "il piano rimuoverebbe il pacchetto critico: ${pkg}"; return 1 ;;
+        esac
+    done
+}
+
+generate_xml_plan() {
+    local out="$1"
+
+    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C \
+    zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive --xmlout dup \
+        ${ZYPPER_LICENSE_ARGS[@]+"${ZYPPER_LICENSE_ARGS[@]}"} \
+        --dry-run --no-recommends --no-allow-vendor-change --details > "${out}"
+}
+
+check_state_allows_new_transaction() {
+    local orphan_pre=
+
+    load_state
+
+    case "${STATE_STATUS}" in
+        '')
+            orphan_pre="$(find_all_atomic_pre_snapshots | tr '\n' ' ')" || true
+            [[ -z "${orphan_pre}" ]] || \
+                die "state assente ma esistono PRE marcate: ${orphan_pre}; usare '${PROG} recover' e verificare manualmente."
+            return 0
+            ;;
+        planned|confirmed|rolled-back|aborted)
+            return 0
+            ;;
+        planning)
+            die "transazione ${STATE_TXID:-?} rimasta planning; usare '${PROG} recover'."
+            ;;
+        prepared)
+            die "transazione ${STATE_TXID:-?} rimasta prepared; usare '${PROG} recover'."
+            ;;
+        in-progress)
+            die "transazione ${STATE_TXID:-?} rimasta in-progress; usare '${PROG} recover'."
+            ;;
+        pending-reboot)
+            die "upgrade ${STATE_TXID:-?} concluso ma non confermato; riavviare/confirm prima di continuare."
+            ;;
+        rollback-pending)
+            die "rollback ${STATE_TXID:-?} pendente; completarlo con reboot/recover prima di continuare."
+            ;;
+        rollback-unverified)
+            die "rollback ${STATE_TXID:-?} non verificabile automaticamente; richiede recovery manuale."
+            ;;
+    esac
+}
+
+preflight_recovery() {
+    require_root
+    acquire_lock
+    require_recovery_commands
+
+    root_is_btrfs_rw || die 'la root deve essere Btrfs read-write.'
+    [[ -d /.snapshots ]] || die 'manca /.snapshots: Snapper root non e configurato.'
+    snapper -c "${SNAPPER_CONFIG}" get-config >/dev/null 2>&1 || die "config Snapper '${SNAPPER_CONFIG}' non disponibile."
+    state_is_outside_root_snapshot || \
+        die 'state/cache/log non sono tutti dimostrabilmente fuori dalla snapshot della root; persistenza non affidabile.'
+    verify_systemd_boot
+}
+
+preflight_common() {
+    preflight_recovery
+    require_update_commands
+
+    [[ "$(os_id)" == "${REQUIRED_OS_ID}" ]] || die 'questo tool e limitato a openSUSE Slowroll.'
+    rpmdb_is_in_root_snapshot || die 'RPM database non e dimostrabilmente incluso nella snapshot root; rollback pacchetti non affidabile.'
+
+    [[ ! -e /run/criscore.allow-removal ]] || die 'token /run/criscore.allow-removal presente: rimuoverlo prima di aggiornare.'
+
+    local pkg only_requires dup_vendor
+
+    for pkg in criscore1 criscore2; do
+        rpm --quiet -q "${pkg}" || die "pacchetto richiesto non installato: ${pkg}"
+    done
+
+    only_requires="$(zypp_value solver.onlyRequires)"
+    dup_vendor="$(zypp_value solver.dupAllowVendorChange)"
+
+    bool_true "${only_requires}" || die 'solver.onlyRequires deve essere esplicitamente true.'
+    bool_false "${dup_vendor}" || die 'solver.dupAllowVendorChange deve essere esplicitamente false.'
+
+    if systemctl is-enabled --quiet transactional-update.timer 2>/dev/null; then
+        die 'transactional-update.timer deve essere disabilitato per questa workstation RW.'
+    fi
+
+    check_zypp_lock_hint
+}
+
+preflight_new_transaction() {
+    preflight_common
+    configure_update_policy
+    check_state_allows_new_transaction
+
+    snapshot_state
+    [[ "${ACTIVE_SNAPSHOT}" == "${DEFAULT_SNAPSHOT}" ]] || \
+        die "snapshot attiva (${ACTIVE_SNAPSHOT}) diversa dalla default (${DEFAULT_SNAPSHOT}); risolvere prima di un nuovo upgrade."
+
+    check_esp_space || die 'preflight spazio ESP/boot fallito.'
+
+    snapshot_is_bootable_report "${ACTIVE_SNAPSHOT}" preflight || \
+        die "snapshot attiva ${ACTIVE_SNAPSHOT} non risulta bootable per sdbootutil."
+}
+
+make_plan_after_preflight() {
+    local hash_a hash_b rpm_a rpm_b zypp_a zypp_b cache_b initial_source
+    local -a dl_pipe
+
+    initial_source="${ACTIVE_SNAPSHOT}"
+
+    if [[ "${STATE_STATUS}" == planned ]]; then
+        history_or_warn planned-superseded 'nuovo comando plan richiesto'
+        mark_aborted 'piano sostituito da nuovo plan'
+    fi
+
+    STATE_TXID="$(new_txid)"
+    STATE_CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    set_tx_paths
+
+    install -d -m 0700 "${STATE_DIR}" "${TX_CACHE_DIR}" "${TX_PKG_CACHE}" "${LOG_ROOT}" || \
+        die 'impossibile creare le directory della nuova transazione.'
+
+    STATE_STATUS=planning
+    STATE_SOURCE="${initial_source}"
+    STATE_PRE=
+    STATE_TARGET=
+    STATE_BOOT_ID_BEFORE=
+    STATE_PLAN_HASH=
+    STATE_RPMDB_HASH=
+    STATE_ZYPP_HASH=
+    STATE_CACHE_HASH=
+    STATE_RPMDB_POST_HASH=
+    STATE_DUP_STARTED=
+    STATE_FINISHED=
+    STATE_LAST_ERROR=
+
+    persist_state_or_die
+    history_or_warn planning-started 'nessuna modifica RPM consentita in questo stato'
+
+    log "Transazione: ${STATE_TXID}"
+
+    log 'Refresh repository...'
+    zypper --non-interactive refresh || abort_planning 'refresh repository fallito durante planning.'
+
+    write_rpmdb_manifest "${RPMDB_PRE_MANIFEST}" || abort_planning 'impossibile salvare il manifest RPM pre-dup.'
+    rpm_a="$(manifest_hash "${RPMDB_PRE_MANIFEST}")" || abort_planning 'impossibile calcolare hash manifest RPM pre-dup.'
+    zypp_a="$(zypp_semantic_hash)" || abort_planning 'impossibile calcolare fingerprint ZYpp iniziale.'
+
+    log 'Piano XML A prima del download...'
+    generate_xml_plan "${PLAN_XML_A}" || abort_planning 'generazione piano XML A fallita.'
+    scan_plan_for_critical_removals "${PLAN_XML_A}" || abort_planning 'validazione rimozioni critiche del piano A fallita.'
+    hash_a="$(plan_hash "${PLAN_XML_A}")" || abort_planning 'impossibile calcolare fingerprint del piano A.'
+    check_plan_space "${PLAN_XML_A}" || abort_planning 'spazio insufficiente o non determinabile per il piano.'
+
+    log 'Pre-download reale degli RPM in cache dedicata alla transazione...'
+    set +e
+    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C \
+    zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup \
+        ${ZYPPER_LICENSE_ARGS[@]+"${ZYPPER_LICENSE_ARGS[@]}"} \
+        --download-only --no-recommends --no-allow-vendor-change \
+        2>&1 | tee "${DOWNLOAD_LOG}"
+    dl_pipe=("${PIPESTATUS[@]}")
+    set -e
+
+    (( dl_pipe[0] == 0 )) || abort_planning "pre-download fallito (zypper rc=${dl_pipe[0]})."
+    (( dl_pipe[1] == 0 )) || warn 'tee del log download ha restituito errore; Zypper ha comunque completato il download.'
+
+    # The package payload must be durable before we accept the plan as prepared.
+    sync "${DOWNLOAD_LOG}" || abort_planning 'impossibile sincronizzare il log del pre-download.'
+    sync -f "${TX_PKG_CACHE}" || abort_planning 'impossibile sincronizzare la cache RPM del pre-download.'
+
+    rpm_b="$(rpmdb_hash)" || abort_planning 'impossibile rileggere rpmdb dopo il pre-download.'
+    zypp_b="$(zypp_semantic_hash)" || abort_planning 'impossibile rileggere fingerprint ZYpp dopo il pre-download.'
+
+    [[ "${rpm_a}" == "${rpm_b}" ]] || abort_planning 'rpmdb modificato durante la fase download-only.'
+    [[ "${zypp_a}" == "${zypp_b}" ]] || abort_planning 'configurazione/repository ZYpp cambiati durante il pre-download.'
+
+    cache_b="$(pkg_cache_hash)" || abort_planning 'impossibile calcolare fingerprint della cache RPM.'
+
+    log 'Piano XML B dopo il download, usando la stessa cache...'
+    generate_xml_plan "${PLAN_XML_B}" || abort_planning 'generazione piano XML B fallita.'
+    scan_plan_for_critical_removals "${PLAN_XML_B}" || abort_planning 'validazione rimozioni critiche del piano B fallita.'
+    hash_b="$(plan_hash "${PLAN_XML_B}")" || abort_planning 'impossibile calcolare fingerprint del piano B.'
+
+    [[ "${hash_a}" == "${hash_b}" ]] || abort_planning 'il piano e cambiato tra validazione e pre-download; nessun upgrade verra eseguito.'
+
+    extract_plan_operations "${PLAN_XML_B}" "${PLAN_OPS}" || abort_planning 'impossibile estrarre le operazioni attese dal piano XML.'
+    validate_plan_operation_count "${PLAN_XML_B}" "${PLAN_OPS}" || abort_planning 'numero di operazioni RPM estratte diverso dal summary Zypper.'
+    build_expected_manifest "${RPMDB_PRE_MANIFEST}" "${PLAN_OPS}" "${RPMDB_EXPECTED_MANIFEST}" || \
+        abort_planning 'impossibile costruire il manifest RPM atteso.'
+
+    sync "${RPMDB_PRE_MANIFEST}" "${RPMDB_EXPECTED_MANIFEST}" "${PLAN_OPS}" || \
+        abort_planning 'impossibile rendere durevoli manifest e operazioni attese.'
+
+    if [[ ! -s "${PLAN_OPS}" ]]; then
+        STATE_STATUS=confirmed
+        STATE_SOURCE="${initial_source}"
+        STATE_PLAN_HASH="${hash_b}"
+        STATE_RPMDB_HASH="${rpm_b}"
+        STATE_ZYPP_HASH="${zypp_b}"
+        STATE_CACHE_HASH="${cache_b}"
+        STATE_RPMDB_POST_HASH="${rpm_b}"
+        STATE_FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        STATE_LAST_ERROR=
+
+        persist_state_or_die
+        history_or_warn plan-noop "source=${STATE_SOURCE} rpmdb_hash=${STATE_RPMDB_HASH}"
+        log 'Nessun aggiornamento disponibile: transazione chiusa senza PRE, modifiche RPM o reboot.'
+        return 0
+    fi
+
+    log 'Dry-run leggibile finale con payload gia presente in cache...'
+    set +e
+    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C \
+    zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup \
+        ${ZYPPER_LICENSE_ARGS[@]+"${ZYPPER_LICENSE_ARGS[@]}"} \
+        --dry-run --no-recommends --no-allow-vendor-change --details | tee "${PLAN_TXT}"
+    dl_pipe=("${PIPESTATUS[@]}")
+    set -e
+
+    (( dl_pipe[0] == 0 )) || abort_planning "dry-run finale fallito (zypper rc=${dl_pipe[0]})."
+    (( dl_pipe[1] == 0 )) || warn 'tee del piano leggibile ha restituito errore; il piano XML resta autoritativo.'
+
+    if ! read_snapshot_state; then
+        abort_planning 'Snapper non identifica snapshot attiva/default alla conclusione del piano.'
+    fi
+
+    if [[ "${ACTIVE_SNAPSHOT}" != "${initial_source}" || "${DEFAULT_SNAPSHOT}" != "${initial_source}" ]]; then
+        abort_planning 'snapshot attiva/default cambiata durante planning'
+    fi
+
+    STATE_STATUS=planned
+    STATE_SOURCE="${initial_source}"
+    STATE_PLAN_HASH="${hash_b}"
+    STATE_RPMDB_HASH="${rpm_b}"
+    STATE_ZYPP_HASH="${zypp_b}"
+    STATE_CACHE_HASH="${cache_b}"
+    STATE_LAST_ERROR=
+
+    persist_state_or_die
+    history_or_warn planned "plan_hash=${STATE_PLAN_HASH} cache_hash=${STATE_CACHE_HASH}"
+
+    log "Piano stabile: ${STATE_PLAN_HASH}"
+    log "Cache RPM stabile: ${STATE_CACHE_HASH}"
+    log 'RPM pre-scaricati; nessun pacchetto installato.'
+}
+
+make_plan() {
+    preflight_new_transaction
+    make_plan_after_preflight
+}
+
+revalidate_plan_and_system() {
+    local current_rpm current_zypp current_plan current_cache final_ops
+
+    [[ "${STATE_STATUS}" == planned || "${STATE_STATUS}" == prepared ]] || {
+        warn "rivalidazione richiesta in stato ${STATE_STATUS:-vuoto}; atteso planned/prepared."
+        return 1
+    }
+
+    [[ -n "${STATE_RPMDB_HASH}" && -n "${STATE_ZYPP_HASH}" && -n "${STATE_CACHE_HASH}" && -n "${STATE_PLAN_HASH}" ]] || return 1
+    [[ -f "${RPMDB_PRE_MANIFEST}" && -f "${RPMDB_EXPECTED_MANIFEST}" && -f "${PLAN_OPS}" ]] || return 1
+
+    planned_is_fresh || { warn 'piano scaduto o timestamp non valido.'; return 1; }
+
+    current_rpm="$(rpmdb_hash)"
+    current_zypp="$(zypp_semantic_hash)"
+    current_cache="$(pkg_cache_hash)" || return 1
+
+    [[ "${current_rpm}" == "${STATE_RPMDB_HASH}" ]] || return 1
+    [[ "${current_zypp}" == "${STATE_ZYPP_HASH}" ]] || return 1
+    [[ "${current_cache}" == "${STATE_CACHE_HASH}" ]] || return 1
+
+    generate_xml_plan "${PLAN_XML_FINAL}" || return 1
+    scan_plan_for_critical_removals "${PLAN_XML_FINAL}" || return 1
+
+    final_ops="${TX_CACHE_DIR}/plan-operations.revalidate.tsv"
+    rm -f -- "${final_ops}"
+
+    extract_plan_operations "${PLAN_XML_FINAL}" "${final_ops}" || {
+        rm -f -- "${final_ops}"
+        return 1
+    }
+
+    validate_plan_operation_count "${PLAN_XML_FINAL}" "${final_ops}" || {
+        rm -f -- "${final_ops}"
+        return 1
+    }
+
+    cmp -s -- "${PLAN_OPS}" "${final_ops}" || {
+        rm -f -- "${final_ops}"
+        return 1
+    }
+
+    rm -f -- "${final_ops}"
+
+    current_plan="$(plan_hash "${PLAN_XML_FINAL}")" || return 1
+    [[ "${current_plan}" == "${STATE_PLAN_HASH}" ]]
+}
+
+prepare_upgrade_plan() {
+    preflight_new_transaction
+
+    if [[ "${STATE_STATUS}" == planned ]] && planned_is_fresh && revalidate_plan_and_system; then
+        log "Riutilizzo piano ${STATE_TXID} creato ${STATE_CREATED}; nessun secondo download."
+        history_or_warn planned-reused 'upgrade ha riutilizzato cache e fingerprint esistenti'
+        return 0
+    fi
+
+    if [[ "${STATE_STATUS}" == planned ]]; then
+        warn "Piano ${STATE_TXID:-?} scaduto, incompleto o non piu valido: ne creo uno nuovo."
+        mark_aborted 'piano non riutilizzabile da upgrade'
+        history_or_warn planned-aborted 'piano scaduto, incompleto o fingerprint non valido'
+    fi
+
+    make_plan_after_preflight
+}
+
+create_recovery_snapshot() {
+    local snap userdata
+
+    check_esp_space || die 'spazio ESP/boot insufficiente immediatamente prima della creazione PRE.'
+
+    userdata="myslowroll=atomic-pre,myslowroll_txid=${STATE_TXID},important=yes"
+
+    # Flush pending writes before freezing the known-good point.
+    sync
+
+    snap="$(snapper -c "${SNAPPER_CONFIG}" create \
+        --type single --read-only \
+        --description "mySlowrollOS pre dup ${STATE_TXID}" \
+        --userdata "${userdata}" --print-number)"
+
+    [[ "${snap}" =~ ^[0-9]+$ ]] || die 'Snapper non ha restituito un numero valido per PRE.'
+    snapshot_exists "${snap}" || die "snapshot PRE ${snap} non trovata dopo la creazione."
+    [[ "$(snapshot_ro_value "${snap}")" == true ]] || die "snapshot PRE ${snap} non risulta read-only."
+    verify_snapshot_core "${snap}" || die "snapshot PRE ${snap} non supera la verifica del core."
+    ensure_snapshot_bootable "${snap}" || die "snapshot PRE ${snap} non puo essere resa bootable da sdbootutil."
+
+    sync
+    printf '%s\n' "${snap}"
+}
+
+verify_rpm_payloads() {
+    local ops="$1" op name
+    local -a pkgs=()
+
+    bool_true "${VERIFY_PAYLOADS}" || return 0
+    [[ -f "${ops}" ]] || return 0
+
+    while IFS=$'\t' read -r op name _ _ _ _; do
+        [[ -n "${op}" && -n "${name}" ]] || continue
+        [[ "${op}" == remove ]] && continue
+        pkgs+=("${name}")
+    done < "${ops}"
+
+    (( ${#pkgs[@]} > 0 )) || return 0
+
+    local -a uniq_pkgs=()
+    mapfile -t uniq_pkgs < <(printf '%s\n' "${pkgs[@]}" | LC_ALL=C sort -u)
+
+    local pkg out bad rc=0
+
+    for pkg in "${uniq_pkgs[@]}"; do
+        if ! out="$(LC_ALL=C rpm -V "${pkg}" 2>&1)"; then
+            bad="$(awk '
+                $0 ~ /^[SM5DLUGTP?.]+[[:space:]]+c[[:space:]]/ { next }
+                $0 ~ /^missing[[:space:]]+c[[:space:]]/ { next }
+                NF
+            ' <<<"${out}" || true)"
+
+            if [[ -n "${bad}" ]]; then
+                warn "payload RPM non verificato per ${pkg}:"
+                warn "${bad}"
+                rc=1
+            fi
+        fi
+    done
+
+    return "${rc}"
+}
+
+postcheck_record() {
+    local result="$1" check="$2" detail="${3:-}" stamp
+
+    [[ -n "${POSTCHECK_LOG}" ]] || return 0
+
+    detail="${detail//$'\n'/; }"
+    detail="${detail//$'\r'/ }"
+    detail="${detail//$'\t'/ }"
+    stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || printf unknown)"
+
+    if ! printf '%s\t%s\t%s\t%s\n' "${stamp}" "${result}" "${check}" "${detail}" >> "${POSTCHECK_LOG}"; then
+        warn "impossibile scrivere diagnostica post-dup in ${POSTCHECK_LOG}."
+    fi
+
+    return 0
+}
+
+prepare_rollback() {
+    local source="$1" reason="$2" out target old_default source_core=0
+
+    STATE_LAST_ERROR="${reason}"
+
+    if ! check_esp_space; then
+        STATE_STATUS=rollback-unverified
+        STATE_LAST_ERROR="spazio ESP/boot insufficiente prima del rollback: ${reason}"
+        persist_state || true
+        warn 'Spazio ESP/boot insufficiente prima del rollback; NON procedo e NON riavvio.'
+        return 1
+    fi
+
+    if snapshot_has_atomic_pre_userdata "${source}"; then
+        verify_snapshot_core "${source}" || {
+            STATE_STATUS=rollback-unverified
+            STATE_LAST_ERROR="snapshot sorgente ${source} non supera la verifica core"
+            persist_state || true
+            warn "snapshot sorgente ${source} non supera la verifica core; NON riavvio."
+            return 1
+        }
+        source_core=1
+    else
+        verify_snapshot_basics "${source}" || {
+            STATE_STATUS=rollback-unverified
+            STATE_LAST_ERROR="snapshot sorgente ${source} non supera la verifica base"
+            persist_state || true
+            warn "snapshot sorgente ${source} non supera la verifica base; NON riavvio."
+            return 1
+        }
+    fi
+
+    if ! read_snapshot_state; then
+        STATE_STATUS=rollback-unverified
+        STATE_LAST_ERROR='impossibile leggere la snapshot default prima del rollback'
+        persist_state || true
+        warn 'Stato Snapper non leggibile prima del rollback; NON procedo.'
+        return 1
+    fi
+
+    old_default="${DEFAULT_SNAPSHOT}"
+
+    warn "${reason}"
+    warn "Preparo rollback dalla snapshot nota ${source}."
+
+    if ! out="$(LC_ALL=C snapper -c "${SNAPPER_CONFIG}" rollback "${source}" 2>&1)"; then
+        STATE_STATUS=rollback-unverified
+        STATE_LAST_ERROR="rollback command failed: ${out//$'\n'/ }"
+        persist_state || true
+        warn 'snapper rollback fallito; NON riavvio automaticamente.'
+        return 1
+    fi
+
+    # The authoritative TARGET is the new Btrfs/Snapper default after rollback.
+    # Do not depend on rollback --print-number: deriving TARGET from Snapper's
+    # post-rollback default is both sufficient and compatible with older Snapper.
+    if ! read_snapshot_state; then
+        STATE_STATUS=rollback-unverified
+        STATE_LAST_ERROR='impossibile determinare snapshot attiva/default dopo snapper rollback'
+        persist_state || true
+        warn 'Stato Snapper non leggibile dopo rollback; NON riavvio automaticamente.'
+        return 1
+    fi
+
+    target="${DEFAULT_SNAPSHOT}"
+
+    [[ "${target}" =~ ^[0-9]+$ && "${target}" != "${old_default}" ]] || {
+        STATE_TARGET="${target:-}"
+        STATE_STATUS=rollback-unverified
+        STATE_LAST_ERROR="default rollback non valido/non cambiato: old=${old_default:-?} new=${target:-?}"
+        persist_state || true
+        warn 'Snapper non ha prodotto un nuovo TARGET default verificabile; NON riavvio automaticamente.'
+        return 1
+    }
+
+    if ! snapshot_exists "${target}"; then
+        STATE_TARGET="${target}"
+        STATE_STATUS=rollback-unverified
+        STATE_LAST_ERROR="rollback target ${target} inesistente"
+        persist_state || true
+        warn 'TARGET rollback non trovato; NON riavvio automaticamente.'
+        return 1
+    fi
+
+    if [[ "$(snapshot_ro_value "${target}")" != false ]]; then
+        STATE_TARGET="${target}"
+        STATE_STATUS=rollback-unverified
+        STATE_LAST_ERROR="rollback target ${target} non RW"
+        persist_state || true
+        warn 'TARGET rollback non read-write; NON riavvio automaticamente.'
+        return 1
+    fi
+
+    if ! verify_snapshot_basics "${target}"; then
+        STATE_TARGET="${target}"
+        STATE_STATUS=rollback-unverified
+        STATE_LAST_ERROR="rollback target ${target} non supera verifica base"
+        persist_state || true
+        warn 'TARGET rollback non verificabile come base; NON riavvio automaticamente.'
+        return 1
+    fi
+
+    if (( source_core )) && ! verify_snapshot_core "${target}"; then
+        STATE_TARGET="${target}"
+        STATE_STATUS=rollback-unverified
+        STATE_LAST_ERROR="rollback target ${target} non supera verifica core derivata dalla PRE"
+        persist_state || true
+        warn 'TARGET rollback non supera la verifica core; NON riavvio automaticamente.'
+        return 1
+    fi
+
+    if ! ensure_snapshot_bootable "${target}"; then
+        STATE_TARGET="${target}"
+        STATE_STATUS=rollback-unverified
+        STATE_LAST_ERROR="rollback target ${target} non bootable"
+        persist_state || true
+        warn 'TARGET rollback non verificabile come bootable; NON riavvio automaticamente.'
+        return 1
+    fi
+
+    # Rollback preparation and possible ESP writes must be durable before reboot.
+    sync
+
+    STATE_TARGET="${target}"
+    STATE_BOOT_ID_BEFORE="$(current_boot_id)"
+    STATE_STATUS=rollback-pending
+    STATE_FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    STATE_LAST_ERROR="${reason}"
+
+    if ! persist_state; then
+        warn 'rollback preparato ma stato rollback-pending non persistibile; NON riavvio automaticamente.'
+        return 1
+    fi
+
+    history_or_warn rollback-pending "source=${source} target=${target} reason=${reason}"
+    log "Rollback preparato: PRE=${source}, TARGET=${target}."
+    return 0
+}
+
+reboot_now_and_wait() {
+    log 'Sync e reboot immediato...'
+    sync
+
+    if ! systemctl reboot; then
+        die 'systemctl reboot fallito. Non modificare la root e riavviare manualmente.'
+    fi
+
+    while sleep 60; do :; done
+}
+
+upgrade() {
+    local answer pre zrc trc
+    local -a dup_pipe
+
+    prepare_upgrade_plan
+
+    printf '\nIl prossimo passo crea una PRE verificata e poi modifica la root attiva.\n'
+    printf 'Dopo il dup non verra eseguita alcuna manutenzione: solo verifiche e reboot.\n'
+    printf 'Scrivi esattamente: AGGIORNA E RIAVVIA\n> '
+
+    if ! IFS= read -r answer; then
+        mark_aborted 'EOF sul prompt di upgrade prima della snapshot PRE'
+        history_or_warn upgrade-aborted 'EOF sul prompt; nessuna PRE creata e nessun RPM modificato'
+        die 'upgrade annullato per EOF; nessuna snapshot PRE creata e nessun RPM modificato.'
+    fi
+
+    if [[ "${answer}" != 'AGGIORNA E RIAVVIA' ]]; then
+        mark_aborted 'annullato dall utente prima della snapshot PRE'
+        history_or_warn upgrade-aborted 'risposta di conferma non valida'
+        die 'upgrade annullato; nessuna snapshot PRE creata e nessun RPM modificato.'
+    fi
+
+    load_state
+    [[ "${STATE_STATUS}" == planned ]] || die 'stato interno inatteso dopo il piano.'
+    set_tx_paths
+
+    check_zypp_lock_hint
+
+    revalidate_plan_and_system || {
+        mark_aborted 'fingerprint cambiato prima della snapshot PRE'
+        die 'sistema/piano cambiato dopo il pre-download; ripetere upgrade da capo.'
+    }
+
+    snapshot_state
+    [[ "${ACTIVE_SNAPSHOT}" == "${STATE_SOURCE}" && "${DEFAULT_SNAPSHOT}" == "${STATE_SOURCE}" ]] || {
+        mark_aborted 'snapshot attiva/default cambiata prima della PRE'
+        die 'snapshot corrente cambiata dopo il piano.'
+    }
+
+    pre="$(create_recovery_snapshot)"
+
+    STATE_PRE="${pre}"
+    STATE_BOOT_ID_BEFORE="$(current_boot_id)"
+    STATE_STATUS=prepared
+
+    persist_state_or_die
+    history_or_warn pre-created "snapshot=${STATE_PRE}"
+
+    # Recheck after PRE creation and its sdbootutil/Snapper hooks, still before RPM writes.
+    check_zypp_lock_hint
+
+    if ! revalidate_plan_and_system; then
+        mark_aborted 'fingerprint cambiato dopo creazione PRE'
+        die "sistema/piano cambiato dopo PRE; PRE ${STATE_PRE} conservata, nessun RPM modificato."
+    fi
+
+    STATE_STATUS=in-progress
+    STATE_DUP_STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    STATE_LAST_ERROR=
+
+    persist_state_or_die
+    history_or_warn dup-started 'stato durabile prima della prima modifica RPM'
+
+    # Strong barrier before the first package modification. The durable state is
+    # already in-progress and PRE is immutable/verified at this point.
+    sync
+
+    log "Avvio zypper dup reale. Log persistente: ${DUP_LOG}"
+
+    set +e
+    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C \
+    systemd-inhibit --what=shutdown:sleep:idle --mode=block \
+        --who="${PROG}" --why='mySlowrollOS guarded distribution upgrade' \
+        zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive --userdata "myslowroll:${STATE_TXID}" dup \
+        ${ZYPPER_LICENSE_ARGS[@]+"${ZYPPER_LICENSE_ARGS[@]}"} \
+        --download-in-advance --no-recommends --no-allow-vendor-change \
+        2>&1 | tee "${DUP_LOG}"
+    dup_pipe=("${PIPESTATUS[@]}")
+    set -e
+
+    zrc="${dup_pipe[0]}"
+    trc="${dup_pipe[1]}"
+
+    if ! sync "${DUP_LOG}" 2>/dev/null; then
+        warn 'impossibile forzare su disco il log del dup; la correttezza della transazione non dipende dal log.'
+    fi
+
+    (( trc == 0 )) || warn "tee del log dup ha restituito rc=${trc}; uso esclusivamente rc Zypper=${zrc} per decidere l'esito."
+
+    if (( zrc != 0 )); then
+        STATE_LAST_ERROR="zypper dup rc=${zrc}"
+        persist_state || true
+        history_or_warn dup-failed "zypper_rc=${zrc}"
+
+        if prepare_rollback "${STATE_PRE}" "zypper dup fallito con rc=${zrc}; root corrente potenzialmente parziale"; then
+            reboot_now_and_wait
+        fi
+
+        die "rollback automatico non verificabile. NON riavviare; log: ${DUP_LOG}"
+    fi
+
+    # From here: package/system checks are read-only; only persistent audit
+    # artifacts below /var are written. ZYpp is not reopened.
+    # The delta is attributable to dup under the operational assumption that no
+    # privileged process bypasses the ZYpp lock by invoking rpm directly.
+    local pkg post_ok=1 post_summary actual_os bootloader_out bootable_out
+    local -a post_fail=()
+
+    if : > "${POSTCHECK_LOG}" && chmod 0600 "${POSTCHECK_LOG}"; then
+        postcheck_record PASS begin "source=${STATE_SOURCE} pre=${STATE_PRE}"
+    else
+        warn "post-dup: impossibile creare il log diagnostico ${POSTCHECK_LOG}."
+        post_fail+=("postcheck-log-create")
+        post_ok=0
+    fi
+
+    if write_rpmdb_manifest "${RPMDB_POST_MANIFEST}"; then
+        postcheck_record PASS rpmdb-manifest-write "path=${RPMDB_POST_MANIFEST}"
+
+        if STATE_RPMDB_POST_HASH="$(manifest_hash "${RPMDB_POST_MANIFEST}")"; then
+            postcheck_record PASS rpmdb-manifest-hash "actual=${STATE_RPMDB_POST_HASH}"
+        else
+            warn 'post-dup: impossibile calcolare hash del manifest RPM finale.'
+            postcheck_record FAIL rpmdb-manifest-hash 'hash non calcolabile'
+            post_fail+=("rpmdb-manifest-hash")
+            post_ok=0
+        fi
+
+        if LC_ALL=C comm -13 "${RPMDB_PRE_MANIFEST}" "${RPMDB_POST_MANIFEST}" > "${RPMDB_ADDED}"; then
+            postcheck_record PASS rpmdb-added-delta "path=${RPMDB_ADDED}"
+        else
+            warn 'post-dup: impossibile costruire il delta RPM aggiunto.'
+            postcheck_record FAIL rpmdb-added-delta 'comm -13 fallito'
+            post_fail+=("rpmdb-added-delta")
+            post_ok=0
+        fi
+
+        if LC_ALL=C comm -23 "${RPMDB_PRE_MANIFEST}" "${RPMDB_POST_MANIFEST}" > "${RPMDB_REMOVED}"; then
+            postcheck_record PASS rpmdb-removed-delta "path=${RPMDB_REMOVED}"
+        else
+            warn 'post-dup: impossibile costruire il delta RPM rimosso.'
+            postcheck_record FAIL rpmdb-removed-delta 'comm -23 fallito'
+            post_fail+=("rpmdb-removed-delta")
+            post_ok=0
+        fi
+
+        if sync "${RPMDB_POST_MANIFEST}" "${RPMDB_ADDED}" "${RPMDB_REMOVED}"; then
+            postcheck_record PASS rpmdb-artifacts-sync 'manifest e delta durevoli'
+        else
+            warn 'post-dup: sync di manifest/delta RPM fallito.'
+            postcheck_record FAIL rpmdb-artifacts-sync 'sync fallito'
+            post_fail+=("rpmdb-artifacts-sync")
+            post_ok=0
+        fi
+
+        if cmp -s "${RPMDB_EXPECTED_MANIFEST}" "${RPMDB_POST_MANIFEST}"; then
+            postcheck_record PASS rpmdb-expected-match "hash=${STATE_RPMDB_POST_HASH:-unknown}"
+        else
+            warn 'post-dup: il manifest RPM reale non coincide con il risultato atteso dal piano.'
+            postcheck_record FAIL rpmdb-expected-match 'manifest reale diverso da atteso'
+            post_fail+=("rpmdb-expected-match")
+            post_ok=0
+        fi
+    else
+        warn 'post-dup: impossibile salvare il manifest RPM finale.'
+        postcheck_record FAIL rpmdb-manifest-write 'scrittura fallita'
+        post_fail+=("rpmdb-manifest-write")
+        post_ok=0
+    fi
+
+    for pkg in "${CRITICAL_PKGS[@]}"; do
+        if rpm --quiet -q "${pkg}"; then
+            postcheck_record PASS critical-package "name=${pkg}"
+        else
+            warn "post-dup: pacchetto critico mancante: ${pkg}"
+            postcheck_record FAIL critical-package "missing=${pkg}"
+            post_fail+=("critical-package:${pkg}")
+            post_ok=0
+        fi
+    done
+
+    if verify_rpm_payloads "${PLAN_OPS}"; then
+        postcheck_record PASS rpm-payloads "policy=${VERIFY_PAYLOADS}"
+    else
+        warn 'post-dup: verifica payload RPM fallita.'
+        postcheck_record FAIL rpm-payloads "policy=${VERIFY_PAYLOADS}"
+        post_fail+=("rpm-payloads")
+        post_ok=0
+    fi
+
+    actual_os="$(os_id)"
+    if [[ "${actual_os}" == "${REQUIRED_OS_ID}" ]]; then
+        postcheck_record PASS os-id "actual=${actual_os}"
+    else
+        warn "post-dup: OS ID inatteso: ${actual_os:-vuoto}."
+        postcheck_record FAIL os-id "actual=${actual_os:-empty} expected=${REQUIRED_OS_ID}"
+        post_fail+=("os-id")
+        post_ok=0
+    fi
+
+    if read_snapshot_state; then
+        if [[ "${ACTIVE_SNAPSHOT}" == "${STATE_SOURCE}" && "${DEFAULT_SNAPSHOT}" == "${STATE_SOURCE}" ]]; then
+            postcheck_record PASS snapshot-state "active=${ACTIVE_SNAPSHOT} default=${DEFAULT_SNAPSHOT} expected=${STATE_SOURCE}"
+        else
+            warn "post-dup: snapshot attiva/default inattesa (attiva=${ACTIVE_SNAPSHOT}, default=${DEFAULT_SNAPSHOT}, attesa=${STATE_SOURCE})."
+            postcheck_record FAIL snapshot-state "active=${ACTIVE_SNAPSHOT:-empty} default=${DEFAULT_SNAPSHOT:-empty} expected=${STATE_SOURCE}"
+            post_fail+=("snapshot-state")
+            post_ok=0
+        fi
+    else
+        warn 'post-dup: impossibile determinare snapshot attiva/default.'
+        postcheck_record FAIL snapshot-state "active=${ACTIVE_SNAPSHOT:-empty} default=${DEFAULT_SNAPSHOT:-empty} expected=${STATE_SOURCE}"
+        post_fail+=("snapshot-state-unreadable")
+        post_ok=0
+    fi
+
+    if bootloader_out="$(LC_ALL=C sdbootutil bootloader 2>&1)" && grep -qi 'systemd-boot' <<<"${bootloader_out}"; then
+        postcheck_record PASS systemd-boot-detected "${bootloader_out}"
+    else
+        warn "post-dup: systemd-boot non rilevato da sdbootutil: ${bootloader_out//$'\n'/; }"
+        postcheck_record FAIL systemd-boot-detected "${bootloader_out:-no output}"
+        post_fail+=("systemd-boot-detected")
+        post_ok=0
+    fi
+
+    if bootable_out="$(LC_ALL=C sdbootutil is-bootable "${STATE_SOURCE}" 2>&1)"; then
+        postcheck_record PASS source-bootable "snapshot=${STATE_SOURCE}; ${bootable_out}"
+    else
+        warn "post-dup: snapshot source ${STATE_SOURCE} non bootable: ${bootable_out//$'\n'/; }"
+        postcheck_record FAIL source-bootable "snapshot=${STATE_SOURCE}; ${bootable_out:-no output}"
+        post_fail+=("source-bootable")
+        post_ok=0
+    fi
+
+    if [[ -f "${POSTCHECK_LOG}" ]]; then
+        if ! sync "${POSTCHECK_LOG}"; then
+            warn 'post-dup: sync del log diagnostico fallito.'
+            post_fail+=("postcheck-log-sync")
+            post_ok=0
+        fi
+    fi
+
+    if (( post_ok == 0 )); then
+        post_summary="$(IFS=,; printf '%s' "${post_fail[*]}")"
+        [[ -n "${post_summary}" ]] || post_summary=unknown
+
+        STATE_LAST_ERROR="verifica post-dup fallita: ${post_summary}"
+        persist_state || true
+        history_or_warn post-dup-failed "checks=${post_summary} log=${POSTCHECK_LOG}"
+
+        if prepare_rollback "${STATE_PRE}" "verifica post-dup fallita (${post_summary}); preparo rollback conservativo"; then
+            reboot_now_and_wait
+        fi
+
+        die "rollback automatico non verificabile. NON riavviare; log dup: ${DUP_LOG}; log check: ${POSTCHECK_LOG}"
+    fi
+
+    postcheck_record PASS complete "rpmdb_post_hash=${STATE_RPMDB_POST_HASH}"
+    sync "${POSTCHECK_LOG}" || warn 'impossibile sincronizzare il log post-dup completato.'
+
+    history_or_warn dup-verified "rpmdb_post_hash=${STATE_RPMDB_POST_HASH}"
+
+    STATE_STATUS=pending-reboot
+    STATE_FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    STATE_LAST_ERROR=
+
+    if ! persist_state; then
+        warn 'dup riuscito ma impossibile registrare pending-reboot; lo stato durabile resta in-progress.'
+        warn 'Per sicurezza riavvio: al prossimo boot usare recover, che proporra il rollback alla PRE.'
+        reboot_now_and_wait
+    fi
+
+    history_or_warn pending-reboot "rpmdb_post_hash=${STATE_RPMDB_POST_HASH}"
+    log "Upgrade completato; PRE conservata: ${STATE_PRE}."
+
+    reboot_now_and_wait
+}
+
+confirm_transaction() {
+    local boot pkg confirm_manifest confirm_hash
+
+    preflight_recovery
+    require_confirm_commands
+    load_state
+
+    [[ "${STATE_STATUS}" == pending-reboot ]] || die 'non esiste un upgrade pending-reboot da confermare.'
+
+    boot="$(current_boot_id)"
+    [[ -n "${STATE_BOOT_ID_BEFORE}" && "${boot}" != "${STATE_BOOT_ID_BEFORE}" ]] || \
+        die 'boot_id invariato: il reboot post-upgrade non e ancora avvenuto.'
+
+    snapshot_state
+    [[ "${ACTIVE_SNAPSHOT}" == "${STATE_SOURCE}" && "${DEFAULT_SNAPSHOT}" == "${STATE_SOURCE}" ]] || \
+        die "non sei sulla root aggiornata attesa (attiva=${ACTIVE_SNAPSHOT}, default=${DEFAULT_SNAPSHOT}, attesa=${STATE_SOURCE})."
+
+    [[ "$(os_id)" == "${REQUIRED_OS_ID}" ]] || die 'OS ID inatteso dopo il reboot.'
+
+    for pkg in "${CRITICAL_PKGS[@]}"; do
+        rpm --quiet -q "${pkg}" || die "post-reboot manca pacchetto critico: ${pkg}"
+    done
+
+    verify_systemd_boot
+
+    [[ -n "${TX_CACHE_DIR}" ]] || die 'stato pending-reboot senza txid valido.'
+    install -d -m 0700 "${TX_CACHE_DIR}" || die 'impossibile preparare la cache per la verifica post-reboot.'
+
+    confirm_manifest="${TX_CACHE_DIR}/rpmdb-confirm.tsv"
+
+    write_rpmdb_manifest "${confirm_manifest}" || \
+        die 'impossibile rileggere rpmdb post-reboot per la conferma.'
+
+    confirm_hash="$(manifest_hash "${confirm_manifest}")" || \
+        die 'impossibile calcolare hash rpmdb post-reboot.'
+
+    [[ -n "${STATE_RPMDB_POST_HASH}" ]] || die 'stato pending-reboot privo di rpmdb_post_hash.'
+    [[ "${confirm_hash}" == "${STATE_RPMDB_POST_HASH}" ]] || \
+        die 'rpmdb post-reboot diverso da quello verificato al termine del dup.'
+
+    STATE_STATUS=confirmed
+    STATE_FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    STATE_LAST_ERROR=
+
+    persist_state_or_die
+    history_or_warn confirmed "rpmdb_post_hash=${STATE_RPMDB_POST_HASH:-none}"
+
+    log "Upgrade ${STATE_TXID} confermato. PRE ${STATE_PRE} conservata per rollback esplicito."
+}
+
+rollback_transaction() {
+    local requested="${1:-}" source answer
+
+    preflight_recovery
+    load_state
+
+    case "${STATE_STATUS}" in
+        planning|prepared|in-progress)
+            die "stato ${STATE_STATUS}: usare '${PROG} recover' per non perdere il contesto della transazione ${STATE_TXID:-?}."
+            ;;
+        rollback-pending|rollback-unverified)
+            die "stato ${STATE_STATUS}: completare la recovery corrente prima di un nuovo rollback."
+            ;;
+        pending-reboot)
+            warn "Upgrade ${STATE_TXID:-?} pending-reboot non confermato: il rollback lo sostituira nello state file."
+            ;;
+        planned|confirmed|rolled-back|aborted|'')
+            [[ -z "${STATE_STATUS}" ]] || warn "Stato corrente: ${STATE_STATUS}, TXID=${STATE_TXID:-?}."
+            ;;
+    esac
+
+    if [[ -n "${requested}" ]]; then source="${requested}"; else source="${STATE_PRE}"; fi
+
+    [[ "${source}" =~ ^[0-9]+$ ]] || die "specificare una snapshot: ${PROG} rollback NUMERO"
+    snapshot_exists "${source}" || die "snapshot ${source} non trovata."
+
+    printf 'Rollback verso snapshot %s.\n' "${source}"
+    printf 'Scrivi esattamente: ROLLBACK %s E RIAVVIA\n> ' "${source}"
+    read_exact_or_die rollback answer
+
+    [[ "${answer}" == "ROLLBACK ${source} E RIAVVIA" ]] || die 'rollback annullato.'
+
+    [[ -n "${STATE_TXID}" ]] || {
+        STATE_TXID="$(new_txid)"
+        STATE_CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    }
+
+    STATE_PRE="${source}"
+    set_tx_paths
+
+    if prepare_rollback "${source}" 'rollback richiesto esplicitamente dall utente'; then
+        reboot_now_and_wait
+    fi
+
+    die 'rollback non verificabile; NON riavviare automaticamente.'
+}
+
+recover() {
+    local boot answer orphan_pre= target_ok=0
+
+    preflight_recovery
+    load_state
+
+    boot="$(current_boot_id)"
+
+    case "${STATE_STATUS}" in
+        planning)
+            orphan_pre="$(find_pre_snapshots_for_txid "${STATE_TXID}" | tr '\n' ' ')" || true
+            STATE_STATUS=aborted
+            STATE_FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            STATE_LAST_ERROR="planning interrotto; cache parziale non fidata; PRE trovate: ${orphan_pre:-nessuna}"
+            persist_state_or_die
+            history_or_warn planning-auto-aborted "PRE=${orphan_pre:-nessuna}"
+            log "Planning interrotto archiviato automaticamente; PRE trovate: ${orphan_pre:-nessuna}."
+            ;;
+
+        prepared)
+            warn "Transazione ${STATE_TXID} rimasta prepared."
+            warn 'Lo stato durable indica che il dup non era ancora marcato in-progress.'
+            printf 'Scrivi esattamente: ARCHIVIA PREPARED\n> '
+            read_exact_or_die recover-prepared answer
+            [[ "${answer}" == 'ARCHIVIA PREPARED' ]] || die 'recovery annullata.'
+
+            STATE_STATUS=aborted
+            STATE_FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            STATE_LAST_ERROR="prepared interrotto; PRE ${STATE_PRE:-?} conservata"
+            persist_state_or_die
+            history_or_warn prepared-aborted "PRE=${STATE_PRE:-nessuna}"
+            log "Stato archiviato come aborted; PRE ${STATE_PRE:-nessuna} non cancellata automaticamente."
+            ;;
+
+        in-progress)
+            [[ "${STATE_PRE}" =~ ^[0-9]+$ ]] || die 'in-progress senza PRE valida: recovery manuale necessaria.'
+
+            warn "Transazione ${STATE_TXID} rimasta in-progress."
+            warn 'Non e possibile dimostrare che il dup sia terminato: policy fail-closed = rollback.'
+            printf 'Scrivi esattamente: RECUPERA %s\n> ' "${STATE_PRE}"
+            read_exact_or_die recover-in-progress answer
+            [[ "${answer}" == "RECUPERA ${STATE_PRE}" ]] || die 'recovery annullata.'
+
+            if prepare_rollback "${STATE_PRE}" 'recovery da stato in-progress/ambiguo'; then
+                reboot_now_and_wait
+            fi
+
+            die 'rollback di recovery non verificabile; NON riavviare automaticamente.'
+            ;;
+
+        pending-reboot)
+            if [[ -n "${STATE_BOOT_ID_BEFORE}" && "${boot}" == "${STATE_BOOT_ID_BEFORE}" ]]; then
+                log 'Upgrade completato ma reboot non ancora osservato: riavviare.'
+            else
+                log "Reboot osservato. Se il sistema funziona, eseguire '${PROG} confirm'."
+            fi
+            ;;
+
+        rollback-pending)
+            [[ "${STATE_TARGET}" =~ ^[0-9]+$ ]] || die 'rollback-pending senza TARGET valido.'
+
+            if [[ -n "${STATE_BOOT_ID_BEFORE}" && "${boot}" == "${STATE_BOOT_ID_BEFORE}" ]]; then
+                log "Rollback TARGET ${STATE_TARGET} preparato ma reboot non ancora osservato: riavviare."
+                return 0
+            fi
+
+            if ! read_snapshot_state; then
+                ACTIVE_SNAPSHOT=
+                DEFAULT_SNAPSHOT=
+            fi
+
+            if [[ "${ACTIVE_SNAPSHOT}" == "${STATE_TARGET}" && "${DEFAULT_SNAPSHOT}" == "${STATE_TARGET}" ]] \
+                && verify_snapshot_basics "${STATE_TARGET}" \
+                && [[ "$(snapshot_ro_value "${STATE_TARGET}")" == false ]] \
+                && snapshot_is_bootable_report "${STATE_TARGET}" post-rollback; then
+
+                if [[ "${STATE_PRE}" =~ ^[0-9]+$ ]] && snapshot_has_atomic_pre_userdata "${STATE_PRE}"; then
+                    if verify_snapshot_core "${STATE_TARGET}"; then
+                        target_ok=1
+                    fi
+                else
+                    target_ok=1
+                fi
+            fi
+
+            if (( target_ok == 1 )); then
+                STATE_STATUS=rolled-back
+                STATE_FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                STATE_LAST_ERROR=
+                persist_state_or_die
+                history_or_warn rolled-back "target=${STATE_TARGET}"
+                log "Rollback confermato: TARGET ${STATE_TARGET} e attivo/default e verificato."
+            else
+                STATE_STATUS=rollback-unverified
+                STATE_FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                STATE_LAST_ERROR="post-reboot rollback verification failed: active=${ACTIVE_SNAPSHOT:-?} default=${DEFAULT_SNAPSHOT:-?} target=${STATE_TARGET}"
+                persist_state_or_die
+                history_or_warn rollback-unverified "active=${ACTIVE_SNAPSHOT:-?} default=${DEFAULT_SNAPSHOT:-?} target=${STATE_TARGET}"
+                warn 'Il reboot e avvenuto ma il TARGET del rollback non e verificabile automaticamente.'
+                warn 'NON iniziare un nuovo upgrade. Ispezionare Snapper e sdbootutil manualmente.'
+                return 1
+            fi
+            ;;
+
+        rollback-unverified)
+            die 'rollback-unverified: stato volutamente bloccante; richiede verifica manuale Snapper/sdbootutil.'
+            ;;
+
+        planned)
+            orphan_pre="$(find_pre_snapshots_for_txid "${STATE_TXID}" | tr '\n' ' ')" || true
+
+            if [[ -n "${orphan_pre}" ]]; then
+                STATE_STATUS=aborted
+                STATE_FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                STATE_LAST_ERROR="PRE orfana trovata dopo crash tra creazione snapshot e stato prepared: ${orphan_pre}"
+                persist_state_or_die
+                history_or_warn orphan-pre-found "snapshots=${orphan_pre}"
+                warn "Piano archiviato come aborted; PRE orfana conservata: ${orphan_pre}."
+            else
+                log 'Esiste solo un piano valido; nessun RPM risulta marcato come modificato.'
+            fi
+            ;;
+
+        '')
+            orphan_pre="$(find_all_atomic_pre_snapshots | tr '\n' ' ')" || true
+            if [[ -n "${orphan_pre}" ]]; then
+                warn "State file assente ma sono presenti PRE marcate: ${orphan_pre}."
+                warn 'Non e possibile stabilire automaticamente se una transazione RPM sia rimasta incompleta.'
+                die 'recovery fail-closed: ispezionare snapshot, rpmdb e log prima di rimuovere o riclassificare le PRE.'
+            fi
+            log 'Nessuna recovery pendente e nessuna PRE marcata trovata.'
+            ;;
+        confirmed|rolled-back|aborted)
+            log 'Nessuna recovery pendente.'
+            ;;
+    esac
+}
+
+prune_artifacts() {
+    local days="${1:-30}" answer path base
+    local -a cache_candidates=() log_candidates=()
+
+    require_root
+    acquire_lock
+    require_prune_commands
+
+    [[ "${days}" =~ ^[0-9]+$ ]] || die 'GIORNI deve essere un intero non negativo.'
+
+    load_state
+
+    case "${STATE_STATUS}" in
+        planning|prepared|in-progress|pending-reboot|rollback-pending|rollback-unverified)
+            die "prune bloccato durante lo stato attivo ${STATE_STATUS}."
+            ;;
+    esac
+
+    if [[ -d "${CACHE_ROOT}" ]]; then
+        while IFS= read -r path; do
+            base="${path##*/}"
+            is_uuid "${base}" || continue
+            [[ "${base}" == "${STATE_TXID}" && "${STATE_STATUS}" == planned ]] && continue
+            cache_candidates+=("${path}")
+        done < <(find "${CACHE_ROOT}" -mindepth 1 -maxdepth 1 -type d -mtime "+${days}" -print)
+    fi
+
+    if [[ -d "${LOG_ROOT}" ]]; then
+        while IFS= read -r path; do
+            base="${path##*/}"
+            [[ "${base}" =~ ^([0-9a-fA-F-]{36})(\.sdboot)?\.log$ ]] || continue
+            is_uuid "${BASH_REMATCH[1]}" || continue
+            [[ "${BASH_REMATCH[1]}" == "${STATE_TXID}" && "${STATE_STATUS}" == planned ]] && continue
+            log_candidates+=("${path}")
+        done < <(find "${LOG_ROOT}" -mindepth 1 -maxdepth 1 -type f -mtime "+${days}" -print)
+    fi
+
+    printf 'Cache candidate: %s; log candidati: %s.\n' "${#cache_candidates[@]}" "${#log_candidates[@]}"
+    printf 'Le snapshot PRE non vengono cancellate automaticamente; quelle marcate sono:\n'
+
+    LC_ALL=C snapper --csvout --no-headers -c "${SNAPPER_CONFIG}" list \
+        --disable-used-space --columns number,date,userdata 2>/dev/null | \
+        grep -F 'myslowroll=atomic-pre' || true
+
+    (( ${#cache_candidates[@]} + ${#log_candidates[@]} > 0 )) || { log 'Nessun artefatto eliminabile.'; return 0; }
+
+    printf 'Scrivi esattamente: PRUNE ARTEFATTI %s\n> ' "${days}"
+    read_exact_or_die prune answer
+    [[ "${answer}" == "PRUNE ARTEFATTI ${days}" ]] || die 'prune annullato.'
+
+    for path in "${cache_candidates[@]}"; do rm -rf -- "${path}"; done
+    for path in "${log_candidates[@]}"; do rm -f -- "${path}"; done
+
+    [[ ! -d "${CACHE_ROOT}" ]] || sync "${CACHE_ROOT}"
+    [[ ! -d "${LOG_ROOT}" ]] || sync "${LOG_ROOT}"
+
+    history_or_warn prune "days=${days} cache=${#cache_candidates[@]} logs=${#log_candidates[@]} snapshots=preserved"
+    log "Prune completato: cache=${#cache_candidates[@]}, log=${#log_candidates[@]}; PRE conservate."
+}
+
+show_status() {
+    # Deliberately no project lock: STATE_FILE is replaced atomically, so status
+    # can observe either the previous complete state or the next complete state.
+    require_root
+    load_state
+
+    printf 'OS: %s\n' "$(os_id)"
+    printf 'Root filesystem: %s\n' "$(findmnt -n -o FSTYPE --target / 2>/dev/null || echo sconosciuto)"
+    printf 'Root options: %s\n' "$(findmnt -n -o OPTIONS --target / 2>/dev/null || echo sconosciuto)"
+
+    local bootloader
+
+    printf 'Boot ID: %s\n' "$(current_boot_id_or_unknown)"
+    bootloader="$(sdbootutil bootloader 2>/dev/null || true)"
+    printf 'Bootloader: %s\n' "${bootloader:-sconosciuto}"
+
+    if [[ "$(findmnt -n -o FSTYPE --target / 2>/dev/null || true)" == btrfs ]] \
+        && snapper -c "${SNAPPER_CONFIG}" get-config >/dev/null 2>&1; then
+        if read_snapshot_state; then
+            printf 'Snapshot attiva: %s\n' "${ACTIVE_SNAPSHOT}"
+            printf 'Snapshot default: %s\n' "${DEFAULT_SNAPSHOT}"
+        else
+            printf 'Snapshot attiva/default: non determinabili\n'
+        fi
+    fi
+
+    if [[ -f "${STATE_FILE}" ]]; then
+        printf 'Stato: %s\n' "${STATE_STATUS:-sconosciuto}"
+        printf 'TXID: %s\n' "${STATE_TXID:-nessuno}"
+        printf 'Source: %s\n' "${STATE_SOURCE:-nessuna}"
+        printf 'PRE: %s\n' "${STATE_PRE:-nessuna}"
+        printf 'TARGET: %s\n' "${STATE_TARGET:-nessuna}"
+        printf 'Boot ID pre-transizione: %s\n' "${STATE_BOOT_ID_BEFORE:-nessuno}"
+        printf 'Plan hash: %s\n' "${STATE_PLAN_HASH:-nessuno}"
+        printf 'Cache hash: %s\n' "${STATE_CACHE_HASH:-nessuno}"
+        printf 'RPMDB pre hash: %s\n' "${STATE_RPMDB_HASH:-nessuno}"
+        printf 'RPMDB post hash: %s\n' "${STATE_RPMDB_POST_HASH:-nessuno}"
+        printf 'Creato UTC: %s\n' "${STATE_CREATED:-sconosciuto}"
+        printf 'Dup iniziato UTC: %s\n' "${STATE_DUP_STARTED:-sconosciuto}"
+        printf 'Fine UTC: %s\n' "${STATE_FINISHED:-sconosciuto}"
+        printf 'Ultimo errore: %s\n' "${STATE_LAST_ERROR:-nessuno}"
+
+        [[ -n "${DUP_LOG}" ]] && printf 'Log dup: %s\n' "${DUP_LOG}"
+        [[ -n "${RPMDB_PRE_MANIFEST}" ]] && printf 'Manifest RPM pre: %s\n' "${RPMDB_PRE_MANIFEST}"
+        [[ -n "${RPMDB_POST_MANIFEST}" ]] && printf 'Manifest RPM post: %s\n' "${RPMDB_POST_MANIFEST}"
+        [[ -n "${POSTCHECK_LOG}" ]] && printf 'Log verifiche post-dup: %s\n' "${POSTCHECK_LOG}"
+    else
+        printf 'Stato: nessuna transazione registrata\n'
+    fi
+}
+
+main() {
+    local command="${1:-}"
+
+    case "${command}" in
+        status)
+            (( $# == 1 )) || die 'status non accetta argomenti.'
+            show_status
+            ;;
+        check)
+            (( $# == 1 )) || die 'check non accetta argomenti.'
+            preflight_new_transaction
+            log 'Preflight superato: Slowroll RW/Btrfs, Snapper, state/cache/log fuori root snapshot, RPMDB nella root snapshot, systemd-boot, criscore e policy ZYpp coerenti.'
+            ;;
+        plan)
+            (( $# == 1 )) || die 'plan non accetta argomenti.'
+            make_plan
+            ;;
+        upgrade)
+            (( $# == 1 )) || die 'upgrade non accetta argomenti.'
+            upgrade
+            ;;
+        confirm)
+            (( $# == 1 )) || die 'confirm non accetta argomenti.'
+            confirm_transaction
+            ;;
+        rollback)
+            (( $# <= 2 )) || die "uso: ${PROG} rollback [SNAPSHOT]"
+            rollback_transaction "${2:-}"
+            ;;
+        recover)
+            (( $# == 1 )) || die 'recover non accetta argomenti.'
+            recover
+            ;;
+        prune)
+            (( $# <= 2 )) || die "uso: ${PROG} prune [GIORNI]"
+            prune_artifacts "${2:-30}"
+            ;;
+        -h|--help|help|'')
+            usage
+            ;;
+        *)
+            usage >&2
+            die "comando sconosciuto: ${command}"
+            ;;
+    esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
