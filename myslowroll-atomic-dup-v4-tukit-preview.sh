@@ -27,15 +27,17 @@ umask 077
 #     reboot, otherwise changes made later to SOURCE would be absent in TARGET.
 
 readonly PROG="${0##*/}"
-readonly PREVIEW_VERSION='4.0.0-tukit-preview'
+readonly PREVIEW_VERSION='4.0.1-tukit-preview'
 readonly STATE_DIR=/var/lib/myslowroll/atomic-dup-v4-preview
 readonly STATE_FILE="${STATE_DIR}/state"
 readonly HISTORY_FILE="${STATE_DIR}/history.log"
-readonly CACHE_ROOT=/var/cache/myslowroll-atomic-dup
-readonly LOG_ROOT=/var/log/myslowroll-atomic-dup
+readonly CACHE_ROOT=/var/cache/myslowroll-atomic-dup-v4-preview
+readonly LOG_ROOT=/var/log/myslowroll-atomic-dup-v4-preview
 readonly LOCK_FILE=/run/myslowroll-atomic-dup-v4-preview.lock
 readonly SNAPPER_CONFIG=root
 readonly REQUIRED_OS_ID=opensuse-slowroll
+readonly TARGET_MAX_AGE_SECONDS="${MYSLOWROLL_TARGET_MAX_AGE_SECONDS:-900}"
+readonly AUTO_AGREE_LICENSES="${MYSLOWROLL_AUTO_AGREE_LICENSES:-0}"
 
 readonly -a VALID_STATES=(
     planning planned target-prepared target-updating target-verifying
@@ -58,8 +60,10 @@ STATE_CACHE_HASH=
 STATE_RPMDB_PRE_HASH=
 STATE_RPMDB_POST_HASH=
 STATE_CREATED_UTC=
+STATE_TARGET_OPENED_UTC=
 STATE_UPDATED_UTC=
 STATE_LAST_ERROR=
+declare -a ZYPPER_LICENSE_ARGS=()
 
 log()  { printf '[%s] %s\n' "${PROG}" "$*"; }
 warn() { printf '[%s] ATTENZIONE: %s\n' "${PROG}" "$*" >&2; }
@@ -93,8 +97,9 @@ acquire_lock() {
 
 require_commands() {
     local cmd
-    for cmd in awk btrfs cat findmnt flock grep rpm sha256sum snapper sort \
-               sdbootutil sync systemctl transactional-update tukit zypper; do
+    for cmd in awk btrfs cat chmod cmp date findmnt flock grep install mktemp \
+               mv rpm sed sha256sum snapper sort sdbootutil sync systemctl \
+               tee transactional-update tukit wc zypper; do
         command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
     done
 }
@@ -122,6 +127,7 @@ load_state() {
             rpmdb_pre_hash)  STATE_RPMDB_PRE_HASH="${value}" ;;
             rpmdb_post_hash) STATE_RPMDB_POST_HASH="${value}" ;;
             created_utc)     STATE_CREATED_UTC="${value}" ;;
+            target_opened_utc) STATE_TARGET_OPENED_UTC="${value}" ;;
             updated_utc)     STATE_UPDATED_UTC="${value}" ;;
             last_error)      STATE_LAST_ERROR="${value}" ;;
             ''|'#'*) ;;
@@ -148,6 +154,7 @@ persist_state() {
         printf 'rpmdb_pre_hash=%s\n' "${STATE_RPMDB_PRE_HASH}"
         printf 'rpmdb_post_hash=%s\n' "${STATE_RPMDB_POST_HASH}"
         printf 'created_utc=%s\n' "${STATE_CREATED_UTC}"
+        printf 'target_opened_utc=%s\n' "${STATE_TARGET_OPENED_UTC}"
         printf 'updated_utc=%s\n' "${STATE_UPDATED_UTC}"
         printf 'last_error=%s\n' "${STATE_LAST_ERROR//$'\n'/ }"
     } > "${tmp}"
@@ -189,12 +196,65 @@ snapshot_is_bootable() {
     sdbootutil is-bootable "$1" >/dev/null 2>&1
 }
 
+ensure_snapshot_bootable() {
+    # add-all-kernels runs on the host because the BLS entries and kernel
+    # payload live on the real ESP, outside the root snapshot.
+    local snapshot="$1" log_file="${2:-${LOG_ROOT}/sdboot-${snapshot}.log}"
+    snapshot_is_bootable "${snapshot}" && return 0
+    install -d -o root -g root -m 0700 "${log_file%/*}"
+    (
+        printf 'snapshot=%s action=sdbootutil-add-all-kernels\n' "${snapshot}"
+        sdbootutil add-all-kernels "${snapshot}"
+        rc=$?
+        printf 'add-all-kernels_rc=%s\n' "${rc}"
+        (( rc == 0 )) || exit "${rc}"
+        sdbootutil is-bootable "${snapshot}"
+    ) >"${log_file}" 2>&1 || return 1
+    sync "${log_file}"
+    snapshot_is_bootable "${snapshot}"
+}
+
+configure_license_policy() {
+    case "${AUTO_AGREE_LICENSES}" in
+        0|no|false|off) ZYPPER_LICENSE_ARGS=() ;;
+        1|yes|true|on)  ZYPPER_LICENSE_ARGS=(--auto-agree-with-licenses) ;;
+        *) die 'MYSLOWROLL_AUTO_AGREE_LICENSES deve essere un valore booleano.' ;;
+    esac
+}
+
+verify_tukit_cli_surface() {
+    local help version
+    version="$(tukit --version 2>&1)" || return 1
+    help="$(tukit --help 2>&1)" || return 1
+    local subcommand
+    for subcommand in open call callext close abort; do
+        grep -Eq "(^|[[:space:]])${subcommand}([[:space:]]|$)" <<<"${help}" || return 1
+    done
+    log "CLI tukit rilevata: ${version//$'\n'/ }"
+    # The VM matrix must additionally record the effective tukit.conf, Snapper
+    # configuration and observed open/close semantics for the installed build.
+}
+
+parse_tukit_open_output() {
+    # Fail closed: until the local CLI is characterized, accept only one line
+    # containing only the snapshot number. The raw output is retained for the
+    # VM test and the adapter can then be specialized to that exact version.
+    local raw_file="$1" candidate count
+    candidate="$(awk '
+        { gsub(/^[[:space:]]+|[[:space:]]+$/, "") }
+        /^[0-9]+$/ { print }
+    ' "${raw_file}")"
+    count="$(wc -l <<<"${candidate}")"
+    [[ "${count}" == 1 && "${candidate}" =~ ^[0-9]+$ ]] || return 1
+    printf '%s\n' "${candidate}"
+}
+
 tukit_open_target() {
-    # tukit open prints the transaction/snapshot identifier.
-    local description="$1" target
-    target="$(tukit --description "${description}" open)" || return 1
-    target="$(grep -Eo '[0-9]+' <<<"${target}" | tail -n 1)"
-    [[ "${target}" =~ ^[0-9]+$ ]] || return 1
+    local description="$1" raw_file="$2" target
+    install -d -o root -g root -m 0700 "${raw_file%/*}"
+    tukit --description "${description}" open >"${raw_file}" 2>&1 || return 1
+    sync "${raw_file}"
+    target="$(parse_tukit_open_output "${raw_file}")" || return 1
     printf '%s\n' "${target}"
 }
 
@@ -251,6 +311,7 @@ verify_target_packages() {
 
 verify_offline_target() {
     local target="$1" expected_manifest="$2" post_manifest="$3"
+    local sdboot_log="${4:-${LOG_ROOT}/${STATE_TXID:-unknown}.target-${target}.sdboot.log}"
     snapshot_exists "${target}" || return 1
     snapshot_is_rw "${target}" || return 1
     write_target_manifest "${target}" "${post_manifest}" || return 1
@@ -258,7 +319,23 @@ verify_offline_target() {
     verify_target_packages "${target}" || return 1
     [[ "$(target_os_id "${target}")" == "${REQUIRED_OS_ID}" ]] || return 1
     snapshot_is_bootable "${STATE_SOURCE}" || return 1
-    snapshot_is_bootable "${target}" || return 1
+    ensure_snapshot_bootable "${target}" "${sdboot_log}" || return 1
+}
+
+target_age_seconds() {
+    local opened_epoch now_epoch
+    [[ -n "${STATE_TARGET_OPENED_UTC}" ]] || return 1
+    opened_epoch="$(date -u -d "${STATE_TARGET_OPENED_UTC}" +%s 2>/dev/null)" || return 1
+    now_epoch="$(date -u +%s)"
+    (( now_epoch >= opened_epoch )) || return 1
+    printf '%s\n' "$(( now_epoch - opened_epoch ))"
+}
+
+assert_target_window() {
+    local age
+    age="$(target_age_seconds)" || die 'eta della TARGET non determinabile.'
+    (( age <= TARGET_MAX_AGE_SECONDS )) ||
+        die "TARGET aperta da ${age}s: supera il limite ${TARGET_MAX_AGE_SECONDS}s; abortire senza commit."
 }
 
 update_offline_target() {
@@ -266,17 +343,23 @@ update_offline_target() {
     target_cache_visible "${target}" "${package_cache}" ||
         die "cache ${package_cache} non visibile nella transazione tukit."
 
-    # The final v4 reuses the exact v3.4.9 zypper arguments and fingerprints.
-    # systemd-inhibit runs on the host; zypper runs only inside TARGET.
+    configure_license_policy
+    assert_target_window
+    # systemd-inhibit runs on the host; env and zypper run only inside TARGET.
+    # /var is shared by tukit: zypp history/cookies can therefore remain visible
+    # on SOURCE even if TARGET is later aborted. RPMDB and /usr stay in TARGET.
     systemd-inhibit \
         --what=shutdown:sleep:idle \
         --who="${PROG}" \
         --why='aggiornamento atomico offline del target Btrfs' \
         --mode=block \
         tukit call "${target}" \
+            env DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C \
             zypper --non-interactive --no-refresh \
             --pkg-cache-dir "${package_cache}" \
-            dup --no-recommends --no-allow-vendor-change \
+            --userdata "myslowroll-v4:${STATE_TXID}" dup \
+            "${ZYPPER_LICENSE_ARGS[@]}" \
+            --download-in-advance --no-recommends --no-allow-vendor-change \
         2>&1 | tee "${log_file}"
     local rc=${PIPESTATUS[0]}
     (( rc == 0 )) || return "${rc}"
@@ -289,8 +372,11 @@ commit_verified_target() {
     [[ "$(default_snapshot)" == "${source}" ]] ||
         die 'SOURCE non e piu la snapshot predefinita: commit rifiutato.'
     snapshot_is_bootable "${source}" || die 'SOURCE non piu bootable: commit rifiutato.'
-    snapshot_is_bootable "${target}" || die 'TARGET non bootable: commit rifiutato.'
+    ensure_snapshot_bootable "${target}" \
+        "${LOG_ROOT}/${STATE_TXID:-unknown}.target-${target}.sdboot.log" ||
+        die 'impossibile creare/verificare la entry di boot TARGET.'
     snapshot_is_rw "${target}" || die 'TARGET non RW prima del commit.'
+    assert_target_window
 
     STATE_STATUS=committing
     STATE_UPDATED_UTC="$(date -u +%FT%TZ)"
@@ -352,6 +438,9 @@ preflight_check() {
     require_root
     acquire_lock
     require_commands
+    verify_tukit_cli_surface || die 'CLI tukit incompatibile o non caratterizzata.'
+    snapper -c "${SNAPPER_CONFIG}" get-config >/dev/null 2>&1 ||
+        die "configurazione Snapper ${SNAPPER_CONFIG} non disponibile."
     [[ "$(findmnt -no FSTYPE /)" == btrfs ]] || die 'root non Btrfs.'
     findmnt -no OPTIONS / | grep -qw rw || die 'root attiva non RW.'
     local active default
@@ -373,10 +462,11 @@ Flusso previsto:
   4. verifica TARGET RW e cache /var/cache visibile
   5. persist target-updating; zypper dup dentro tukit call
   6. persist target-verifying; manifest e controlli dentro TARGET
-  7. verifica bootability di SOURCE e TARGET sulla ESP reale
-  8. persist committing; tukit close TARGET
-  9. verifica default=TARGET, TARGET RW, entrambe le entry bootable
- 10. persist pending-reboot; reboot; conferma solo da TARGET
+  7. se necessario: sdbootutil add-all-kernels TARGET dall'host
+  8. verifica bootability di SOURCE e TARGET sulla ESP reale
+  9. persist committing; tukit close TARGET
+ 10. verifica default=TARGET, TARGET RW, entrambe le entry bootable
+ 11. persist pending-reboot; reboot; conferma solo da TARGET
 
 Recovery:
   target-prepared/updating/verifying/verified + default=SOURCE:
@@ -393,6 +483,21 @@ Recovery:
 Rischio esterno residuo:
   la ESP non appartiene alla snapshot root. Per questo SOURCE e TARGET devono
   restare entrambi bootable durante l'intera transizione.
+
+Finestra di drift:
+  il piano e il download precedono tukit open. Dal clone al commit non fare
+  modifiche amministrative a /etc o /var; il commit viene rifiutato oltre il
+  limite configurato (default 900 secondi). La history/cookie ZYpp in /var puo
+  registrare il tentativo anche quando la TARGET viene abortita.
+
+Matrice VM obbligatoria:
+  - registrare versione tukit, tukit.conf e config Snapper effettiva;
+  - caratterizzare esattamente output di open e semantica di close;
+  - verificare visibilita della cache e del lock ZYpp con /run privato/condiviso;
+  - dup senza aggiornamento kernel: TARGET riceve comunque una entry BLS;
+  - kill durante tukit call;
+  - poweroff durante close;
+  - reboot spontaneo in ogni stato target-* e committing.
 EOF
 }
 
