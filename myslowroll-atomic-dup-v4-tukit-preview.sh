@@ -27,7 +27,7 @@ umask 077
 #     reboot, otherwise changes made later to SOURCE would be absent in TARGET.
 
 readonly PROG="${0##*/}"
-readonly PREVIEW_VERSION='4.0.1-tukit-preview'
+readonly PREVIEW_VERSION='4.0.2-tukit-preview'
 readonly STATE_DIR=/var/lib/myslowroll/atomic-dup-v4-preview
 readonly STATE_FILE="${STATE_DIR}/state"
 readonly HISTORY_FILE="${STATE_DIR}/history.log"
@@ -36,7 +36,8 @@ readonly LOG_ROOT=/var/log/myslowroll-atomic-dup-v4-preview
 readonly LOCK_FILE=/run/myslowroll-atomic-dup-v4-preview.lock
 readonly SNAPPER_CONFIG=root
 readonly REQUIRED_OS_ID=opensuse-slowroll
-readonly TARGET_MAX_AGE_SECONDS="${MYSLOWROLL_TARGET_MAX_AGE_SECONDS:-900}"
+readonly TARGET_MAX_AGE_SECONDS="${MYSLOWROLL_TARGET_MAX_AGE_SECONDS:-3600}"
+readonly ESP_MIN_FREE_BYTES="${MYSLOWROLL_ESP_MIN_FREE_BYTES:-134217728}"
 readonly AUTO_AGREE_LICENSES="${MYSLOWROLL_AUTO_AGREE_LICENSES:-0}"
 
 readonly -a VALID_STATES=(
@@ -97,9 +98,10 @@ acquire_lock() {
 
 require_commands() {
     local cmd
-    for cmd in awk btrfs cat chmod cmp date findmnt flock grep install mktemp \
-               mv rpm sed sha256sum snapper sort sdbootutil sync systemctl \
-               tee transactional-update tukit wc zypper; do
+    for cmd in awk bootctl btrfs cat chmod cmp date df env findmnt flock grep \
+               install mktemp mv readlink rpm sed sha256sum snapper sort \
+               sdbootutil sync systemctl systemd-inhibit tee tr \
+               transactional-update tukit wc zypper; do
         command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
     done
 }
@@ -196,16 +198,108 @@ snapshot_is_bootable() {
     sdbootutil is-bootable "$1" >/dev/null 2>&1
 }
 
+available_bytes() {
+    LC_ALL=C df -PB1 -- "$1" 2>/dev/null |
+        awk 'NR == 2 && $4 ~ /^[0-9]+$/ { print $4 }'
+}
+
+esp_path() {
+    bootctl --print-esp-path 2>/dev/null
+}
+
+check_esp_space() {
+    local esp available
+    esp="$(esp_path)" || return 1
+    [[ -n "${esp}" && -d "${esp}" ]] || return 1
+    available="$(available_bytes "${esp}")" || return 1
+    [[ "${available}" =~ ^[0-9]+$ ]] || return 1
+    (( available >= ESP_MIN_FREE_BYTES )) || {
+        warn "spazio ESP insufficiente: disponibile=${available}, minimo=${ESP_MIN_FREE_BYTES} byte"
+        return 1
+    }
+}
+
+nearest_existing_storage_path() {
+    local path="$1"
+    [[ "${path}" == /* ]] || return 1
+    while [[ ! -e "${path}" ]]; do
+        [[ ! -L "${path}" ]] || return 1
+        [[ "${path}" != / ]] || return 1
+        path="${path%/*}"
+        [[ -n "${path}" ]] || path=/
+    done
+    readlink -f -- "${path}"
+}
+
+path_is_outside_root_snapshot() {
+    local wanted="$1" path root_dev path_dev root_fs path_fs root_id path_id
+    path="$(nearest_existing_storage_path "${wanted}")" || return 1
+    root_dev="$(findmnt -n -o MAJ:MIN --target / 2>/dev/null || true)"
+    path_dev="$(findmnt -n -o MAJ:MIN --target "${path}" 2>/dev/null || true)"
+    root_fs="$(findmnt -n -o FSTYPE --target / 2>/dev/null || true)"
+    path_fs="$(findmnt -n -o FSTYPE --target "${path}" 2>/dev/null || true)"
+    [[ -n "${root_dev}" && -n "${path_dev}" ]] || return 1
+    [[ "${root_dev}" != "${path_dev}" ]] && return 0
+    [[ "${root_fs}" == btrfs && "${path_fs}" == btrfs ]] || return 1
+    root_id="$(btrfs inspect-internal rootid / 2>/dev/null || true)"
+    path_id="$(btrfs inspect-internal rootid "${path}" 2>/dev/null || true)"
+    [[ "${root_id}" =~ ^[0-9]+$ && "${path_id}" =~ ^[0-9]+$ ]] || return 1
+    [[ "${root_id}" != "${path_id}" ]]
+}
+
+state_is_outside_root_snapshot() {
+    path_is_outside_root_snapshot "${STATE_DIR}" &&
+    path_is_outside_root_snapshot "${CACHE_ROOT}" &&
+    path_is_outside_root_snapshot "${LOG_ROOT}"
+}
+
+rpmdb_is_in_root_snapshot() {
+    local db_path root_dev db_dev root_id db_id
+    db_path="$(rpm --eval '%{_dbpath}' 2>/dev/null || true)"
+    [[ "${db_path}" == /* ]] || return 1
+    db_path="$(readlink -f -- "${db_path}" 2>/dev/null || true)"
+    [[ -n "${db_path}" && -d "${db_path}" ]] || return 1
+    root_dev="$(findmnt -n -o MAJ:MIN --target / 2>/dev/null || true)"
+    db_dev="$(findmnt -n -o MAJ:MIN --target "${db_path}" 2>/dev/null || true)"
+    [[ -n "${root_dev}" && "${root_dev}" == "${db_dev}" ]] || return 1
+    root_id="$(btrfs inspect-internal rootid / 2>/dev/null || true)"
+    db_id="$(btrfs inspect-internal rootid "${db_path}" 2>/dev/null || true)"
+    [[ "${root_id}" =~ ^[0-9]+$ && "${root_id}" == "${db_id}" ]]
+}
+
+check_zypp_lock_hint() {
+    local pid
+    if [[ -r /run/zypp.pid ]]; then
+        read -r pid < /run/zypp.pid || true
+        if [[ "${pid:-}" =~ ^[0-9]+$ ]] && kill -0 "${pid}" 2>/dev/null; then
+            die "ZYpp risulta gia in uso dal PID ${pid}; chiudere YaST/Zypper."
+        fi
+    fi
+}
+
+check_transactional_update_idle() {
+    if systemctl is-enabled --quiet transactional-update.timer 2>/dev/null; then
+        die 'transactional-update.timer deve essere disabilitato: potrebbe aprire una transazione concorrente.'
+    fi
+    if systemctl is-active --quiet transactional-update.service 2>/dev/null; then
+        die 'transactional-update.service e attivo: attendere che termini.'
+    fi
+}
+
 ensure_snapshot_bootable() {
     # add-all-kernels runs on the host because the BLS entries and kernel
     # payload live on the real ESP, outside the root snapshot.
     local snapshot="$1" log_file="${2:-${LOG_ROOT}/sdboot-${snapshot}.log}"
     snapshot_is_bootable "${snapshot}" && return 0
+    check_esp_space || return 1
     install -d -o root -g root -m 0700 "${log_file%/*}"
     (
         printf 'snapshot=%s action=sdbootutil-add-all-kernels\n' "${snapshot}"
-        sdbootutil add-all-kernels "${snapshot}"
-        rc=$?
+        if sdbootutil add-all-kernels "${snapshot}"; then
+            rc=0
+        else
+            rc=$?
+        fi
         printf 'add-all-kernels_rc=%s\n' "${rc}"
         (( rc == 0 )) || exit "${rc}"
         sdbootutil is-bootable "${snapshot}"
@@ -345,6 +439,8 @@ update_offline_target() {
 
     configure_license_policy
     assert_target_window
+    check_zypp_lock_hint
+    check_transactional_update_idle
     # systemd-inhibit runs on the host; env and zypper run only inside TARGET.
     # /var is shared by tukit: zypp history/cookies can therefore remain visible
     # on SOURCE even if TARGET is later aborted. RPMDB and /usr stay in TARGET.
@@ -382,6 +478,9 @@ commit_verified_target() {
     STATE_UPDATED_UTC="$(date -u +%FT%TZ)"
     persist_state
 
+    # Flush TARGET, manifest, log and durable state before changing the default
+    # Btrfs subvolume. A close is never attempted after a failed sync barrier.
+    sync || return 1
     tukit close "${target}" || return 1
 
     [[ "$(default_snapshot)" == "${target}" ]] || return 1
@@ -441,6 +540,13 @@ preflight_check() {
     verify_tukit_cli_surface || die 'CLI tukit incompatibile o non caratterizzata.'
     snapper -c "${SNAPPER_CONFIG}" get-config >/dev/null 2>&1 ||
         die "configurazione Snapper ${SNAPPER_CONFIG} non disponibile."
+    state_is_outside_root_snapshot ||
+        die 'state/cache/log v4 non sono dimostrabilmente fuori dalla snapshot root.'
+    rpmdb_is_in_root_snapshot ||
+        die 'RPMDB non e dimostrabilmente inclusa nella snapshot root.'
+    check_transactional_update_idle
+    check_zypp_lock_hint
+    check_esp_space || die 'spazio ESP insufficiente o non determinabile.'
     [[ "$(findmnt -no FSTYPE /)" == btrfs ]] || die 'root non Btrfs.'
     findmnt -no OPTIONS / | grep -qw rw || die 'root attiva non RW.'
     local active default
@@ -487,13 +593,14 @@ Rischio esterno residuo:
 Finestra di drift:
   il piano e il download precedono tukit open. Dal clone al commit non fare
   modifiche amministrative a /etc o /var; il commit viene rifiutato oltre il
-  limite configurato (default 900 secondi). La history/cookie ZYpp in /var puo
+  limite configurato (default 3600 secondi). La history/cookie ZYpp in /var puo
   registrare il tentativo anche quando la TARGET viene abortita.
 
 Matrice VM obbligatoria:
   - registrare versione tukit, tukit.conf e config Snapper effettiva;
   - caratterizzare esattamente output di open e semantica di close;
   - verificare visibilita della cache e del lock ZYpp con /run privato/condiviso;
+  - inventariare tutti i mount /var e classificare ogni effetto persistente;
   - dup senza aggiornamento kernel: TARGET riceve comunque una entry BLS;
   - kill durante tukit call;
   - poweroff durante close;
