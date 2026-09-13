@@ -27,7 +27,7 @@ umask 077
 #     reboot, otherwise changes made later to SOURCE would be absent in TARGET.
 
 readonly PROG="${0##*/}"
-readonly PREVIEW_VERSION='4.0.5-tukit-preview'
+readonly PREVIEW_VERSION='4.0.6-tukit-preview'
 readonly STATE_DIR=/var/lib/myslowroll/atomic-dup-v4-preview
 readonly STATE_FILE="${STATE_DIR}/state"
 readonly HISTORY_FILE="${STATE_DIR}/history.log"
@@ -41,7 +41,8 @@ readonly ESP_MIN_FREE_BYTES="${MYSLOWROLL_ESP_MIN_FREE_BYTES:-134217728}"
 readonly AUTO_AGREE_LICENSES="${MYSLOWROLL_AUTO_AGREE_LICENSES:-0}"
 
 readonly -a VALID_STATES=(
-    planning planned target-prepared target-updating target-verifying
+    planning planned target-opening target-open-ambiguous
+    target-prepared target-updating target-verifying
     target-verified committing pending-reboot confirmed aborted
 )
 
@@ -267,18 +268,6 @@ path_is_outside_root_snapshot() {
     [[ "${root_id}" != "${path_id}" ]]
 }
 
-state_is_outside_root_snapshot() {
-    # /var itself is deliberately required to be external. The three durable
-    # paths would technically be sufficient, but accepting an internal /var
-    # would change the documented tukit/ZYpp side-effect model. This stricter
-    # workstation policy therefore fails closed even with separately mounted
-    # STATE_DIR, CACHE_ROOT and LOG_ROOT.
-    path_is_outside_root_snapshot /var &&
-    path_is_outside_root_snapshot "${STATE_DIR}" &&
-    path_is_outside_root_snapshot "${CACHE_ROOT}" &&
-    path_is_outside_root_snapshot "${LOG_ROOT}"
-}
-
 rpmdb_is_in_root_snapshot() {
     local db_path root_dev db_dev root_id db_id
     db_path="$(rpm --eval '%{_dbpath}' 2>/dev/null || true)"
@@ -416,9 +405,35 @@ parse_tukit_open_output() {
 tukit_open_target() {
     local description="$1" raw_file="$2" target
     install -d -o root -g root -m 0700 "${raw_file%/*}"
-    tukit --description "${description}" open >"${raw_file}" 2>&1 || return 1
+    STATE_STATUS=target-opening
+    STATE_TARGET=
+    STATE_UPDATED_UTC="$(date -u +%FT%TZ)"
+    STATE_LAST_ERROR=
+    persist_state || return 1
+
+    if ! tukit --description "${description}" open >"${raw_file}" 2>&1; then
+        sync "${raw_file}" || true
+        STATE_STATUS=target-open-ambiguous
+        STATE_UPDATED_UTC="$(date -u +%FT%TZ)"
+        STATE_LAST_ERROR="tukit open fallito o ambiguo; cercare la TARGET tramite descrizione/txid; output=${raw_file}"
+        persist_state || true
+        warn "tukit open non concluso in modo verificabile; non riprovare automaticamente. Output: ${raw_file}"
+        return 1
+    fi
     sync "${raw_file}"
-    target="$(parse_tukit_open_output "${raw_file}")" || return 1
+    if ! target="$(parse_tukit_open_output "${raw_file}")"; then
+        STATE_STATUS=target-open-ambiguous
+        STATE_UPDATED_UTC="$(date -u +%FT%TZ)"
+        STATE_LAST_ERROR="tukit open riuscito ma numero TARGET non riconosciuto; cercare per txid; output=${raw_file}"
+        persist_state || true
+        warn "TARGET forse creata ma numero non riconosciuto; non riprovare. Output: ${raw_file}"
+        return 1
+    fi
+    STATE_TARGET="${target}"
+    STATE_STATUS=target-prepared
+    STATE_UPDATED_UTC="$(date -u +%FT%TZ)"
+    persist_state || return 1
+    record_source_hash_at_target_open
     printf '%s\n' "${target}"
 }
 
@@ -435,11 +450,44 @@ tukit_call_external() {
 }
 
 tukit_abort_target() {
-    local target="$1" active
+    local target="$1" active default
     active="$(active_snapshot)"
+    default="$(default_snapshot)"
     [[ -n "${active}" ]] || die 'snapshot attiva non determinabile.'
     [[ "${target}" != "${active}" ]] || die "rifiuto di abortire TARGET ${target}: e' la root attiva."
+    [[ "${target}" != "${default}" ]] || die "rifiuto di abortire TARGET ${target}: e' la snapshot default."
+    remove_target_boot_entries "${target}" ||
+        warn "pulizia preventiva delle entry BLS TARGET ${target} incompleta; proseguo con abort Snapper."
     tukit abort "${target}"
+}
+
+remove_target_boot_entries() {
+    local target="$1" log_file="${LOG_ROOT}/${STATE_TXID:-unknown}.target-${target}.sdboot-remove.log"
+    [[ "${target}" =~ ^[0-9]+$ ]] || return 1
+    [[ "$(active_snapshot)" != "${target}" ]] || return 1
+    [[ "$(default_snapshot)" != "${target}" ]] || return 1
+    install -d -o root -g root -m 0700 "${LOG_ROOT}"
+    (
+        rc=0
+        if sdbootutil remove-all-kernels --disable-predictions "${target}"; then
+            printf 'remove-all-kernels_rc=0\n'
+        else
+            cmd_rc=$?
+            printf 'remove-all-kernels_rc=%s\n' "${cmd_rc}"
+            rc="${cmd_rc}"
+        fi
+        if sdbootutil cleanup --disable-predictions "${target}"; then
+            printf 'cleanup_rc=0\n'
+        else
+            cmd_rc=$?
+            printf 'cleanup_rc=%s\n' "${cmd_rc}"
+            (( rc != 0 )) || rc="${cmd_rc}"
+        fi
+        exit "${rc}"
+    ) >"${log_file}" 2>&1
+    local rc=$?
+    sync "${log_file}" || true
+    return "${rc}"
 }
 
 target_cache_visible() {
@@ -451,11 +499,16 @@ target_cache_visible() {
 write_target_manifest() {
     local target="$1" output="$2" tmp
     tmp="${output}.tmp"
-    LC_ALL=C tukit_call "${target}" rpm -qa \
+    rm -f -- "${tmp}"
+    if ! LC_ALL=C tukit_call "${target}" rpm -qa \
         --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}|%{ARCH}\n' |
-        LC_ALL=C sort -u > "${tmp}"
-    sync "${tmp}"
-    mv -f -- "${tmp}" "${output}"
+        LC_ALL=C sort -u >"${tmp}"; then
+        rm -f -- "${tmp}"
+        return 1
+    fi
+    [[ -s "${tmp}" ]] || { rm -f -- "${tmp}"; return 1; }
+    sync "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+    mv -f -- "${tmp}" "${output}" || { rm -f -- "${tmp}"; return 1; }
     sync "${output%/*}"
 }
 
@@ -504,7 +557,8 @@ assert_target_window() {
 }
 
 update_offline_target() {
-    local target="$1" package_cache="$2" log_file="$3"
+    local target="$1" package_cache="$2" log_file="$3" had_errexit=0
+    local -a pipeline_rc
     assert_source_unchanged
     target_cache_visible "${target}" "${package_cache}" ||
         die "cache ${package_cache} non visibile nella transazione tukit."
@@ -516,6 +570,8 @@ update_offline_target() {
     # systemd-inhibit runs on the host; env and zypper run only inside TARGET.
     # /var is shared by tukit: zypp history/cookies can therefore remain visible
     # on SOURCE even if TARGET is later aborted. RPMDB and /usr stay in TARGET.
+    [[ $- == *e* ]] && had_errexit=1
+    set +e
     systemd-inhibit \
         --what=shutdown:sleep:idle \
         --who="${PROG}" \
@@ -529,8 +585,11 @@ update_offline_target() {
             "${ZYPPER_LICENSE_ARGS[@]}" \
             --download-in-advance --no-recommends --no-allow-vendor-change \
         2>&1 | tee "${log_file}"
-    local rc=${PIPESTATUS[0]}
-    (( rc == 0 )) || return "${rc}"
+    pipeline_rc=("${PIPESTATUS[@]}")
+    (( had_errexit == 0 )) || set -e
+    sync "${log_file}" || warn "impossibile sincronizzare il log ${log_file}."
+    (( pipeline_rc[1] == 0 )) || warn "tee del dup ha restituito rc=${pipeline_rc[1]}."
+    return "${pipeline_rc[0]}"
 }
 
 commit_verified_target() {
@@ -576,6 +635,8 @@ recover_committing_reference() {
 
     if [[ "${active}" == "${target}" ]]; then
         # Never delete the running root. Validate and continue to confirmation.
+        [[ "${default}" == "${target}" ]] ||
+            die "TARGET ${target} attiva ma default=${default:-?}: recovery automatica rifiutata."
         snapshot_is_rw "${target}" || die 'TARGET attiva ma read-only.'
         snapshot_is_bootable "${target}" || die 'TARGET attiva ma non bootable.'
         STATE_STATUS=pending-reboot
@@ -615,6 +676,10 @@ preflight_check() {
     verify_tukit_cli_surface || die 'CLI tukit incompatibile o non caratterizzata.'
     snapper -c "${SNAPPER_CONFIG}" get-config >/dev/null 2>&1 ||
         die "configurazione Snapper ${SNAPPER_CONFIG} non disponibile."
+    # /var itself is deliberately required to be external. The three durable
+    # paths would technically suffice, but an internal /var would change the
+    # documented tukit/ZYpp side-effect model. This workstation policy is
+    # intentionally stricter and fails closed.
     path_is_outside_root_snapshot /var ||
         die '/var non e dimostrabilmente fuori dalla snapshot root.'
     path_is_outside_root_snapshot "${STATE_DIR}" ||
