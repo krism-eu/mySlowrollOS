@@ -27,7 +27,7 @@ umask 077
 #     reboot, otherwise changes made later to SOURCE would be absent in TARGET.
 
 readonly PROG="${0##*/}"
-readonly PREVIEW_VERSION='4.0.3-tukit-preview'
+readonly PREVIEW_VERSION='4.0.4-tukit-preview'
 readonly STATE_DIR=/var/lib/myslowroll/atomic-dup-v4-preview
 readonly STATE_FILE="${STATE_DIR}/state"
 readonly HISTORY_FILE="${STATE_DIR}/history.log"
@@ -100,7 +100,7 @@ acquire_lock() {
 require_commands() {
     local cmd
     for cmd in awk bootctl btrfs cat chmod cmp date df env findmnt flock grep \
-               install mktemp mv readlink rpm sed sha256sum snapper sort \
+               install mktemp mv readlink rm rpm sed sha256sum snapper sort \
                sdbootutil sync systemctl systemd-inhibit tee tr \
                transactional-update tukit wc zypper; do
         command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
@@ -252,6 +252,11 @@ path_is_outside_root_snapshot() {
 }
 
 state_is_outside_root_snapshot() {
+    # /var itself is deliberately required to be external. The three durable
+    # paths would technically be sufficient, but accepting an internal /var
+    # would change the documented tukit/ZYpp side-effect model. This stricter
+    # workstation policy therefore fails closed even with separately mounted
+    # STATE_DIR, CACHE_ROOT and LOG_ROOT.
     path_is_outside_root_snapshot /var &&
     path_is_outside_root_snapshot "${STATE_DIR}" &&
     path_is_outside_root_snapshot "${CACHE_ROOT}" &&
@@ -283,11 +288,23 @@ check_zypp_lock_hint() {
 }
 
 source_rpmdb_hash() {
-    LC_ALL=C rpm -qa \
+    local tmp hash
+    tmp="$(mktemp /run/myslowroll-source-rpmdb.XXXXXX)" || return 1
+    if ! LC_ALL=C rpm -qa \
         --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}|%{ARCH}\n' |
-        LC_ALL=C sort -u |
-        sha256sum |
-        awk '{ print $1 }'
+        LC_ALL=C sort -u >"${tmp}"; then
+        rm -f -- "${tmp}"
+        return 1
+    fi
+    # Do not accept the valid SHA-256 of an empty stream as a healthy RPMDB.
+    [[ -s "${tmp}" ]] || { rm -f -- "${tmp}"; return 1; }
+    hash="$(sha256sum "${tmp}" | awk '{ print $1 }')" || {
+        rm -f -- "${tmp}"
+        return 1
+    }
+    rm -f -- "${tmp}"
+    [[ "${hash}" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "${hash}"
 }
 
 record_source_hash_at_target_open() {
@@ -311,7 +328,7 @@ assert_source_unchanged() {
 
 check_transactional_update_idle() {
     if systemctl is-enabled --quiet transactional-update.timer 2>/dev/null; then
-        die 'transactional-update.timer deve essere disabilitato: potrebbe aprire una transazione concorrente.'
+        die 'transactional-update.timer deve essere disabilitato: eseguire systemctl disable --now transactional-update.timer.'
     fi
     if systemctl is-active --quiet transactional-update.service 2>/dev/null; then
         die 'transactional-update.service e attivo: attendere che termini.'
@@ -406,9 +423,8 @@ tukit_abort_target() {
 
 target_cache_visible() {
     local target="$1" cache="$2"
-    tukit_call "${target}" test -d "${cache}" &&
-    tukit_call "${target}" test -r "${cache}" &&
-    tukit_call "${target}" test -w "${cache}"
+    tukit_call "${target}" sh -c \
+        'test -d "$1" && test -r "$1" && test -w "$1"' sh "${cache}"
 }
 
 write_target_manifest() {
@@ -439,6 +455,7 @@ verify_target_packages() {
 verify_offline_target() {
     local target="$1" expected_manifest="$2" post_manifest="$3"
     local sdboot_log="${4:-${LOG_ROOT}/${STATE_TXID:-unknown}.target-${target}.sdboot.log}"
+    assert_source_unchanged
     snapshot_exists "${target}" || return 1
     snapshot_is_rw "${target}" || return 1
     write_target_manifest "${target}" "${post_manifest}" || return 1
@@ -467,6 +484,7 @@ assert_target_window() {
 
 update_offline_target() {
     local target="$1" package_cache="$2" log_file="$3"
+    assert_source_unchanged
     target_cache_visible "${target}" "${package_cache}" ||
         die "cache ${package_cache} non visibile nella transazione tukit."
 
