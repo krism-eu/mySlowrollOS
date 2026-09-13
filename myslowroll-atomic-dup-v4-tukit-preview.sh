@@ -27,7 +27,7 @@ umask 077
 #     reboot, otherwise changes made later to SOURCE would be absent in TARGET.
 
 readonly PROG="${0##*/}"
-readonly PREVIEW_VERSION='4.0.2-tukit-preview'
+readonly PREVIEW_VERSION='4.0.3-tukit-preview'
 readonly STATE_DIR=/var/lib/myslowroll/atomic-dup-v4-preview
 readonly STATE_FILE="${STATE_DIR}/state"
 readonly HISTORY_FILE="${STATE_DIR}/history.log"
@@ -60,6 +60,7 @@ STATE_PLAN_HASH=
 STATE_CACHE_HASH=
 STATE_RPMDB_PRE_HASH=
 STATE_RPMDB_POST_HASH=
+STATE_SOURCE_OPEN_HASH=
 STATE_CREATED_UTC=
 STATE_TARGET_OPENED_UTC=
 STATE_UPDATED_UTC=
@@ -128,6 +129,7 @@ load_state() {
             cache_hash)      STATE_CACHE_HASH="${value}" ;;
             rpmdb_pre_hash)  STATE_RPMDB_PRE_HASH="${value}" ;;
             rpmdb_post_hash) STATE_RPMDB_POST_HASH="${value}" ;;
+            source_open_hash) STATE_SOURCE_OPEN_HASH="${value}" ;;
             created_utc)     STATE_CREATED_UTC="${value}" ;;
             target_opened_utc) STATE_TARGET_OPENED_UTC="${value}" ;;
             updated_utc)     STATE_UPDATED_UTC="${value}" ;;
@@ -155,6 +157,7 @@ persist_state() {
         printf 'cache_hash=%s\n' "${STATE_CACHE_HASH}"
         printf 'rpmdb_pre_hash=%s\n' "${STATE_RPMDB_PRE_HASH}"
         printf 'rpmdb_post_hash=%s\n' "${STATE_RPMDB_POST_HASH}"
+        printf 'source_open_hash=%s\n' "${STATE_SOURCE_OPEN_HASH}"
         printf 'created_utc=%s\n' "${STATE_CREATED_UTC}"
         printf 'target_opened_utc=%s\n' "${STATE_TARGET_OPENED_UTC}"
         printf 'updated_utc=%s\n' "${STATE_UPDATED_UTC}"
@@ -199,8 +202,9 @@ snapshot_is_bootable() {
 }
 
 available_bytes() {
-    LC_ALL=C df -PB1 -- "$1" 2>/dev/null |
-        awk 'NR == 2 && $4 ~ /^[0-9]+$/ { print $4 }'
+    # GNU df rejects -P together with --output, so use -B1 only.
+    LC_ALL=C df -B1 --output=avail -- "$1" 2>/dev/null |
+        awk 'NR == 2 && $1 ~ /^[0-9]+$/ { print $1 }'
 }
 
 esp_path() {
@@ -248,6 +252,7 @@ path_is_outside_root_snapshot() {
 }
 
 state_is_outside_root_snapshot() {
+    path_is_outside_root_snapshot /var &&
     path_is_outside_root_snapshot "${STATE_DIR}" &&
     path_is_outside_root_snapshot "${CACHE_ROOT}" &&
     path_is_outside_root_snapshot "${LOG_ROOT}"
@@ -275,6 +280,33 @@ check_zypp_lock_hint() {
             die "ZYpp risulta gia in uso dal PID ${pid}; chiudere YaST/Zypper."
         fi
     fi
+}
+
+source_rpmdb_hash() {
+    LC_ALL=C rpm -qa \
+        --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}|%{ARCH}\n' |
+        LC_ALL=C sort -u |
+        sha256sum |
+        awk '{ print $1 }'
+}
+
+record_source_hash_at_target_open() {
+    # Called immediately after tukit open in the final orchestrator.
+    STATE_SOURCE_OPEN_HASH="$(source_rpmdb_hash)" ||
+        die 'impossibile acquisire il fingerprint RPM della SOURCE.'
+    [[ "${STATE_SOURCE_OPEN_HASH}" =~ ^[0-9a-f]{64}$ ]] ||
+        die 'fingerprint RPM SOURCE non valido.'
+    STATE_TARGET_OPENED_UTC="$(date -u +%FT%TZ)"
+    persist_state
+}
+
+assert_source_unchanged() {
+    local current
+    [[ "${STATE_SOURCE_OPEN_HASH}" =~ ^[0-9a-f]{64}$ ]] ||
+        die 'fingerprint SOURCE all apertura assente o non valido.'
+    current="$(source_rpmdb_hash)" || die 'fingerprint RPM SOURCE corrente non calcolabile.'
+    [[ "${current}" == "${STATE_SOURCE_OPEN_HASH}" ]] ||
+        die 'RPMDB della SOURCE cambiata dopo tukit open: commit rifiutato.'
 }
 
 check_transactional_update_idle() {
@@ -375,7 +407,8 @@ tukit_abort_target() {
 target_cache_visible() {
     local target="$1" cache="$2"
     tukit_call "${target}" test -d "${cache}" &&
-    tukit_call "${target}" test -r "${cache}"
+    tukit_call "${target}" test -r "${cache}" &&
+    tukit_call "${target}" test -w "${cache}"
 }
 
 write_target_manifest() {
@@ -467,6 +500,7 @@ commit_verified_target() {
         die 'SOURCE non e piu la snapshot attiva: commit rifiutato.'
     [[ "$(default_snapshot)" == "${source}" ]] ||
         die 'SOURCE non e piu la snapshot predefinita: commit rifiutato.'
+    assert_source_unchanged
     snapshot_is_bootable "${source}" || die 'SOURCE non piu bootable: commit rifiutato.'
     ensure_snapshot_bootable "${target}" \
         "${LOG_ROOT}/${STATE_TXID:-unknown}.target-${target}.sdboot.log" ||
@@ -537,18 +571,24 @@ preflight_check() {
     require_root
     acquire_lock
     require_commands
+    [[ "$(findmnt -no FSTYPE /)" == btrfs ]] || die 'root non Btrfs.'
+    findmnt -no OPTIONS / | tr ',' '\n' | grep -qx rw || die 'root attiva non RW.'
     verify_tukit_cli_surface || die 'CLI tukit incompatibile o non caratterizzata.'
     snapper -c "${SNAPPER_CONFIG}" get-config >/dev/null 2>&1 ||
         die "configurazione Snapper ${SNAPPER_CONFIG} non disponibile."
-    state_is_outside_root_snapshot ||
-        die 'state/cache/log v4 non sono dimostrabilmente fuori dalla snapshot root.'
+    path_is_outside_root_snapshot /var ||
+        die '/var non e dimostrabilmente fuori dalla snapshot root.'
+    path_is_outside_root_snapshot "${STATE_DIR}" ||
+        die "STATE_DIR (${STATE_DIR}) non e fuori dalla snapshot root."
+    path_is_outside_root_snapshot "${CACHE_ROOT}" ||
+        die "CACHE_ROOT (${CACHE_ROOT}) non e fuori dalla snapshot root."
+    path_is_outside_root_snapshot "${LOG_ROOT}" ||
+        die "LOG_ROOT (${LOG_ROOT}) non e fuori dalla snapshot root."
     rpmdb_is_in_root_snapshot ||
         die 'RPMDB non e dimostrabilmente inclusa nella snapshot root.'
     check_transactional_update_idle
     check_zypp_lock_hint
     check_esp_space || die 'spazio ESP insufficiente o non determinabile.'
-    [[ "$(findmnt -no FSTYPE /)" == btrfs ]] || die 'root non Btrfs.'
-    findmnt -no OPTIONS / | grep -qw rw || die 'root attiva non RW.'
     local active default
     active="$(active_snapshot)"
     default="$(default_snapshot)"
@@ -593,8 +633,9 @@ Rischio esterno residuo:
 Finestra di drift:
   il piano e il download precedono tukit open. Dal clone al commit non fare
   modifiche amministrative a /etc o /var; il commit viene rifiutato oltre il
-  limite configurato (default 3600 secondi). La history/cookie ZYpp in /var puo
-  registrare il tentativo anche quando la TARGET viene abortita.
+  limite configurato (default 3600 secondi). Il fingerprint RPM della SOURCE
+  viene inoltre salvato a open e confrontato prima del close. La history/cookie
+  ZYpp in /var puo registrare il tentativo anche quando TARGET viene abortita.
 
 Matrice VM obbligatoria:
   - registrare versione tukit, tukit.conf e config Snapper effettiva;
