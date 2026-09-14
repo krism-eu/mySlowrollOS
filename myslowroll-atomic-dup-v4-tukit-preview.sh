@@ -27,7 +27,7 @@ umask 077
 #     reboot, otherwise changes made later to SOURCE would be absent in TARGET.
 
 readonly PROG="${0##*/}"
-readonly PREVIEW_VERSION='4.0.6-tukit-preview'
+readonly PREVIEW_VERSION='4.0.7-tukit-preview'
 readonly STATE_DIR=/var/lib/myslowroll/atomic-dup-v4-preview
 readonly STATE_FILE="${STATE_DIR}/state"
 readonly HISTORY_FILE="${STATE_DIR}/history.log"
@@ -119,6 +119,31 @@ require_commands() {
     done
 }
 
+is_uuid() {
+    local value="${1:-}"
+    [[ "${value}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
+}
+
+is_sha256() {
+    [[ "${1:-}" =~ ^[0-9a-f]{64}$ ]]
+}
+
+is_utc_timestamp() {
+    [[ "${1:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+}
+
+validate_configuration() {
+    [[ "${TARGET_MAX_AGE_SECONDS}" =~ ^[0-9]+$ ]] ||
+        die 'MYSLOWROLL_TARGET_MAX_AGE_SECONDS deve essere un intero positivo.'
+    (( 10#${TARGET_MAX_AGE_SECONDS} > 0 )) ||
+        die 'MYSLOWROLL_TARGET_MAX_AGE_SECONDS deve essere maggiore di zero.'
+    [[ "${ESP_MIN_FREE_BYTES}" =~ ^[0-9]+$ ]] ||
+        die 'MYSLOWROLL_ESP_MIN_FREE_BYTES deve essere un intero positivo.'
+    (( 10#${ESP_MIN_FREE_BYTES} > 0 )) ||
+        die 'MYSLOWROLL_ESP_MIN_FREE_BYTES deve essere maggiore di zero.'
+    configure_license_policy
+}
+
 state_value_valid() {
     local wanted="$1" item
     for item in "${VALID_STATES[@]}"; do
@@ -129,35 +154,65 @@ state_value_valid() {
 
 load_state() {
     local key value
+    local -A seen=()
     [[ -f "${STATE_FILE}" ]] || return 0
     while IFS='=' read -r key value; do
         case "${key}" in
-            status)          STATE_STATUS="${value}" ;;
-            txid)            STATE_TXID="${value}" ;;
-            source)          STATE_SOURCE="${value}" ;;
-            target)          STATE_TARGET="${value}" ;;
-            boot_id_before)  STATE_BOOT_ID_BEFORE="${value}" ;;
-            plan_hash)       STATE_PLAN_HASH="${value}" ;;
-            cache_hash)      STATE_CACHE_HASH="${value}" ;;
-            rpmdb_pre_hash)  STATE_RPMDB_PRE_HASH="${value}" ;;
-            rpmdb_post_hash) STATE_RPMDB_POST_HASH="${value}" ;;
-            source_open_hash) STATE_SOURCE_OPEN_HASH="${value}" ;;
-            created_utc)     STATE_CREATED_UTC="${value}" ;;
-            target_opened_utc) STATE_TARGET_OPENED_UTC="${value}" ;;
-            updated_utc)     STATE_UPDATED_UTC="${value}" ;;
-            last_error)      STATE_LAST_ERROR="${value}" ;;
+            status|txid|source|target|boot_id_before|plan_hash|cache_hash|rpmdb_pre_hash|rpmdb_post_hash|source_open_hash|created_utc|target_opened_utc|updated_utc|last_error)
+                [[ -z "${seen[${key}]+x}" ]] || die "chiave state duplicata: ${key}"
+                seen["${key}"]=1
+                case "${key}" in
+                    status)          STATE_STATUS="${value}" ;;
+                    txid)            STATE_TXID="${value}" ;;
+                    source)          STATE_SOURCE="${value}" ;;
+                    target)          STATE_TARGET="${value}" ;;
+                    boot_id_before)  STATE_BOOT_ID_BEFORE="${value}" ;;
+                    plan_hash)       STATE_PLAN_HASH="${value}" ;;
+                    cache_hash)      STATE_CACHE_HASH="${value}" ;;
+                    rpmdb_pre_hash)  STATE_RPMDB_PRE_HASH="${value}" ;;
+                    rpmdb_post_hash) STATE_RPMDB_POST_HASH="${value}" ;;
+                    source_open_hash) STATE_SOURCE_OPEN_HASH="${value}" ;;
+                    created_utc)     STATE_CREATED_UTC="${value}" ;;
+                    target_opened_utc) STATE_TARGET_OPENED_UTC="${value}" ;;
+                    updated_utc)     STATE_UPDATED_UTC="${value}" ;;
+                    last_error)      STATE_LAST_ERROR="${value}" ;;
+                esac
+                ;;
             ''|'#'*) ;;
             *) die "chiave state sconosciuta: ${key}" ;;
         esac
     done < "${STATE_FILE}"
-    [[ -z "${STATE_STATUS}" ]] || state_value_valid "${STATE_STATUS}" ||
-        die "stato non valido: ${STATE_STATUS}"
+    [[ -n "${STATE_STATUS}" ]] || die 'file state privo di status.'
+    state_value_valid "${STATE_STATUS}" || die "stato non valido: ${STATE_STATUS}"
+    is_uuid "${STATE_TXID}" || die 'txid non valido nello state.'
+    [[ "${STATE_SOURCE}" =~ ^[0-9]+$ ]] || die 'SOURCE non valida nello state.'
+    [[ -z "${STATE_TARGET}" || "${STATE_TARGET}" =~ ^[0-9]+$ ]] ||
+        die 'TARGET non valida nello state.'
+    [[ -z "${STATE_BOOT_ID_BEFORE}" ]] || is_uuid "${STATE_BOOT_ID_BEFORE}" ||
+        die 'boot_id_before non valido nello state.'
+    [[ -z "${STATE_PLAN_HASH}" ]] || is_sha256 "${STATE_PLAN_HASH}" ||
+        die 'plan_hash non valido nello state.'
+    [[ -z "${STATE_CACHE_HASH}" ]] || is_sha256 "${STATE_CACHE_HASH}" ||
+        die 'cache_hash non valido nello state.'
+    [[ -z "${STATE_RPMDB_PRE_HASH}" ]] || is_sha256 "${STATE_RPMDB_PRE_HASH}" ||
+        die 'rpmdb_pre_hash non valido nello state.'
+    [[ -z "${STATE_RPMDB_POST_HASH}" ]] || is_sha256 "${STATE_RPMDB_POST_HASH}" ||
+        die 'rpmdb_post_hash non valido nello state.'
+    [[ -z "${STATE_SOURCE_OPEN_HASH}" ]] || is_sha256 "${STATE_SOURCE_OPEN_HASH}" ||
+        die 'source_open_hash non valido nello state.'
+    [[ -z "${STATE_CREATED_UTC}" ]] || is_utc_timestamp "${STATE_CREATED_UTC}" ||
+        die 'created_utc non valido nello state.'
+    [[ -z "${STATE_TARGET_OPENED_UTC}" ]] || is_utc_timestamp "${STATE_TARGET_OPENED_UTC}" ||
+        die 'target_opened_utc non valido nello state.'
+    [[ -z "${STATE_UPDATED_UTC}" ]] || is_utc_timestamp "${STATE_UPDATED_UTC}" ||
+        die 'updated_utc non valido nello state.'
 }
 
 persist_state() {
     # Reference implementation for the final v4. The preview never calls it.
     local tmp
-    install -d -o root -g root -m 0700 "${STATE_DIR}"
+    install -d -o root -g root -m 0700 "${STATE_DIR}" ||
+        die 'impossibile preparare STATE_DIR per il marker anti-drift.'
     tmp="$(mktemp "${STATE_DIR}/.state.XXXXXX")"
     {
         printf 'status=%s\n' "${STATE_STATUS}"
@@ -173,12 +228,16 @@ persist_state() {
         printf 'created_utc=%s\n' "${STATE_CREATED_UTC}"
         printf 'target_opened_utc=%s\n' "${STATE_TARGET_OPENED_UTC}"
         printf 'updated_utc=%s\n' "${STATE_UPDATED_UTC}"
-        printf 'last_error=%s\n' "${STATE_LAST_ERROR//$'\n'/ }"
+        local safe_last_error="${STATE_LAST_ERROR//$'\n'/ }"
+        safe_last_error="${safe_last_error//$'\r'/ }"
+        safe_last_error="${safe_last_error//$'\t'/ }"
+        printf 'last_error=%s\n' "${safe_last_error}"
     } > "${tmp}"
     chmod 0600 "${tmp}"
     sync "${tmp}"
     mv -f -- "${tmp}" "${STATE_FILE}"
     sync "${STATE_DIR}"
+    sync -f "${STATE_FILE}"
 }
 
 snapshot_path() {
@@ -314,34 +373,72 @@ source_rpmdb_hash() {
     printf '%s\n' "${hash}"
 }
 
-record_source_hash_at_target_open() {
-    # Called immediately after tukit open in the final orchestrator.
+start_source_drift_guard() {
+    # Called immediately before tukit open. Starting before the clone closes
+    # the small observation gap that would otherwise exist while parsing open.
+    local marker
+    marker="$(source_etc_marker)" || die 'percorso marker anti-drift non valido.'
+    install -d -o root -g root -m 0700 "${STATE_DIR}"
+    printf 'txid=%s\nopened_utc=%s\n' "${STATE_TXID}" "$(date -u +%FT%TZ)" >"${marker}" ||
+        die 'impossibile creare il marker anti-drift di /etc.'
+    chmod 0600 "${marker}" || {
+        rm -f -- "${marker}"
+        die 'impossibile proteggere il marker anti-drift di /etc.'
+    }
+    sync "${marker}" || die 'impossibile rendere durevole il marker anti-drift di /etc.'
+
     STATE_SOURCE_OPEN_HASH="$(source_rpmdb_hash)" ||
         die 'impossibile acquisire il fingerprint RPM della SOURCE.'
     [[ "${STATE_SOURCE_OPEN_HASH}" =~ ^[0-9a-f]{64}$ ]] ||
         die 'fingerprint RPM SOURCE non valido.'
-    STATE_TARGET_OPENED_UTC="$(date -u +%FT%TZ)"
-    persist_state
+    persist_state || die 'impossibile rendere durevole il fingerprint della SOURCE.'
+}
+
+source_etc_marker() {
+    is_uuid "${STATE_TXID}" || return 1
+    printf '%s/%s.source-etc-open.marker\n' "${STATE_DIR}" "${STATE_TXID}"
+}
+
+source_etc_drift_report() {
+    local marker path tmp
+    marker="$(source_etc_marker)" || return 1
+    [[ -f "${marker}" ]] || return 1
+    tmp="$(mktemp /run/myslowroll-etc-drift.XXXXXX)" || return 1
+    if ! find /etc -xdev -type f -newer "${marker}" -print0 >"${tmp}"; then
+        rm -f -- "${tmp}"
+        return 1
+    fi
+    while IFS= read -r -d '' path; do
+        case "${path}" in
+            /etc/resolv.conf|/etc/mtab|/etc/adjtime) continue ;;
+        esac
+        printf '%s\n' "${path}"
+    done <"${tmp}"
+    rm -f -- "${tmp}"
 }
 
 assert_source_unchanged() {
-    local current
+    local current etc_drift
     [[ "${STATE_SOURCE_OPEN_HASH}" =~ ^[0-9a-f]{64}$ ]] ||
         die 'fingerprint SOURCE all apertura assente o non valido.'
     current="$(source_rpmdb_hash)" || die 'fingerprint RPM SOURCE corrente non calcolabile.'
     [[ "${current}" == "${STATE_SOURCE_OPEN_HASH}" ]] ||
         die 'RPMDB della SOURCE cambiata dopo tukit open: chiudere YaST/Zypper, abortire la TARGET e creare un nuovo piano.'
+    etc_drift="$(source_etc_drift_report)" ||
+        die 'marker anti-drift di /etc assente o non verificabile: commit rifiutato.'
+    [[ -z "${etc_drift}" ]] ||
+        die "file della SOURCE modificati in /etc dopo tukit open: ${etc_drift//$'\n'/, }; abortire la TARGET e creare un nuovo piano."
 }
 
 check_transactional_update_idle() {
-    if systemctl is-enabled --quiet transactional-update.timer 2>/dev/null; then
-        die 'transactional-update.timer deve essere disabilitato: eseguire systemctl disable --now transactional-update.timer.'
+    if systemctl is-failed --quiet transactional-update.service 2>/dev/null; then
+        die 'transactional-update.service e in stato failed: esaminare systemctl status e journalctl prima di continuare.'
     fi
     if systemctl is-active --quiet transactional-update.service 2>/dev/null; then
         die 'transactional-update.service e attivo: attendere che termini.'
     fi
-    if systemctl is-failed --quiet transactional-update.service 2>/dev/null; then
-        die 'transactional-update.service e in stato failed: esaminare systemctl status e journalctl prima di continuare.'
+    if systemctl is-enabled --quiet transactional-update.timer 2>/dev/null; then
+        die 'transactional-update.timer deve essere disabilitato: eseguire systemctl disable --now transactional-update.timer.'
     fi
 }
 
@@ -410,6 +507,7 @@ tukit_open_target() {
     STATE_UPDATED_UTC="$(date -u +%FT%TZ)"
     STATE_LAST_ERROR=
     persist_state || return 1
+    start_source_drift_guard
 
     if ! tukit --description "${description}" open >"${raw_file}" 2>&1; then
         sync "${raw_file}" || true
@@ -431,9 +529,9 @@ tukit_open_target() {
     fi
     STATE_TARGET="${target}"
     STATE_STATUS=target-prepared
+    STATE_TARGET_OPENED_UTC="$(date -u +%FT%TZ)"
     STATE_UPDATED_UTC="$(date -u +%FT%TZ)"
     persist_state || return 1
-    record_source_hash_at_target_open
     printf '%s\n' "${target}"
 }
 
@@ -491,9 +589,20 @@ remove_target_boot_entries() {
 }
 
 target_cache_visible() {
-    local target="$1" cache="$2"
+    local target="$1" cache="$2" marker token rc=0
+    [[ "${target}" =~ ^[0-9]+$ && "${cache}" == "${CACHE_ROOT}/"* ]] || return 1
+    [[ -d "${cache}" && -r "${cache}" && -w "${cache}" ]] || return 1
+    token="${STATE_TXID}:$(cat /proc/sys/kernel/random/uuid 2>/dev/null || true)"
+    is_uuid "${token#*:}" || return 1
+    marker="${cache}/.target-visibility-${STATE_TXID}"
+    printf '%s\n' "${token}" >"${marker}" || return 1
+    chmod 0600 "${marker}" || { rm -f -- "${marker}"; return 1; }
+    sync "${marker}" || { rm -f -- "${marker}"; return 1; }
     tukit_call "${target}" sh -c \
-        'test -d "$1" && test -r "$1" && test -w "$1"' sh "${cache}"
+        'test -r "$1" && test -w "${1%/*}" && IFS= read -r value <"$1" && test "$value" = "$2"' \
+        sh "${marker}" "${token}" || rc=$?
+    rm -f -- "${marker}" || return 1
+    return "${rc}"
 }
 
 write_target_manifest() {
@@ -671,6 +780,7 @@ preflight_check() {
     require_root
     acquire_lock
     require_commands
+    validate_configuration
     [[ "$(findmnt -no FSTYPE /)" == btrfs ]] || die 'root non Btrfs.'
     findmnt -no OPTIONS / | tr ',' '\n' | grep -qx rw || die 'root attiva non RW.'
     verify_tukit_cli_surface || die 'CLI tukit incompatibile o non caratterizzata.'
@@ -696,7 +806,9 @@ preflight_check() {
     local active default
     active="$(active_snapshot)"
     default="$(default_snapshot)"
-    [[ -n "${active}" && "${active}" == "${default}" ]] ||
+    [[ "${active}" =~ ^[0-9]+$ ]] ||
+        die 'la root attiva non e una snapshot numerata /.snapshots/N/snapshot: v4 richiede modalita snapshot-root RW (per esempio dopo snapper rollback), non subvol=/@.'
+    [[ "${active}" == "${default}" ]] ||
         die "snapshot attiva/default non coincidono (${active:-?}/${default:-?})."
     snapshot_is_rw "${active}" || die "snapshot attiva ${active} non RW."
     snapshot_is_bootable "${active}" || die "snapshot attiva ${active} non bootable."
@@ -706,7 +818,8 @@ preflight_check() {
 show_design() {
     cat <<'EOF'
 Flusso previsto:
-  1. v3.4.9 plan A/B + pre-download + manifest atteso (invariati)
+  1. v3.4.9 plan A/B + pre-download + manifest atteso (invariati); se il
+     piano e vuoto, chiudere confirmed senza aprire alcuna TARGET
   2. persist target-prepared prima di ogni modifica al TARGET
   3. tukit open da SOURCE RW
   4. verifica TARGET RW e cache /var/cache visibile
@@ -738,8 +851,10 @@ Finestra di drift:
   il piano e il download precedono tukit open. Dal clone al commit non fare
   modifiche amministrative a /etc o /var; il commit viene rifiutato oltre il
   limite configurato (default 3600 secondi). Il fingerprint RPM della SOURCE
-  viene inoltre salvato a open e confrontato prima del close. La history/cookie
-  ZYpp in /var puo registrare il tentativo anche quando TARGET viene abortita.
+  viene salvato a open e confrontato prima del close. Un marker durevole rileva
+  inoltre modifiche successive ai file regolari di /etc sulla SOURCE, eccetto
+  resolv.conf, mtab e adjtime. La history/cookie ZYpp in /var puo registrare il
+  tentativo anche quando TARGET viene abortita.
 
 Matrice VM obbligatoria:
   - registrare versione tukit, tukit.conf e config Snapper effettiva;
@@ -747,6 +862,8 @@ Matrice VM obbligatoria:
   - verificare visibilita della cache e del lock ZYpp con /run privato/condiviso;
   - inventariare tutti i mount /var e classificare ogni effetto persistente;
   - dup senza aggiornamento kernel: TARGET riceve comunque una entry BLS;
+  - kill durante gli scriptlet kernel e inventario delle modifiche ESP;
+  - piano senza operazioni: nessuna TARGET viene aperta;
   - kill durante tukit call;
   - poweroff durante close;
   - reboot spontaneo in ogni stato target-* e committing.

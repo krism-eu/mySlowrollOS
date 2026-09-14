@@ -34,3 +34,19 @@ La pipeline ufficiale del DVD Slowroll basata su product-builder non verrà dupl
 ## Stato
 
 Il materiale proveniente dagli esperimenti precedenti verrà analizzato come insieme di fonti indipendenti. Nessuna vecchia configurazione verrà importata integralmente senza revisione.
+
+## Prerequisito architetturale di Atomic Dup v4
+
+Atomic Dup v4 richiede che la root attiva sia una **snapshot-root RW numerata**,
+montata come `/.snapshots/N/snapshot`, e che la stessa snapshot sia anche il
+subvolume Btrfs predefinito. È, per esempio, lo stato in cui resta la workstation
+dopo un `snapper rollback` seguito dal reboot previsto.
+
+Una installazione Slowroll classica avviata direttamente da `subvol=/@` non è
+compatibile con il motore v4 e il preflight deve rifiutarla esplicitamente. Non è
+un dettaglio di parsing: l'identità numerica e l'uguaglianza `ACTIVE == DEFAULT`
+sono parte del modello di recovery. La v3.4.9 collaudata applica già questa
+invariante; v4 la conserva.
+
+La v4 resta una preview di progetto e non sostituisce la v3.4.9 finché non supera
+la matrice crash/recovery in VM.
