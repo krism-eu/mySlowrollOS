@@ -210,10 +210,13 @@ load_state() {
 
 persist_state() {
     # Reference implementation for the final v4. The preview never calls it.
-    local tmp
-    install -d -o root -g root -m 0700 "${STATE_DIR}" ||
-        die 'impossibile preparare STATE_DIR per il marker anti-drift.'
-    tmp="$(mktemp "${STATE_DIR}/.state.XXXXXX")"
+    local tmp safe_last_error
+    install -d -o root -g root -m 0700 "${STATE_DIR}" || return 1
+    tmp="$(mktemp "${STATE_DIR}/.state.XXXXXX")" || return 1
+    chmod 0600 "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+    safe_last_error="${STATE_LAST_ERROR//$'\n'/ }"
+    safe_last_error="${safe_last_error//$'\r'/ }"
+    safe_last_error="${safe_last_error//$'\t'/ }"
     {
         printf 'status=%s\n' "${STATE_STATUS}"
         printf 'txid=%s\n' "${STATE_TXID}"
@@ -228,16 +231,12 @@ persist_state() {
         printf 'created_utc=%s\n' "${STATE_CREATED_UTC}"
         printf 'target_opened_utc=%s\n' "${STATE_TARGET_OPENED_UTC}"
         printf 'updated_utc=%s\n' "${STATE_UPDATED_UTC}"
-        local safe_last_error="${STATE_LAST_ERROR//$'\n'/ }"
-        safe_last_error="${safe_last_error//$'\r'/ }"
-        safe_last_error="${safe_last_error//$'\t'/ }"
         printf 'last_error=%s\n' "${safe_last_error}"
-    } > "${tmp}"
-    chmod 0600 "${tmp}"
-    sync "${tmp}"
-    mv -f -- "${tmp}" "${STATE_FILE}"
-    sync "${STATE_DIR}"
-    sync -f "${STATE_FILE}"
+    } > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+    sync "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+    mv -f -- "${tmp}" "${STATE_FILE}" || { rm -f -- "${tmp}"; return 1; }
+    sync "${STATE_DIR}" || return 1
+    sync -f "${STATE_FILE}" || return 1
 }
 
 snapshot_path() {
@@ -378,7 +377,8 @@ start_source_drift_guard() {
     # the small observation gap that would otherwise exist while parsing open.
     local marker
     marker="$(source_etc_marker)" || die 'percorso marker anti-drift non valido.'
-    install -d -o root -g root -m 0700 "${STATE_DIR}"
+    install -d -o root -g root -m 0700 "${STATE_DIR}" ||
+        die 'impossibile preparare STATE_DIR per il marker anti-drift.'
     printf 'txid=%s\nopened_utc=%s\n' "${STATE_TXID}" "$(date -u +%FT%TZ)" >"${marker}" ||
         die 'impossibile creare il marker anti-drift di /etc.'
     chmod 0600 "${marker}" || {

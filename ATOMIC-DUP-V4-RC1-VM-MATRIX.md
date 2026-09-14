@@ -16,7 +16,7 @@ prove, la baseline operativa resta `myslowroll-atomic-dup-v3.4.9-tested.sh`.
   o sistema sulla `SOURCE`.
 - La root attiva è una snapshot-root RW numerata `/.snapshots/N/snapshot`, non
   la root classica `subvol=/@`, ed è uguale alla snapshot default.
-- Un marker durevole creato subito dopo `tukit open` rende verificabile il drift
+- Un marker durevole creato subito prima di `tukit open` rende verificabile il drift
   dei file regolari della `SOURCE` in `/etc`; sono esclusi soltanto
   `/etc/resolv.conf`, `/etc/mtab` e `/etc/adjtime`.
 
