@@ -1,6 +1,21 @@
 {
+  "product": {
+    "id": "Slowroll"
+  },
   "software": {
     "patterns": [],
+    "extraRepositories": [
+      {
+        "alias": "home_krism",
+        "name": "home:krism - openSUSE Slowroll",
+        "url": "https://download.opensuse.org/repositories/home:/krism/openSUSE_Slowroll/",
+        "priority": 90,
+        "gpgFingerprints": [
+          "8528 3DD3 E1AF A9EA 668E 2065 3505 E29C 78A0 0759"
+        ]
+      }
+    ],
+    "onlyRequired": true,
     "packages": [
       "7zip",
       "Mesa-dri",
@@ -13,6 +28,7 @@
       "apparmor-parser",
       "apparmor-utils",
       "ark",
+      "atomic-update",
       "avahi",
       "bash",
       "bash-completion",
@@ -161,23 +177,7 @@
       "zip",
       "zram-generator",
       "zstd",
-      "zypper",
-      "atomic-update"
-    ],
-    "extraRepositories": [
-      {
-        "alias": "home_krism",
-        "name": "home:krism - openSUSE Slowroll",
-        "url": "https://download.opensuse.org/repositories/home:/krism/openSUSE_Slowroll/",
-        "priority": 90,
-        "gpgFingerprints": [
-          "8528 3DD3 E1AF A9EA 668E 2065 3505 E29C 78A0 0759"
-        ]
-      }
-    ],
-    "onlyRequired": true
-  },
-  "product": {
-    "id": "Slowroll"
+      "zypper"
+    ]
   }
 }

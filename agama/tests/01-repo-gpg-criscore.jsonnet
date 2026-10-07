@@ -7,8 +7,6 @@
     id: "Slowroll",
   },
 
-  root: { password: "test1234" },
-
   software: {
     // Replace product preselected patterns for this test only.
     patterns: [],

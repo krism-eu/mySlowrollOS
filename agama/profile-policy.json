@@ -1,0 +1,106 @@
+{
+  "product": {
+    "id": "Slowroll"
+  },
+  "software": {
+    "patterns": [],
+    "extraRepositories": [
+      {
+        "alias": "home_krism",
+        "name": "home:krism - openSUSE Slowroll",
+        "url": "https://download.opensuse.org/repositories/home:/krism/openSUSE_Slowroll/",
+        "priority": 90,
+        "gpgFingerprints": [
+          "8528 3DD3 E1AF A9EA 668E 2065 3505 E29C 78A0 0759"
+        ]
+      }
+    ],
+    "onlyRequired": true
+  },
+  "files": [
+    {
+      "source": "myslowroll-policy/10-myslowroll.preset",
+      "destination": "/etc/systemd/system-preset/10-myslowroll.preset",
+      "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/20-myslowroll-disable-ipv6.conf",
+      "destination": "/etc/sysctl.d/20-myslowroll-disable-ipv6.conf",
+      "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/10-myslowroll-journald.conf",
+      "destination": "/etc/systemd/journald.conf.d/10-myslowroll.conf",
+      "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/10-myslowroll-wayland.conf",
+      "destination": "/etc/sddm.conf.d/10-myslowroll-wayland.conf",
+      "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/90-myslowroll-sddm-fallback.conf",
+      "destination": "/etc/sddm.conf.d/90-myslowroll-fallback.conf",
+      "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/90-myslowroll-zypp.conf",
+      "destination": "/etc/zypp/zypp.conf.d/90-myslowroll.conf",
+      "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/home_krism.repo",
+      "destination": "/etc/zypp/repos.d/home_krism.repo",
+      "permissions": "0644"
+    },
+    {
+      "source": "agama/keys/home_krism.asc",
+      "destination": "/etc/zypp/repos.d/home_krism.key",
+      "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/99-myslowroll-passwordless-admin",
+      "destination": "/etc/sudoers.d/99-myslowroll-passwordless-admin",
+      "permissions": "0440"
+    },
+    {
+      "source": "myslowroll-policy/10-myslowroll-passwordless-admin.rules",
+      "destination": "/etc/polkit-1/rules.d/10-myslowroll-passwordless-admin.rules",
+      "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/kdesurc",
+      "destination": "/etc/skel/.config/kdesurc",
+      "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/kernel-cmdline",
+      "destination": "/etc/kernel/cmdline",
+      "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/10-myslowroll-zram.conf",
+      "destination": "/etc/systemd/zram-generator.conf.d/10-myslowroll.conf",
+      "permissions": "0644"
+    }
+  ],
+  "scripts": {
+    "post": [
+      {
+        "name": "myslowroll-native-sddm-before-first-boot",
+        "chroot": true,
+        "source": "agama/post-chroot-boot-policy.sh"
+      }
+    ],
+    "init": [
+      {
+        "name": "myslowroll-firstboot-policy",
+        "source": "agama/init-firstboot.sh"
+      }
+    ]
+  },
+  "bootloader": {
+    "timeout": 3,
+    "updateNvram": true
+  }
+}

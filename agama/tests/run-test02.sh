@@ -1,52 +1,55 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-URL='https://raw.githubusercontent.com/krism-eu/mySlowrollOS/main/agama/tests/02-full-vm-validation.jsonnet'
-OUT=/tmp/myslowroll-test02.json
-REPORT=/tmp/myslowroll-agama-test02-report.txt
-
+# Run from a checkout/archive of the reviewed commit. Never starts installation.
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ROOT=$(cd -- "$HERE/../.." && pwd)
+REPORT_DIR=$(mktemp -d /tmp/myslowroll-agama-test02.XXXXXX)
+REPORT="$REPORT_DIR/report.txt"
+OUT="$REPORT_DIR/profile.json"
 exec > >(tee "$REPORT") 2>&1
 
-echo '=== GENERATE ==='
-agama config generate "$URL" > "$OUT"
-echo 'GENERATE=PASS'
+echo '=== CHECK GENERATED PROFILES ==='
+python3 "$ROOT/agama/generate-profiles.py" --check
 
-echo '=== VALIDATE ==='
+echo '=== GENERATE ACTUAL FINAL PROFILE ==='
+agama config generate "$ROOT/agama/profile-final.jsonnet" > "$OUT"
 agama config validate "$OUT"
 echo 'VALIDATE=PASS'
 
-echo '=== LOAD (NO INSTALL) ==='
-agama config load "$OUT"
-agama probe
-
-echo '=== STATUS ==='
-agama status || true
-echo '=== QUESTIONS ==='
-agama questions list 2>/dev/null || true
-echo '=== ISSUES ==='
-agama issues list 2>/dev/null || true
-
-echo '=== BOOTLOADER / STORAGE (STORAGE EXPECTED UNSET) ==='
-agama config show >/tmp/myslowroll-test02-current.json
-python3 - <<'PY'
-import json
-d=json.load(open('/tmp/myslowroll-test02-current.json'))
-print(json.dumps({'storage':d.get('storage'),'bootloader':d.get('bootloader')},indent=2))
+echo '=== FETCH AND CHECK THE EXACT PINNED SCRIPTS ==='
+python3 - "$OUT" "$REPORT_DIR" <<'PY'
+import json, pathlib, re, subprocess, sys, urllib.request
+profile = json.load(open(sys.argv[1]))
+directory = pathlib.Path(sys.argv[2])
+for group, scripts in profile.get('scripts', {}).items():
+    for index, script in enumerate(scripts):
+        url = script['url']
+        if not re.fullmatch(r'https://raw\.githubusercontent\.com/krism-eu/mySlowrollOS/[0-9a-f]{40}/agama/[\w-]+\.sh', url):
+            raise SystemExit('Script URL is not pinned: ' + url)
+        with urllib.request.urlopen(url, timeout=30) as response:
+            content = response.read()
+        path = directory / f'{group}-{index}.sh'
+        path.write_bytes(content)
+        subprocess.run(['bash', '-n', str(path)], check=True)
+        print('BASH_N=PASS', url)
 PY
 
-echo '=== DOWNLOADED SCRIPT/FILES ==='
-find /run/agama/scripts -maxdepth 3 -type f -print 2>/dev/null | sort || true
-grep -RniE 'myslowroll-firstboot-policy|10-myslowroll|home_krism|99-myslowroll' /run/agama 2>/dev/null | head -n 100 || true
+echo '=== LOAD / PROBE (NO INSTALL) ==='
+agama config load "$OUT"
+agama probe
+agama status
+agama questions list
+agama issues list
 
-echo '=== TARGET SOLVER FINAL ==='
-journalctl -b --no-pager | grep -E 'job: install (atomic-update|criscore1|criscore2)|final solver statistics|nothing provides|conflict|problem' | tail -n 120 || true
+echo '=== CURRENT CONFIGURATION ==='
+agama config show > "$REPORT_DIR/current-config.json"
+python3 - "$REPORT_DIR/current-config.json" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+print(json.dumps({key: data.get(key) for key in ('storage', 'bootloader')}, indent=2))
+PY
 
-echo '=== SCRIPT SYNTAX ==='
-curl -fsSL https://raw.githubusercontent.com/krism-eu/mySlowrollOS/main/agama/init-firstboot.sh -o /tmp/init-firstboot.sh
-bash -n /tmp/init-firstboot.sh
-echo 'INIT_BASH_N=PASS'
-
-echo '=== FINAL ==='
-agama status || true
 echo "REPORT=$REPORT"
 echo 'NO_INSTALL_WAS_STARTED'
+echo 'Profile validation/probe is not an installed-system or first-boot test.'

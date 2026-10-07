@@ -2,13 +2,14 @@
 
 This test intentionally does **not** configure storage and does **not** start installation.
 
-From an Agama live environment:
+From a checkout/archive of the reviewed commit in an Agama live environment.
+Authentication is left untouched; enter credentials in the UI if needed.
 
 ```bash
-URL='https://raw.githubusercontent.com/krism-eu/mySlowrollOS/main/agama/tests/01-repo-gpg-criscore.jsonnet'
+PROFILE="$PWD/agama/tests/01-repo-gpg-criscore.jsonnet"
 
 agama config show > /tmp/agama-before.json
-agama config generate "$URL" > /tmp/agama-test01.json
+agama config generate "$PROFILE" > /tmp/agama-test01.json
 agama config validate /tmp/agama-test01.json
 agama config load /tmp/agama-test01.json
 agama config show > /tmp/agama-after.json

@@ -1,59 +1,66 @@
-# Architecture decision — 2026-10-07
+# Architecture decision — 2026-10-08
 
-Goal: finish mySlowrollOS without restarting the design.
+## Installation and sources
 
-## Active source of truth
-- Late-September recovered sources are the active historical baseline.
-- Current OBS `criscore1` 0.2 is authoritative for the protected core.
-- Earlier September seeds/specs are reference material only and are not merged into the active lists.
+Stock Agama 24, product Slowroll, remains the interactive installer.
+The active entry point is `agama/profile-final.jsonnet`.
+Storage and authentication are omitted: disks, partitions, formatting, username
+and credentials are chosen in the UI. No unattended hardware installation.
 
-## Installation path
-Agama 24 with the stock `Slowroll` product is the primary installer.
-The installation remains interactive. Do not use unattended `inst.auto` for the hardware install.
-The remote profile in GitHub supplies software/repository policy and is loaded for review before installation.
+The sole workstation package manifest is
+`myslowroll-workstation/myslowroll-workstation.spec`.
+`agama/profile-policy.json` defines the profile structure.
+`agama/generate-profiles.py` generates the final profile, an identical VM test
+profile, and a software-only diagnostic subset. It does not require an OBS
+workstation or policy RPM.
 
-A custom `agama-product-myslowroll` package is retained as recovered reference, but it is not required by the current stock-Agama workflow and must not be added to OBS merely to make this path work.
+Current OBS criscore1/criscore2 0.2 are the protected core anchors.
+Their core-only dependencies intentionally differ from the workstation manifest.
+atomic-update remains the existing OBS updater package; this change does not
+redesign or upgrade it.
 
-## Software composition
-- `agama/profile-software-final.json` is the active explicit workstation package profile.
-- `criscore1/criscore2` are protected core anchors from OBS.
-- `atomic-update` remains an OBS package for the current baseline.
-- `myslowroll-workstation` is retained as the human/RPM manifest source used to audit the explicit package list; it is not required to exist in OBS for the current Agama path.
-- `myslowroll-policy` is retained as the policy source; its settings will be deployed by Agama files/scripts instead of assuming an OBS RPM.
+## Trust and policy
 
-## OBS repository and trust
-Repository:
+OBS repository:
 `https://download.opensuse.org/repositories/home:/krism/openSUSE_Slowroll/`
 
-Trusted fingerprint:
-`85283DD3E1AFA9EA668E20653505E29C78A00759`
+Trusted fingerprint: `85283DD3E1AFA9EA668E20653505E29C78A00759`.
 
-Public key:
-`agama/keys/home_krism.asc`
+All deployed policy files and scripts use full commit-SHA URLs recorded in
+`agama/assets-revision`, including the OBS public key. Keep signature checking
+enabled. The final repo file requires gpgcheck=1, repo_gpgcheck=1 and its local key.
 
-Never disable signature checking to work around trust failures.
+Agama v24 adds the first user to wheel. The local sudo and polkit policy grants
+passwordless administration to wheel (polkit additionally requires a local active
+session). No active custom script creates users, clears passwords or changes PAM.
+Agama's group assignment is best effort, so verify it after installation.
 
-## Verified on Agama 24 Build11.3
-- remote profile generation/validation/load works;
-- target repo `home_krism` is created;
-- target solver indexes `criscore1` and `criscore2` 0.2-1.1;
-- target solver selects `atomic-update` 5.6.1-6.1 and both criscore anchors;
-- full software profile reaches `Ready to start the installation`;
-- Agama reports no issues/questions and libsolv reports 0 problems / 0 unsolvable;
-- recovered post-install script passes `bash -n`.
+Zram is configured explicitly using zram-generator:
+min(RAM / 2, 4096 MiB), zstd, swap priority 100.
+On the target 16 GiB machine this gives a 4 GiB logical swap device.
+Disk swap remains a manual storage choice; the intended layout uses none.
 
-## Storage policy
-Storage is intentionally **not** declared in the active Agama profile.
-Disk selection, partition creation/reuse, formatting and mount assignments are manual choices in the Agama UI.
-The profile must not preselect a disk or perform unattended storage changes.
+The post-chroot script selects native SDDM and graphical.target before reboot.
+The init script imports the OBS key and applies runtime service policy.
 
-Authentication is also intentionally omitted from the active profile.
-User creation, username, password and root credentials are entered manually in the Agama UI at install time.
+## Historical material
 
-Target layout for the real machine remains a user choice at install time (EFI + Btrfs root + separate /home, no disk swap; zram is used).
+`legacy/agama/post-install.sh.txt` is unsafe historical text, never an installer
+hook. The old partial profile is also isolated in legacy.
+The recovered custom Agama product and RPM policy spec remain reference material;
+the active path uses the stock product and deploys policy via files/scripts.
 
-## Remaining work
-1. Validate policy files + init script with storage omitted.
-2. Configure the target disk manually in Agama UI.
-3. Verify systemd-boot/UEFI on the resulting manual layout.
-4. Perform one complete VM installation before hardware installation.
+## Validation boundaries
+
+Earlier Agama 24 Build11.3 results established repository trust, package
+resolution and readiness of the software proposal. They do not establish
+successful installation or boot of this revised final profile.
+
+Static checks can establish generated-file consistency and shell syntax only.
+Agama v24 writes profile files before storage finalization installs the bootloader.
+The supplied /etc/kernel/cmdline still needs an installed-system check: this
+revision does not assert whether the bootloader preserves or regenerates all
+root/AppArmor parameters.
+
+Before hardware installation, complete one VM installation using the actual
+final profile and perform the checks in agama/tests/TEST-02.md.
