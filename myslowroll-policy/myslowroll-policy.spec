@@ -15,6 +15,7 @@ Source8:        99-myslowroll-passwordless-admin
 Source9:        10-myslowroll-passwordless-admin.rules
 Source10:        kdesurc
 Source11:        kernel-cmdline
+Source12:        10-myslowroll-zram.conf
 BuildArch:      noarch
 BuildRequires:  sudo
 Requires:       NetworkManager
@@ -24,6 +25,7 @@ Requires:       sddm-qt6
 Requires:       sudo
 Requires:       systemd
 Requires:       zypper
+Requires:       zram-generator
 
 %description
 Stable configuration policy shared by KIWI validation images and the system
@@ -45,6 +47,7 @@ install -Dpm0644 %{SOURCE7}  %{buildroot}%{_sysconfdir}/zypp/repos.d/home_krism.
 install -Dpm0440 %{SOURCE8}  %{buildroot}%{_sysconfdir}/sudoers.d/99-myslowroll-passwordless-admin
 install -Dpm0644 %{SOURCE9}  %{buildroot}%{_sysconfdir}/polkit-1/rules.d/10-myslowroll-passwordless-admin.rules
 install -Dpm0644 %{SOURCE10} %{buildroot}%{_sysconfdir}/skel/.config/kdesurc
+install -Dpm0644 %{SOURCE12} %{buildroot}%{_sysconfdir}/systemd/zram-generator.conf.d/10-myslowroll.conf
 install -Dpm0644 %{SOURCE11} %{buildroot}%{_sysconfdir}/kernel/cmdline
 install -Dpm0644 %{SOURCE0}  %{buildroot}%{_licensedir}/%{name}/LICENSE
 
@@ -82,3 +85,4 @@ ln -sfn /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager
 %config(noreplace) %{_sysconfdir}/polkit-1/rules.d/10-myslowroll-passwordless-admin.rules
 %config(noreplace) %{_sysconfdir}/skel/.config/kdesurc
 %config(noreplace) %{_sysconfdir}/kernel/cmdline
+%config(noreplace) %{_sysconfdir}/systemd/zram-generator.conf.d/10-myslowroll.conf
