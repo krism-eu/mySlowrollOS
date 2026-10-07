@@ -897,8 +897,7 @@ make_plan() {
     has_installs="$(grep -cvE '^[[:space:]]*remove[[:space:]]' "${PLAN_OPS}" || true)"
     if (( has_installs > 0 )) && ! pkg_cache_has_rpms; then
         mark_aborted 'piano richiede pacchetti ma la cache RPM e vuota'
-        return 1
-    fi
+        return 1    fi
 
     build_expected_manifest "${RPMDB_PRE_MANIFEST}" "${PLAN_OPS}" "${RPMDB_EXPECTED_MANIFEST}" || { mark_aborted 'manifest atteso fallito'; return 1; }
     sync "${RPMDB_PRE_MANIFEST}" "${RPMDB_EXPECTED_MANIFEST}" "${PLAN_OPS}" || { mark_aborted 'sync manifest fallito'; return 1; }
@@ -998,3 +997,771 @@ target_window_valid() {
     a="$(target_age_seconds)" || return 1
     (( a <= TARGET_MAX_AGE_SECONDS ))
 }
+
+assert_target_window() {
+    target_window_valid || die 'TARGET troppo vecchia o eta non determinabile.'
+}
+
+tukit_call() { local t="$1"; shift; tukit call "${t}" "$@"; }
+
+open_target() {
+    local target
+
+    STATE_STATUS=target-opening
+    STATE_TARGET=
+    STATE_BOOT_ID_BEFORE="$(current_boot_id)"
+    STATE_LAST_ERROR=
+    persist_state_or_die
+
+    : >"${TUKIT_OPEN_LOG}"
+    chmod 0600 "${TUKIT_OPEN_LOG}"
+
+    if ! tukit --description "mySlowrollOS v5 ${STATE_TXID}" open >"${TUKIT_OPEN_LOG}" 2>&1; then
+        STATE_STATUS=target-open-ambiguous
+        STATE_LAST_ERROR="tukit open failed/ambiguous; inspect ${TUKIT_OPEN_LOG}"
+        persist_state_or_die
+        return 1
+    fi
+    sync "${TUKIT_OPEN_LOG}" || true
+
+    if ! target="$(parse_tukit_open_output "${TUKIT_OPEN_LOG}")"; then
+        STATE_STATUS=target-open-ambiguous
+        STATE_LAST_ERROR="tukit open output not safely parseable; inspect ${TUKIT_OPEN_LOG}"
+        persist_state_or_die
+        return 1
+    fi
+
+    STATE_TARGET="${target}"
+    local a d
+    a="$(active_snapshot)"
+    d="$(default_snapshot)"
+    if ! snapshot_exists "${target}" ||
+       ! snapshot_is_rw "${target}" ||
+       [[ "${target}" == "${STATE_SOURCE}" ]] ||
+       [[ "${target}" == "${a}" ]] ||
+       [[ "${a}" != "${STATE_SOURCE}" ]] ||
+       [[ "${d}" != "${STATE_SOURCE}" ]]; then
+        STATE_STATUS=target-open-ambiguous
+        STATE_LAST_ERROR="post-open invariants failed: source=${STATE_SOURCE} active=${a:-?} default=${d:-?} target=${target}"
+        persist_state_or_die
+        return 1
+    fi
+
+    STATE_TARGET_OPENED="$(date -u +%FT%TZ)"
+    STATE_STATUS=target-prepared
+    STATE_LAST_ERROR=
+    persist_state_or_die
+
+    if ! STATE_SOURCE_OPEN_RPM_HASH="$(rpmdb_hash_host)"; then
+        STATE_LAST_ERROR='hash RPM SOURCE post-open fallito'
+        persist_state_or_die
+        return 1
+    fi
+    if ! STATE_SOURCE_OPEN_ETC_HASH="$(etc_tree_hash)"; then
+        STATE_LAST_ERROR='hash /etc SOURCE post-open fallito'
+        persist_state_or_die
+        return 1
+    fi
+    if [[ "${STATE_SOURCE_OPEN_RPM_HASH}" != "${STATE_RPMDB_HASH}" ]]; then
+        STATE_LAST_ERROR='RPMDB SOURCE cambiata tra piano e clone'
+        persist_state_or_die
+        return 1
+    fi
+
+    STATE_LAST_ERROR=
+    persist_state_or_die
+    history_or_warn target-opened "target=${target}"
+}
+
+write_target_manifest() {
+    local t="$1"
+    local out="$2"
+    local tmp="${out}.tmp"
+    if ! LC_ALL=C tukit_call "${t}" rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}:{}|%{VERSION}-%{RELEASE}|%{ARCH}\n' | grep -v '^gpg-pubkey|' | LC_ALL=C sort -u >"${tmp}"; then rm -f -- "${tmp}"; return 1; fi
+    [[ -s "${tmp}" ]] || { rm -f -- "${tmp}"; return 1; }
+    mv -f -- "${tmp}" "${out}"
+}
+
+target_cache_visible() { tukit_call "$1" sh -c 'test -d "$1" && test -r "$1" && test -w "$1"' sh "$2"; }
+
+run_target_dup() {
+    local t="$1"
+    local zrc
+    local trc
+    local zok=0
+    local -a rc
+
+    if ! toolchain_unchanged; then
+        STATE_STATUS=target-update-failed
+        STATE_LAST_ERROR='toolchain tukit/sdbootutil cambiata o non compatibile prima del dup'
+        persist_state_or_die
+        return 1
+    fi
+    if ! source_unchanged; then
+        STATE_STATUS=target-update-failed
+        STATE_LAST_ERROR='SOURCE cambiata o non verificabile prima del dup'
+        persist_state_or_die
+        return 1
+    fi
+    if ! target_window_valid; then
+        STATE_STATUS=target-update-failed
+        STATE_LAST_ERROR='finestra TARGET scaduta o non determinabile prima del dup'
+        persist_state_or_die
+        return 1
+    fi
+    if ! target_cache_visible "${t}" "${TX_PKG_CACHE}"; then
+        STATE_STATUS=target-update-failed
+        STATE_LAST_ERROR='cache pre-validata non visibile/scrivibile nella TARGET'
+        persist_state_or_die
+        return 1
+    fi
+
+    if ! check_zypp_lock_hint; then
+        STATE_STATUS=target-update-failed
+        STATE_LAST_ERROR='ZYpp concorrente rilevato prima del dup TARGET'
+        persist_state_or_die
+        return 1
+    fi
+    if ! check_conflicting_update_units_idle; then
+        STATE_STATUS=target-update-failed
+        STATE_LAST_ERROR='unita transactional-update opzionali/stale in conflitto prima del dup TARGET'
+        persist_state_or_die
+        return 1
+    fi
+    if ! : >"${DUP_LOG}" || ! chmod 0600 "${DUP_LOG}"; then
+        STATE_STATUS=target-update-failed
+        STATE_LAST_ERROR='impossibile preparare il log persistente del dup TARGET'
+        persist_state_or_die
+        return 1
+    fi
+
+    STATE_STATUS=target-updating
+    STATE_DUP_STARTED="$(date -u +%FT%TZ)"
+    STATE_LAST_ERROR=
+    persist_state_or_die
+    if ! sync; then
+        STATE_STATUS=target-update-failed
+        STATE_LAST_ERROR='sync barrier fallita prima del dup TARGET'
+        persist_state_or_die
+        return 1
+    fi
+
+    set +e
+    systemd-inhibit --what=shutdown:sleep:idle --mode=block --who="${PROG}" --why='mySlowrollOS v5 offline target update' \
+      tukit call "${t}" env DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C \
+      zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive --userdata "myslowroll-v5:${STATE_TXID}" dup \
+        "${ZYPPER_LICENSE_ARGS[@]}" --download-in-advance --no-recommends --no-allow-vendor-change 2>&1 | tee "${DUP_LOG}"
+    rc=("${PIPESTATUS[@]}")
+    set -e
+
+    zrc="${rc[0]}"
+    trc="${rc[1]}"
+    sync "${DUP_LOG}" || trc=125
+
+    # zypper 102/103 are informational results, not generic transaction failures.
+    # 103 may require rerunning the package-manager command; therefore these codes
+    # are accepted only as permission to enter verify_target. The full expected RPM
+    # manifest still decides whether this dup is complete.
+    # Anything else non-zero (including 107, RPM script failed) stays a failure.
+    case "${zrc}" in
+        0) zok=1 ;;
+        102|103)
+            zok=1
+            log "zypper ha restituito ${zrc} (reboot/restart richiesto): codice informativo accettato; procedo alla verifica completa."
+            ;;
+    esac
+
+    if (( zok == 0 || trc != 0 )); then
+        STATE_STATUS=target-update-failed
+        STATE_LAST_ERROR="target dup failed: zypper=${zrc} tee/sync=${trc}"
+        persist_state_or_die
+        history_or_warn target-update-failed "${STATE_LAST_ERROR}"
+        return 1
+    fi
+
+    STATE_STATUS=target-updated
+    STATE_LAST_ERROR=
+    persist_state_or_die
+    history_or_warn target-updated "zypper_rc=${zrc}"
+}
+
+verify_target_packages() { local p; for p in "${CRITICAL_PKGS[@]}"; do tukit_call "$1" rpm --quiet -q "${p}" || return 1; done; }
+
+verify_target_payloads() {
+    bool_true "${VERIFY_PAYLOADS}" || return 0
+    local op
+    local name
+    while IFS=$'\t' read -r op name _; do [[ "${op}" == remove || -z "${name}" ]] && continue; tukit_call "$1" rpm -V "${name}" >/dev/null 2>&1 || return 1; done <"${PLAN_OPS}"
+}
+
+verify_target() {
+    local t="$1"
+
+    STATE_STATUS=target-verifying
+    STATE_LAST_ERROR=
+    persist_state_or_die
+    if ! : >"${POSTCHECK_LOG}" || ! chmod 0600 "${POSTCHECK_LOG}"; then
+        STATE_STATUS=target-verification-failed
+        STATE_LAST_ERROR='impossibile preparare il log persistente delle verifiche TARGET'
+        persist_state_or_die
+        return 1
+    fi
+
+    if ! toolchain_unchanged; then
+        STATE_STATUS=target-verification-failed
+        STATE_LAST_ERROR='toolchain tukit/sdbootutil cambiata o non compatibile durante verify'
+        persist_state_or_die
+        return 1
+    fi
+    if ! source_unchanged; then
+        STATE_STATUS=target-verification-failed
+        STATE_LAST_ERROR='SOURCE cambiata o non verificabile durante verify'
+        persist_state_or_die
+        return 1
+    fi
+    if ! target_window_valid; then
+        STATE_STATUS=target-verification-failed
+        STATE_LAST_ERROR='finestra TARGET scaduta o non determinabile durante verify'
+        persist_state_or_die
+        return 1
+    fi
+
+    snapshot_exists "${t}" && snapshot_is_rw "${t}" || { STATE_STATUS=target-verification-failed; STATE_LAST_ERROR='TARGET missing/not RW'; persist_state_or_die; return 1; }
+    write_target_manifest "${t}" "${RPMDB_POST_MANIFEST}" || { STATE_STATUS=target-verification-failed; STATE_LAST_ERROR='target manifest failed'; persist_state_or_die; return 1; }
+    if ! STATE_RPMDB_POST_HASH="$(sha256sum "${RPMDB_POST_MANIFEST}" | awk '{print $1}')" \
+       || [[ ! "${STATE_RPMDB_POST_HASH}" =~ ^[0-9a-f]{64}$ ]]; then
+        STATE_STATUS=target-verification-failed
+        STATE_LAST_ERROR='target manifest hash failed'
+        persist_state_or_die
+        return 1
+    fi
+    cmp -s -- "${RPMDB_EXPECTED_MANIFEST}" "${RPMDB_POST_MANIFEST}" || { STATE_STATUS=target-verification-failed; STATE_LAST_ERROR='target RPM manifest differs from expected solver result'; persist_state_or_die; return 1; }
+    verify_target_packages "${t}" || { STATE_STATUS=target-verification-failed; STATE_LAST_ERROR='critical package missing in TARGET'; persist_state_or_die; return 1; }
+    verify_target_payloads "${t}" || { STATE_STATUS=target-verification-failed; STATE_LAST_ERROR='optional rpm -V payload verification failed'; persist_state_or_die; return 1; }
+    [[ "$(tukit_call "${t}" awk -F= '$1=="ID"{gsub(/^"|"$/,"",$2);print $2;exit}' /usr/lib/os-release)" == "${REQUIRED_OS_ID}" ]] || { STATE_STATUS=target-verification-failed; STATE_LAST_ERROR='TARGET OS ID invalid'; persist_state_or_die; return 1; }
+    snapshot_is_bootable "${STATE_SOURCE}" || { STATE_STATUS=target-verification-failed; STATE_LAST_ERROR='SOURCE no longer bootable'; persist_state_or_die; return 1; }
+    ensure_snapshot_bootable "${t}" || { STATE_STATUS=target-verification-failed; STATE_LAST_ERROR='TARGET not bootable'; persist_state_or_die; return 1; }
+    source_unchanged || { STATE_STATUS=target-verification-failed; STATE_LAST_ERROR='SOURCE changed during TARGET boot preparation'; persist_state_or_die; return 1; }
+
+    STATE_STATUS=target-verified
+    STATE_LAST_ERROR=
+    persist_state_or_die
+    history_or_warn target-verified "rpm=${STATE_RPMDB_POST_HASH}"
+}
+
+remove_target_boot_entries() {
+    local t="$1"
+    local rc=0
+    local cmd_rc
+    [[ "${t}" =~ ^[0-9]+$ ]] || return 1
+    [[ "$(active_snapshot)" != "${t}" && "$(default_snapshot)" != "${t}" ]] || return 1
+    install -d -o root -g root -m 0700 "${LOG_ROOT}" || return 1
+    (
+        if LC_ALL=C sdbootutil remove-all-kernels --disable-predictions "${t}"; then
+            printf 'remove-all-kernels_rc=0\n'
+        else
+            cmd_rc=$?; printf 'remove-all-kernels_rc=%s\n' "${cmd_rc}"; rc="${cmd_rc}"
+        fi
+        if LC_ALL=C sdbootutil cleanup --disable-predictions "${t}"; then
+            printf 'cleanup_rc=0\n'
+        else
+            cmd_rc=$?; printf 'cleanup_rc=%s\n' "${cmd_rc}"; (( rc != 0 )) || rc="${cmd_rc}"
+        fi
+        exit "${rc}"
+    ) >>"${SDBOOT_LOG}" 2>&1
+}
+
+abort_target_safe() {
+    local t="$1"
+    local a
+    local d
+    local a_after
+    local d_after
+    [[ "${t}" =~ ^[0-9]+$ ]] || return 1
+    a="$(active_snapshot)"; d="$(default_snapshot)"
+    [[ -n "${a}" && -n "${d}" ]] || return 1
+    [[ "${t}" != "${a}" && "${t}" != "${d}" ]] || return 1
+
+    STATE_STATUS=aborting
+    STATE_LAST_ERROR=
+    persist_state_or_die
+
+    if ! remove_target_boot_entries "${t}"; then
+        STATE_LAST_ERROR="pulizia boot TARGET ${t} fallita; snapshot non abortita"
+        persist_state_or_die
+        return 1
+    fi
+    if ! tukit abort "${t}"; then
+        STATE_LAST_ERROR="tukit abort ${t} fallito/ambiguo dopo pulizia boot"
+        persist_state_or_die
+        return 1
+    fi
+
+    a_after="$(active_snapshot)"
+    d_after="$(default_snapshot)"
+    if snapshot_exists "${t}" || [[ "${a_after}" != "${a}" ]] || [[ "${d_after}" != "${d}" ]]; then
+        STATE_LAST_ERROR="abort TARGET ${t} non verificabile: exists=$(snapshot_exists "${t}" && echo yes || echo no) active=${a_after:-?}/${a:-?} default=${d_after:-?}/${d:-?}"
+        persist_state_or_die
+        return 1
+    fi
+
+    STATE_STATUS=aborted
+    STATE_FINISHED="$(date -u +%FT%TZ)"
+    STATE_LAST_ERROR=
+    persist_state_or_die
+    history_or_warn target-aborted "target=${t}"
+}
+
+precommit_target_valid() {
+    local t="$1"
+    [[ "${STATE_STATUS}" == target-verified ]] || return 1
+    toolchain_unchanged || return 1
+    source_unchanged || return 1
+    target_window_valid || return 1
+    [[ "$(active_snapshot)" == "${STATE_SOURCE}" ]] || return 1
+    [[ "$(default_snapshot)" == "${STATE_SOURCE}" ]] || return 1
+    snapshot_is_bootable "${STATE_SOURCE}" || return 1
+    ensure_snapshot_bootable "${t}" || return 1
+    source_unchanged || return 1
+    return 0
+}
+
+commit_target() {
+    local t="$1"
+
+    if ! precommit_target_valid "${t}"; then
+        STATE_STATUS=target-verification-failed
+        STATE_LAST_ERROR='pre-commit invariants failed'
+        persist_state_or_die
+        return 2
+    fi
+
+    STATE_STATUS=committing
+    STATE_LAST_ERROR=
+    persist_state_or_die
+    if ! sync; then
+        STATE_LAST_ERROR='sync barrier failed before tukit close'
+        persist_state || true
+        return 1
+    fi
+
+    tukit close "${t}" || { STATE_LAST_ERROR='tukit close failed/ambiguous'; persist_state || true; return 1; }
+    [[ "$(default_snapshot)" == "${t}" ]] || { STATE_LAST_ERROR='close returned but TARGET is not default'; persist_state || true; return 1; }
+    snapshot_is_rw "${t}" || { STATE_LAST_ERROR='TARGET default but not RW'; persist_state || true; return 1; }
+    snapshot_is_bootable "${STATE_SOURCE}" || { STATE_LAST_ERROR='SOURCE lost bootability after close'; persist_state || true; return 1; }
+    snapshot_is_bootable "${t}" || { STATE_LAST_ERROR='TARGET lost bootability after close'; persist_state || true; return 1; }
+
+    STATE_STATUS=pending-reboot
+    STATE_FINISHED="$(date -u +%FT%TZ)"
+    STATE_LAST_ERROR=
+    persist_state_or_die
+    history_or_warn pending-reboot "target=${t}"
+}
+
+reboot_or_finish() {
+    local reason="${1:-upgrade}"
+    if bool_true "${AUTO_REBOOT}"; then
+        case "${reason}" in
+            rollback) log 'Rollback preparato con successo. Avvio del reboot...' ;;
+            *)        log 'Upgrade verificato con successo. Avvio del reboot...' ;;
+        esac
+        sync
+        systemctl reboot || die 'reboot automatico fallito; non modificare la root ed eseguire reboot manuale.'
+        while sleep 60; do :; done
+    else
+        case "${reason}" in
+            rollback) log "Rollback preparato: TARGET ${STATE_TARGET} e default. Riavviare senza fare manutenzione intermedia." ;;
+            *)        log "Upgrade verificato: TARGET ${STATE_TARGET} e default. Riavviare senza fare manutenzione intermedia." ;;
+        esac
+    fi
+}
+
+upgrade() {
+    local answer
+    prepare_plan_for_upgrade
+    [[ "${STATE_STATUS}" == confirmed ]] && { log 'Nessun aggiornamento da applicare.'; return 0; }
+    [[ "${STATE_STATUS}" == planned ]] || die 'piano non disponibile.'
+
+    printf '\n=======================================================\n'
+    printf 'RIASSUNTO PIANO AGGIORNAMENTO (%s)\n' "${STATE_TXID}"
+    printf '=======================================================\n'
+    if [[ -s "${PLAN_TXT}" ]]; then
+        head -n 25 "${PLAN_TXT}"
+        printf '... [Piano completo disponibile in: %s]\n' "${PLAN_TXT}"
+    else
+        printf 'Operazioni previste: %s pacchetti da modificare.\n' "$(awk 'END{print NR}' "${PLAN_OPS}")"
+    fi
+    printf '=======================================================\n'
+    printf 'SOURCE: %s | I pacchetti saranno installati solo nella snapshot TARGET.\n' "${STATE_SOURCE}"
+    printf 'Scrivi esattamente: AGGIORNA OFFLINE E RIAVVIA\n> '
+    IFS= read -r answer || die 'EOF: nessuna TARGET creata.'
+    [[ "${answer}" == 'AGGIORNA OFFLINE E RIAVVIA' ]] || die 'upgrade annullato.'
+
+    revalidate_plan || { mark_aborted 'piano cambiato prima di tukit open'; die 'piano non piu valido.'; }
+    [[ "$(active_snapshot)" == "${STATE_SOURCE}" && "$(default_snapshot)" == "${STATE_SOURCE}" ]] || { mark_aborted 'SOURCE cambiata prima di open'; die 'SOURCE cambiata.'; }
+    if ! open_target; then
+        load_state
+        if [[ "${STATE_STATUS}" == target-prepared && "${STATE_TARGET}" =~ ^[0-9]+$ ]]; then
+            if abort_target_safe "${STATE_TARGET}"; then
+                die 'post-open TARGET fallito; TARGET abortita, SOURCE invariata.'
+            fi
+            die 'post-open TARGET fallito e abort automatico non riuscito; usare recover.'
+        fi
+        die "tukit open ambiguo: NON riprovare automaticamente; usare status/recover e ispezionare ${TUKIT_OPEN_LOG}."
+    fi
+    load_state
+    if ! run_target_dup "${STATE_TARGET}"; then
+        if abort_target_safe "${STATE_TARGET}"; then die 'dup TARGET fallito; TARGET abortita, SOURCE invariata.'; fi
+        die 'dup TARGET fallito e abort automatico non sicuro; recovery manuale richiesta.'
+    fi
+    if ! verify_target "${STATE_TARGET}"; then
+        if abort_target_safe "${STATE_TARGET}"; then die 'verifica TARGET fallita; TARGET abortita, SOURCE invariata.'; fi
+        die 'verifica TARGET fallita e abort automatico non sicuro; recovery manuale richiesta.'
+    fi
+    local commit_rc
+    if commit_target "${STATE_TARGET}"; then
+        :
+    else
+        commit_rc=$?
+        if (( commit_rc == 2 )); then
+            if abort_target_safe "${STATE_TARGET}"; then
+                die 'controlli pre-commit falliti; TARGET abortita, SOURCE invariata.'
+            fi
+            die 'controlli pre-commit falliti e TARGET non abortibile automaticamente; usare recover.'
+        fi
+        die "commit ambiguo. NON abortire alla cieca; eseguire '${PROG} recover'."
+    fi
+    reboot_or_finish upgrade
+}
+
+confirm_manifest_delta_allowed() {
+    # $1 = manifest verificato sulla TARGET, $2 = manifest osservato dopo il reboot.
+    # Ammesso SOLO: nessuna riga aggiunta; ogni riga rimossa appartiene a un
+    # pacchetto kernel-* di cui resta installata un'altra versione.
+    local post="$1"
+    local now="$2"
+    local added removed line name
+    added="$(LC_ALL=C comm -13 "${post}" "${now}")" || return 1
+    if [[ -n "${added}" ]]; then
+        warn 'dopo il reboot risultano pacchetti nuovi/cambiati rispetto al manifest verificato:'
+        printf '%s\n' "${added}" >&2
+        return 1
+    fi
+    removed="$(LC_ALL=C comm -23 "${post}" "${now}")" || return 1
+    [[ -n "${removed}" ]] || return 1
+    while IFS= read -r line; do
+        [[ -n "${line}" ]] || continue
+        name="${line%%|*}"
+        if [[ ! "${name}" =~ ^kernel-[A-Za-z0-9_+.-]+$ ]]; then
+            warn "rimozione post-boot non ammessa: ${line}"
+            return 1
+        fi
+        if ! awk -F'|' -v n="${name}" '$1==n {f=1} END{exit !f}' "${now}"; then
+            warn "rimozione post-boot dell'ultima versione di ${name}: non ammessa."
+            return 1
+        fi
+        log "rimozione post-boot tollerata (kernel purge): ${line}"
+    done <<<"${removed}"
+}
+
+confirm() {
+    local boot
+    local manifest
+    local hash
+    local tolerated=0
+    preflight confirm >/dev/null
+    load_state
+    [[ "${STATE_STATUS}" == pending-reboot ]] || die 'nessuna transazione pending-reboot.'
+    boot="$(current_boot_id)"; [[ "${boot}" != "${STATE_BOOT_ID_BEFORE}" ]] || die 'reboot non ancora osservato.'
+    [[ "$(active_snapshot)" == "${STATE_TARGET}" && "$(default_snapshot)" == "${STATE_TARGET}" ]] || die 'TARGET non e active/default.'
+    snapshot_is_rw "${STATE_TARGET}" || die 'TARGET attiva non RW.'
+    snapshot_is_bootable "${STATE_TARGET}" || die 'TARGET attiva non bootable.'
+    [[ "$(os_id)" == "${REQUIRED_OS_ID}" ]] || die 'OS ID post reboot errato.'
+    manifest="${TX_CACHE_DIR}/rpmdb-confirm.tsv"; write_rpm_manifest_host "${manifest}" || die 'manifest conferma fallito.'
+    hash="$(sha256sum "${manifest}" | awk '{print $1}')"
+    if [[ "${hash}" != "${STATE_RPMDB_POST_HASH}" ]]; then
+        [[ -s "${RPMDB_POST_MANIFEST}" ]] || die 'RPMDB post reboot diversa e manifest verificato non disponibile.'
+        [[ "$(sha256sum "${RPMDB_POST_MANIFEST}" | awk '{print $1}')" == "${STATE_RPMDB_POST_HASH}" ]] \
+            || die 'manifest verificato alterato rispetto allo state.'
+        confirm_manifest_delta_allowed "${RPMDB_POST_MANIFEST}" "${manifest}" \
+            || die 'RPMDB post reboot diversa da quella verificata.'
+        tolerated=1
+    fi
+    # All confirmation checks are complete. Persist directly to the terminal state;
+    # a crash before this write leaves pending-reboot and confirm is safely repeatable.
+    STATE_STATUS=confirmed; STATE_FINISHED="$(date -u +%FT%TZ)"; STATE_LAST_ERROR=; persist_state_or_die; history_or_warn confirmed "target=${STATE_TARGET} rpm=${hash} kernel-purge-tolerated=${tolerated}"
+    log "Upgrade ${STATE_TXID} confermato sulla TARGET ${STATE_TARGET}. SOURCE ${STATE_SOURCE} disponibile per recovery finche Snapper la conserva."
+}
+
+prepare_rollback() {
+    local source="$1"
+    local out
+    local old
+    local active
+    local target
+    snapshot_exists "${source}" || return 1
+    check_boot_space || return 1
+    [[ "$(snapshot_os_id "${source}")" == "${REQUIRED_OS_ID}" ]] || return 1
+    ensure_snapshot_bootable "${source}" || return 1
+    active="$(active_snapshot)"
+    old="$(default_snapshot)"
+    [[ "${active}" =~ ^[0-9]+$ && "${old}" == "${active}" ]] || return 1
+
+    # Persist intent before snapper changes the default subvolume. If the process
+    # dies inside snapper rollback, recover can classify the observed default.
+    STATE_SOURCE="${source}"
+    STATE_TARGET=
+    STATE_BOOT_ID_BEFORE="$(current_boot_id)"
+    STATE_STATUS=rollback-preparing
+    STATE_FINISHED=
+    STATE_LAST_ERROR=
+    persist_state_or_die
+    history_or_warn rollback-preparing "source=${source} old-default=${old}"
+
+    if ! out="$(LC_ALL=C snapper -c "${SNAPPER_CONFIG}" rollback "${source}" 2>&1)"; then
+        STATE_STATUS=rollback-unverified
+        STATE_LAST_ERROR="snapper rollback failed/ambiguous: ${out//$'\n'/ }"
+        persist_state_or_die
+        return 1
+    fi
+    target="$(default_snapshot)"
+    [[ "${target}" =~ ^[0-9]+$ && "${target}" != "${old}" ]] || { STATE_STATUS=rollback-unverified; STATE_LAST_ERROR='rollback default ambiguous'; persist_state_or_die; return 1; }
+    snapshot_exists "${target}" && snapshot_is_rw "${target}" || { STATE_STATUS=rollback-unverified; STATE_LAST_ERROR='rollback TARGET invalid'; persist_state_or_die; return 1; }
+    ensure_snapshot_bootable "${target}" || { STATE_TARGET="${target}"; STATE_STATUS=rollback-unverified; STATE_LAST_ERROR='rollback TARGET not bootable'; persist_state_or_die; return 1; }
+    [[ "$(active_snapshot)" == "${active}" ]] || { STATE_TARGET="${target}"; STATE_STATUS=rollback-unverified; STATE_LAST_ERROR='active snapshot changed while preparing rollback'; persist_state_or_die; return 1; }
+
+    STATE_TARGET="${target}"
+    STATE_STATUS=rollback-pending
+    STATE_FINISHED="$(date -u +%FT%TZ)"
+    STATE_LAST_ERROR=
+    persist_state_or_die
+    history_or_warn rollback-pending "source=${source} target=${target}"
+}
+
+rollback() {
+    local requested="${1:-}"
+    local source
+    local answer
+    preflight recovery >/dev/null
+    load_state
+
+    # Consistency gate: refuse to overwrite an active or unresolved transaction
+    case "${STATE_STATUS}" in
+        ''|confirmed|aborted|rolled-back|planned) ;;
+        *)
+            die "Impossibile eseguire rollback: transazione v5 ${STATE_TXID:-?} attiva in stato '${STATE_STATUS}'. Eseguire prima '${PROG} recover'."
+            ;;
+    esac
+
+    source="${requested:-${STATE_SOURCE}}"; [[ "${source}" =~ ^[0-9]+$ ]] || die 'specificare una snapshot numerica.'
+    if [[ "${STATE_STATUS}" == planned ]]; then
+        warn "Esiste un piano pendente (${STATE_TXID}); confermando il rollback verra invalidato."
+    fi
+
+    printf 'Rollback verso snapshot %s. Scrivi esattamente: ROLLBACK %s E RIAVVIA\n> ' "${source}" "${source}"
+    IFS= read -r answer || die 'rollback annullato.'
+    [[ "${answer}" == "ROLLBACK ${source} E RIAVVIA" ]] || die 'rollback annullato.'
+
+    # State mutation happens strictly after user confirmation
+    if [[ "${STATE_STATUS}" == planned ]]; then
+        mark_aborted 'piano invalidato da rollback manuale'
+    fi
+
+    reset_state
+    STATE_TXID="$(new_txid)"
+    STATE_CREATED="$(date -u +%FT%TZ)"
+    set_tx_paths
+    prepare_rollback "${source}" || die 'rollback non verificabile; non riavvio.'
+    reboot_or_finish rollback
+}
+
+recover() {
+    preflight recovery >/dev/null
+    load_state
+    local a
+    local d
+    local boot
+    [[ -n "${STATE_STATUS}" ]] || { log 'Nessuna transazione v5 registrata.'; return 0; }
+    a="$(active_snapshot)"; d="$(default_snapshot)"; boot="$(current_boot_id)"
+    case "${STATE_STATUS}" in
+        planning) mark_aborted 'planning interrotto; cache non fidata'; log 'Planning archiviato come aborted.' ;;
+        planned) log 'Esiste solo un piano; SOURCE non modificata.' ;;
+        target-opening|target-open-ambiguous)
+            die "open TARGET ambiguo. Non posso identificare con certezza la snapshot da abortire: ispezionare ${TUKIT_OPEN_LOG} e snapper list." ;;
+        target-prepared|target-updating|target-update-failed|target-updated|target-verifying|target-verification-failed|target-verified)
+            [[ "${STATE_TARGET}" =~ ^[0-9]+$ ]] || die 'TARGET sconosciuta.'
+            if [[ "${a}" == "${STATE_TARGET}" || "${d}" == "${STATE_TARGET}" ]]; then die 'TARGET e active/default: abort automatico vietato.'; fi
+            abort_target_safe "${STATE_TARGET}" || die 'abort TARGET non riuscito in modo verificabile.'
+            log 'TARGET incompleta abortita; SOURCE invariata.'
+            ;;
+        committing)
+            [[ "${STATE_TARGET}" =~ ^[0-9]+$ ]] || die 'committing senza TARGET.'
+            if [[ "${a}" == "${STATE_TARGET}" ]]; then
+                [[ "${d}" == "${STATE_TARGET}" ]] || die 'TARGET active ma default diverso: recovery manuale.'
+                STATE_STATUS=pending-reboot; persist_state_or_die; log 'TARGET gia attiva/default; riclassificata pending-reboot.'
+            elif [[ "${d}" == "${STATE_SOURCE}" ]]; then
+                abort_target_safe "${STATE_TARGET}" || die 'commit fallito prima del cambio default ma abort non riuscito.'
+                log 'Commit non avvenuto; TARGET abortita.'
+            elif [[ "${d}" == "${STATE_TARGET}" ]]; then
+                snapshot_is_rw "${STATE_TARGET}" && snapshot_is_bootable "${STATE_SOURCE}" && snapshot_is_bootable "${STATE_TARGET}" || die 'TARGET default non supera invarianti post-close.'
+                STATE_STATUS=pending-reboot; persist_state_or_die; log 'Close avvenuto: TARGET default; stato riclassificato pending-reboot.'
+            else die "recovery committing ambigua: active=${a:-?} default=${d:-?}."; fi
+            ;;
+        pending-reboot)
+            if [[ "${boot}" == "${STATE_BOOT_ID_BEFORE}" ]]; then
+                log 'TARGET preparata ma il reboot non e ancora avvenuto; completare il riavvio senza manutenzione intermedia.'
+            elif [[ "${a}" == "${STATE_TARGET}" && "${d}" == "${STATE_TARGET}" ]]; then
+                log "Reboot osservato con successo sulla TARGET; eseguire '${PROG} confirm'."
+            else
+                warn "ANOMALIA BOOT: osservato reboot (boot_id variato), ma la snapshot attiva non e la TARGET attesa!"
+                warn "Attiva: ${a:-?} | Default: ${d:-?} | Attesa TARGET: ${STATE_TARGET}"
+                die "Il sistema si e riavviato sulla snapshot errata. Verificare le entry di avvio EFI/sdbootutil prima di continuare."
+            fi
+            ;;
+        rollback-preparing)
+            [[ "${boot}" == "${STATE_BOOT_ID_BEFORE}" ]] || {
+                STATE_STATUS=rollback-unverified
+                STATE_LAST_ERROR='reboot osservato mentre rollback era ancora rollback-preparing'
+                persist_state_or_die
+                die 'rollback-preparing attraversato da reboot: ispezione manuale richiesta.'
+            }
+            if [[ "${d}" == "${a}" ]]; then
+                # No staged default is observable. The current boot/default stayed untouched;
+                # archive the interrupted intent rather than inventing a TARGET.
+                STATE_STATUS=aborted
+                STATE_FINISHED="$(date -u +%FT%TZ)"
+                STATE_LAST_ERROR='rollback interrotto prima di osservare un nuovo default'
+                persist_state_or_die
+                history_or_warn rollback-aborted-no-default "source=${STATE_SOURCE}"
+                log 'Rollback non risulta staged; active/default invariati. Intento archiviato come aborted.'
+            elif [[ "${d}" =~ ^[0-9]+$ && "${d}" != "${a}" ]] \
+                && snapshot_exists "${d}" && snapshot_is_rw "${d}" \
+                && [[ "$(snapshot_os_id "${d}")" == "${REQUIRED_OS_ID}" ]]; then
+                STATE_TARGET="${d}"
+                ensure_snapshot_bootable "${STATE_TARGET}" || {
+                    STATE_STATUS=rollback-unverified
+                    STATE_LAST_ERROR='rollback-preparing: nuovo default trovato ma non reso bootable'
+                    persist_state_or_die
+                    die 'nuovo default rollback trovato ma bootability non verificabile.'
+                }
+                STATE_STATUS=rollback-pending
+                STATE_FINISHED="$(date -u +%FT%TZ)"
+                STATE_LAST_ERROR=
+                persist_state_or_die
+                history_or_warn rollback-pending "source=${STATE_SOURCE} target=${STATE_TARGET} recovered=1"
+                log "Rollback recuperato: TARGET ${STATE_TARGET} e default; reboot ancora da fare."
+            else
+                STATE_STATUS=rollback-unverified
+                STATE_LAST_ERROR="rollback-preparing ambiguo active=${a:-?} default=${d:-?}"
+                persist_state_or_die
+                die 'rollback-preparing non classificabile automaticamente.'
+            fi
+            ;;
+        rollback-pending)
+            [[ "${boot}" != "${STATE_BOOT_ID_BEFORE}" ]] || { log 'Rollback preparato; reboot ancora da fare.'; return 0; }
+            if [[ "${a}" == "${STATE_TARGET}" && "${d}" == "${STATE_TARGET}" ]] \
+                && snapshot_is_rw "${STATE_TARGET}" \
+                && snapshot_is_bootable "${STATE_TARGET}"; then
+                STATE_STATUS=rolled-back
+                STATE_LAST_ERROR=
+                persist_state_or_die
+                history_or_warn rolled-back "target=${STATE_TARGET}"
+                log 'Rollback confermato.'
+            else
+                STATE_STATUS=rollback-unverified
+                STATE_LAST_ERROR="rollback post-reboot mismatch active=${a:-?} default=${d:-?}"
+                persist_state_or_die
+                die 'rollback non verificabile automaticamente.'
+            fi
+            ;;
+        rollback-unverified)
+            if [[ "${boot}" == "${STATE_BOOT_ID_BEFORE}" && "${STATE_TARGET}" =~ ^[0-9]+$ \
+                && "${d}" == "${STATE_TARGET}" && "${a}" != "${STATE_TARGET}" ]] \
+                && snapshot_exists "${STATE_TARGET}" \
+                && snapshot_is_rw "${STATE_TARGET}" \
+                && ensure_snapshot_bootable "${STATE_TARGET}"; then
+                STATE_STATUS=rollback-pending
+                STATE_LAST_ERROR=
+                persist_state_or_die
+                history_or_warn rollback-pending "source=${STATE_SOURCE} target=${STATE_TARGET} recovered=1"
+                log 'Rollback-unverified riclassificato rollback-pending; reboot ancora da fare.'
+            else
+                die 'rollback-unverified: ispezione manuale richiesta.'
+            fi
+            ;;
+        confirmed|aborted|rolled-back) log 'Nessuna recovery pendente.' ;;
+        aborting) die 'abort interrotto: ispezionare TARGET e Snapper manualmente prima di riprovare.' ;;
+    esac
+}
+
+prune() {
+    local days="${1:-30}"
+    local p
+    local base
+    local -a files=()
+    require_root; acquire_lock; require_recovery_commands; command -v find >/dev/null 2>&1 || die 'comando richiesto non trovato: find'; [[ "${days}" =~ ^[0-9]+$ ]] || die 'GIORNI non valido.'; load_state
+    case "${STATE_STATUS}" in
+        ''|confirmed|aborted|rolled-back|planned) ;;
+        *) die "prune bloccato in stato ${STATE_STATUS:-sconosciuto}." ;;
+    esac
+    [[ -d "${CACHE_ROOT}" ]] && while IFS= read -r p; do base="${p##*/}"; is_uuid "${base}" || continue; [[ "${base}" == "${STATE_TXID}" && "${STATE_STATUS}" == planned ]] || files+=("${p}"); done < <(find "${CACHE_ROOT}" -mindepth 1 -maxdepth 1 -type d -mtime "+${days}" -print)
+    [[ -d "${LOG_ROOT}" ]] && while IFS= read -r p; do files+=("${p}"); done < <(find "${LOG_ROOT}" -mindepth 1 -maxdepth 1 -type f -mtime "+${days}" -print)
+    printf 'Artefatti v5 candidati: %s. Snapshot Btrfs: mai eliminate da prune.\n' "${#files[@]}"
+    (( ${#files[@]} )) || return 0
+    printf 'Scrivi esattamente: PRUNE V5 %s\n> ' "${days}"; local ans; IFS= read -r ans || die 'prune annullato.'; [[ "${ans}" == "PRUNE V5 ${days}" ]] || die 'prune annullato.'
+    for p in "${files[@]}"; do [[ -d "${p}" ]] && rm -rf -- "${p}" || rm -f -- "${p}"; done
+    history_or_warn prune "days=${days} files=${#files[@]}"
+}
+
+status() {
+    require_root; load_state
+    printf 'mySlowrollOS: %s\n' "${PROGRAM_VERSION}"
+    printf 'OS: %s\n' "$(os_id)"
+    printf 'Boot ID: %s\n' "$(current_boot_id 2>/dev/null || echo sconosciuto)"
+    printf 'Active: %s\n' "$(active_snapshot || true)"
+    printf 'Default: %s\n' "$(default_snapshot || true)"
+    printf 'State: %s\n' "${STATE_STATUS:-nessuna transazione v5}"
+    printf 'TXID: %s\n' "${STATE_TXID:-nessuno}"
+    printf 'SOURCE: %s\n' "${STATE_SOURCE:-nessuna}"
+    printf 'TARGET: %s\n' "${STATE_TARGET:-nessuna}"
+    printf 'Created: %s\n' "${STATE_CREATED:-sconosciuto}"
+    if [[ "${STATE_STATUS}" == planned ]]; then
+        local age
+        age="$(plan_age_seconds || echo sconosciuta)"
+        printf 'Plan age: %ss (riutilizzabile: %s, max %ss)\n' "${age}" "$(planned_is_fresh && echo 'si' || echo 'no')" "${PLAN_MAX_AGE_SECONDS}"
+    fi
+    printf 'Target opened: %s\n' "${STATE_TARGET_OPENED:-sconosciuto}"
+    printf 'Last error: %s\n' "${STATE_LAST_ERROR:-nessuno}"
+    if [[ -n "${DUP_LOG}" ]]; then
+        printf 'Dup log: %s\n' "${DUP_LOG}"
+    fi
+    return 0
+}
+
+main() {
+    local c="${1:-}"
+    case "${c}" in
+        check)
+            (( $#==1 )) || die 'check non accetta argomenti'
+            preflight update >/dev/null
+            load_state
+            if [[ -n "${STATE_STATUS}" && ! "${STATE_STATUS}" =~ ^(confirmed|aborted|rolled-back)$ ]]; then
+                warn "Esiste una transazione v5 attiva in stato '${STATE_STATUS}' (TXID: ${STATE_TXID:-?})."
+            fi
+            log "Preflight ${PROGRAM_VERSION} superato."
+            ;;
+        plan) (( $#==1 )) || die 'plan non accetta argomenti'; make_plan ;;
+        upgrade) (( $#==1 )) || die 'upgrade non accetta argomenti'; upgrade ;;
+        confirm) (( $#==1 )) || die 'confirm non accetta argomenti'; confirm ;;
+        recover) (( $#==1 )) || die 'recover non accetta argomenti'; recover ;;
+        rollback) (( $#<=2 )) || die "uso: ${PROG} rollback [SNAPSHOT]"; rollback "${2:-}" ;;
+        prune) (( $#<=2 )) || die "uso: ${PROG} prune [GIORNI]"; prune "${2:-30}" ;;
+        status) (( $#==1 )) || die 'status non accetta argomenti'; status ;;
+        -h|--help|help|'') usage ;;
+        *) usage >&2; die "comando sconosciuto: ${c}" ;;
+    esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
