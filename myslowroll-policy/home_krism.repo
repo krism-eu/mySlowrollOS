@@ -1,0 +1,10 @@
+[home_krism]
+name=home:krism - openSUSE Slowroll
+enabled=1
+autorefresh=1
+baseurl=https://download.opensuse.org/repositories/home:/krism/openSUSE_Slowroll/
+type=rpm-md
+priority=110
+gpgcheck=1
+repo_gpgcheck=1
+keeppackages=0
