@@ -1,0 +1,17 @@
+{
+  "software": {
+    "patterns": [],
+    "packages": [
+      "criscore1",
+      "criscore2"
+    ],
+    "extraRepositories": [
+      {
+        "alias": "home_krism_slowroll",
+        "name": "Personal Slowroll packages",
+        "url": "https://download.opensuse.org/repositories/home:/krism/openSUSE_Slowroll/"
+      }
+    ],
+    "onlyRequired": true
+  }
+}
