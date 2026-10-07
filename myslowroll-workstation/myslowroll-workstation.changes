@@ -1,0 +1,6 @@
+-------------------------------------------------------------------
+Mon Sep 28 2026 - krism
+
+- Initial package.
+- Represent the frozen 161-package mySlowrollOS workstation manifest.
+- Use the same RPM dependency set from KIWI and Agama.
