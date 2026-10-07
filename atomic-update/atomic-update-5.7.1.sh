@@ -2,14 +2,14 @@
 set -Eeuo pipefail
 umask 077
 
-# mySlowrollOS guarded offline distribution upgrade v5/v6.7.1
+# mySlowrollOS guarded offline distribution upgrade v5.7.1
 #
 # Evolution of the tested 5.6.1 engine:
 # - durable PREPARED -> REVALIDATED barrier before tukit open;
 # - capability-based tukit/sdbootutil gate instead of exact help/version hashes;
 # - fail-closed needs-inspection state for ambiguous open/close/abort outcomes;
 # - TARGET quiescence proof before automatic abort;
-# - v5/v6 state/cache namespace retained deliberately so an in-flight 5.6.1
+# - v5 state/cache namespace retained deliberately so an in-flight 5.6.1
 #   pending-reboot transaction remains confirmable after atomic-update upgrades.
 #
 # SOURCE is never the RPM transaction root.  All package changes happen only
@@ -18,12 +18,12 @@ umask 077
 readonly PROG="${0##*/}"
 readonly PROGRAM_VERSION='5.7.1-guarded'
 readonly STATE_VERSION=6
-readonly STATE_DIR=/var/lib/myslowroll/atomic-dup-v5/v6
+readonly STATE_DIR=/var/lib/myslowroll/atomic-dup-v5
 readonly STATE_FILE="${STATE_DIR}/state"
 readonly HISTORY_FILE="${STATE_DIR}/history.log"
-readonly CACHE_ROOT=/var/cache/myslowroll-atomic-dup-v5/v6
-readonly LOG_ROOT=/var/log/myslowroll-atomic-dup-v5/v6
-readonly LOCK_FILE=/run/myslowroll-atomic-dup-v5/v6.lock
+readonly CACHE_ROOT=/var/cache/myslowroll-atomic-dup-v5
+readonly LOG_ROOT=/var/log/myslowroll-atomic-dup-v5
+readonly LOCK_FILE=/run/myslowroll-atomic-dup-v5.lock
 readonly SNAPPER_CONFIG=root
 readonly REQUIRED_OS_ID=opensuse-slowroll
 readonly TUKIT_DESCRIPTION_PREFIX='mySlowrollOS v6'
@@ -104,14 +104,18 @@ usage() {
 Uso: ${PROG} COMMAND
 
 Comandi:
-  check               preflight completo, nessuna modifica
-  plan                refresh + doppio piano + pre-download + fingerprint
-  upgrade             piano (o riuso) + TARGET offline + dup + verifiche + reboot
-  confirm             conferma dopo il reboot sul TARGET
-  recover             recovery fail-closed di una transazione interrotta
-  rollback [SNAPSHOT] rollback esplicito verso una snapshot e reboot
-  status              stato corrente
-  prune [GIORNI]      elimina vecchi cache/log v5/v6 (default 30), mai snapshot
+  check                       preflight completo, nessuna modifica
+  plan                        refresh + doppio piano + pre-download + fingerprint
+  upgrade                     PREPARED -> REVALIDATED -> TARGET -> verifica -> reboot
+  confirm                     conferma dopo il reboot sul TARGET
+  recover                     recovery fail-closed automatica
+  recover inspect             diagnostica read-only
+  recover abort-target N      abort tipizzato della TARGET N
+  recover adopt-target N      adotta N solo se gia default e verificabile
+  recover clear-opening       archivia open ambiguo solo senza TARGET registrata
+  rollback [SNAPSHOT]         rollback esplicito e reboot
+  status                      stato corrente
+  prune [GIORNI]              elimina vecchi cache/log v5, mai snapshot
 
 Stati bloccanti come target-open-ambiguous, aborting e rollback-unverified
 richiedono recover/ispezione; non rilanciare upgrade alla cieca.
@@ -128,7 +132,7 @@ acquire_lock() {
 require_recovery_commands() {
     local cmd
     for cmd in awk bootctl btrfs cat chmod date df findmnt flock grep head install \
-               mktemp mv readlink rm sdbootutil sed sha256sum sleep snapper sort sync \
+               mktemp mv pgrep readlink rm sdbootutil sed sha256sum sleep snapper sort sync \
                systemctl timeout tr tukit; do
         command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
     done
@@ -1055,7 +1059,8 @@ open_target() {
        [[ "${target}" == "${a}" ]] ||
        [[ "${a}" != "${STATE_SOURCE}" ]] ||
        [[ "${d}" != "${STATE_SOURCE}" ]]; then
-        STATE_STATUS=target-open-ambiguous
+        STATE_STATUS=needs-inspection
+        STATE_INSPECTION_KIND=post-open-invariants
         STATE_LAST_ERROR="post-open invariants failed: source=${STATE_SOURCE} active=${a:-?} default=${d:-?} target=${target}"
         persist_state_or_die
         return 1
@@ -1799,7 +1804,7 @@ prune() {
     esac
     [[ -d "${CACHE_ROOT}" ]] && while IFS= read -r p; do base="${p##*/}"; is_uuid "${base}" || continue; [[ "${base}" == "${STATE_TXID}" && "${STATE_STATUS}" == planned ]] || files+=("${p}"); done < <(find "${CACHE_ROOT}" -mindepth 1 -maxdepth 1 -type d -mtime "+${days}" -print)
     [[ -d "${LOG_ROOT}" ]] && while IFS= read -r p; do files+=("${p}"); done < <(find "${LOG_ROOT}" -mindepth 1 -maxdepth 1 -type f -mtime "+${days}" -print)
-    printf 'Artefatti v5/v6 candidati: %s. Snapshot Btrfs: mai eliminate da prune.\n' "${#files[@]}"
+    printf 'Artefatti v5 candidati: %s. Snapshot Btrfs: mai eliminate da prune.\n' "${#files[@]}"
     (( ${#files[@]} )) || return 0
     printf 'Scrivi esattamente: PRUNE V5 %s\n> ' "${days}"; local ans; IFS= read -r ans || die 'prune annullato.'; [[ "${ans}" == "PRUNE V5 ${days}" ]] || die 'prune annullato.'
     for p in "${files[@]}"; do [[ -d "${p}" ]] && rm -rf -- "${p}" || rm -f -- "${p}"; done
@@ -1813,7 +1818,7 @@ status() {
     printf 'Boot ID: %s\n' "$(current_boot_id 2>/dev/null || echo sconosciuto)"
     printf 'Active: %s\n' "$(active_snapshot || true)"
     printf 'Default: %s\n' "$(default_snapshot || true)"
-    printf 'State: %s\n' "${STATE_STATUS:-nessuna transazione v5/v6}"
+    printf 'State: %s\n' "${STATE_STATUS:-nessuna transazione}"
     printf 'TXID: %s\n' "${STATE_TXID:-nessuno}"
     printf 'SOURCE: %s\n' "${STATE_SOURCE:-nessuna}"
     printf 'TARGET: %s\n' "${STATE_TARGET:-nessuna}"
