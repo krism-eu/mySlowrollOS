@@ -84,20 +84,8 @@ local base = 'https://raw.githubusercontent.com/krism-eu/mySlowrollOS/main/';
     }],
   },
 
-  // VM-only storage validation. Nothing is written until "agama install".
-  // Explicit /home keeps it on its own Btrfs partition. No disk swap; zram is used instead.\n  // boot.configure lets Agama create the required EFI System Partition automatically on GPT/UEFI.
-  storage: {
-    drives: [{
-      search: { condition: { name: '/dev/vda' }, max: 1 },
-      alias: 'vmDisk',
-      ptableType: 'gpt',
-      partitions: [
-        { filesystem: { path: '/', type: 'btrfs' }, size: '12 GiB' },
-        { filesystem: { path: '/home', type: 'btrfs' }, size: { min: '5 GiB' } },
-      ],
-    }],
-    boot: { configure: true, device: 'vmDisk' },
-  },
+  // Storage is intentionally omitted. Disk selection, partitioning, reuse,
+  // formatting and mount assignments are performed manually in the Agama UI.
 
   bootloader: {
     timeout: 3,
