@@ -269,7 +269,7 @@ load_state() {
         *) die "state v${file_version} incompatibile con v${STATE_VERSION}." ;;
     esac
     [[ -n "${STATE_STATUS}" ]] || die 'state privo di status.'
-    # v5/v6.5 could persist an intermediate confirming state. v5/v6.6 never writes it:
+    # v5.5 could persist an intermediate confirming state. v5.6 never writes it:
     # treat it as pending-reboot so confirm can be safely repeated after a crash.
     [[ "${STATE_STATUS}" == confirming ]] && STATE_STATUS=pending-reboot
     state_value_valid "${STATE_STATUS}" || die "state sconosciuto: ${STATE_STATUS}"
@@ -452,7 +452,7 @@ systemd_unit_exists() {
 }
 
 check_conflicting_update_units_idle() {
-    # The intended v5/v6.6 host does not require the transactional-update package.
+    # The intended v5.6 host does not require the transactional-update package.
     # If stale/optional units exist, they must not be enabled/active/failed.
     if systemd_unit_exists transactional-update.timer \
        && systemctl is-enabled --quiet transactional-update.timer 2>/dev/null; then
@@ -846,7 +846,7 @@ check_state_for_new() {
     case "${STATE_STATUS}" in
         ''|confirmed|aborted|rolled-back) return 0 ;;
         planned) return 0 ;;
-        *) die "transazione v5/v6 ${STATE_TXID:-?} in stato ${STATE_STATUS}; usare recover/status prima di continuare." ;;
+        *) die "transazione ${STATE_TXID:-?} in stato ${STATE_STATUS}; usare recover/status prima di continuare." ;;
     esac
 }
 
@@ -1639,7 +1639,7 @@ rollback() {
     case "${STATE_STATUS}" in
         ''|confirmed|aborted|rolled-back|planned) ;;
         *)
-            die "Impossibile eseguire rollback: transazione v5/v6 ${STATE_TXID:-?} attiva in stato '${STATE_STATUS}'. Eseguire prima '${PROG} recover'."
+            die "Impossibile eseguire rollback: transazione ${STATE_TXID:-?} attiva in stato '${STATE_STATUS}'. Eseguire prima '${PROG} recover'."
             ;;
     esac
 
@@ -1671,7 +1671,7 @@ recover() {
     local a
     local d
     local boot
-    [[ -n "${STATE_STATUS}" ]] || { log 'Nessuna transazione v5/v6 registrata.'; return 0; }
+    [[ -n "${STATE_STATUS}" ]] || { log 'Nessuna transazione registrata.'; return 0; }
     a="$(active_snapshot)"; d="$(default_snapshot)"; boot="$(current_boot_id)"
     case "${STATE_STATUS}" in
         planning) mark_aborted 'planning interrotto; cache non fidata'; log 'Planning archiviato come aborted.' ;;
