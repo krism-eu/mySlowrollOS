@@ -957,6 +957,30 @@ prepare_plan_for_upgrade() {
     load_state
 }
 
+find_owned_targets() {
+    # Resolve TARGET ownership from the exact tukit description.  This is used
+    # only as a recovery aid when stdout parsing is absent/changed.
+    local line number description wanted
+    wanted="${TUKIT_DESCRIPTION_PREFIX} ${STATE_TXID}"
+    while IFS= read -r line; do
+        line="${line//\"/}"
+        number="${line%%,*}"
+        description="${line#*,}"
+        number="${number//[[:space:]]/}"
+        description="${description#${description%%[![:space:]]*}}"
+        description="${description%${description##*[![:space:]]}}"
+        [[ "${number}" =~ ^[0-9]+$ ]] || continue
+        [[ "${description}" == "${wanted}" ]] && printf '%s\n' "${number}"
+    done < <(LC_ALL=C snapper --csvout --no-headers -c "${SNAPPER_CONFIG}"              list --disable-used-space --columns number,description 2>/dev/null)
+}
+
+resolve_owned_target() {
+    local -a found=()
+    mapfile -t found < <(find_owned_targets)
+    (( ${#found[@]} == 1 )) || return 1
+    printf '%s\n' "${found[0]}"
+}
+
 parse_tukit_open_output() {
     local raw="$1"
     local line
@@ -1042,11 +1066,17 @@ open_target() {
     sync "${TUKIT_OPEN_LOG}" || true
 
     if ! target="$(parse_tukit_open_output "${TUKIT_OPEN_LOG}")"; then
-        STATE_STATUS=needs-inspection
-        STATE_INSPECTION_KIND=open-ambiguous
-        STATE_LAST_ERROR="tukit open output not safely parseable; inspect ${TUKIT_OPEN_LOG}"
-        persist_state_or_die
-        return 1
+        # CLI wording may change.  Recover identity only from the exact
+        # transaction description; never guess from arbitrary numbers.
+        if target="$(resolve_owned_target)"; then
+            log "TARGET ${target} recuperata dalla descrizione tukit."
+        else
+            STATE_STATUS=needs-inspection
+            STATE_INSPECTION_KIND=open-ambiguous
+            STATE_LAST_ERROR="tukit open output non parseabile e ownership non univoca; inspect ${TUKIT_OPEN_LOG}"
+            persist_state_or_die
+            return 1
+        fi
     fi
 
     STATE_TARGET="${target}"
@@ -1847,6 +1877,10 @@ recover_inspect() {
     printf 'TXID: %s\n' "${STATE_TXID:-none}"
     printf 'SOURCE: %s | TARGET: %s | active: %s | default: %s\n'         "${STATE_SOURCE:-none}" "${STATE_TARGET:-none}" "${a:-?}" "${d:-?}"
     printf 'Last error: %s\n' "${STATE_LAST_ERROR:-none}"
+    printf 'Owned TARGETs by description:'
+    local owned
+    owned="$(find_owned_targets | tr '\n' ' ' || true)"
+    printf ' %s\n' "${owned:-none}"
     if [[ "${STATE_TARGET}" =~ ^[0-9]+$ ]]; then
         if target_quiescent "${STATE_TARGET}"; then
             printf 'TARGET quiescent: yes\n'
@@ -1893,8 +1927,12 @@ recover_clear_opening() {
         die 'clear-opening ammesso solo per open-ambiguous.'
     [[ "$(active_snapshot)" == "${STATE_SOURCE}" && "$(default_snapshot)" == "${STATE_SOURCE}" ]] ||
         die 'SOURCE non e piu active/default.'
-    # Fail closed: clear only when the state never learned a TARGET number.
+    # Fail closed: clear only when neither state nor Snapper reveal a TARGET
+    # owned by this TXID.  A parse failure is not proof that open created none.
     [[ -z "${STATE_TARGET}" ]] || die 'TARGET numerica registrata: usare inspect/abort-target.'
+    if find_owned_targets | grep -q .; then
+        die 'Esiste almeno una snapshot con la descrizione di questa transazione: clear-opening vietato.'
+    fi
     STATE_STATUS=aborted
     STATE_INSPECTION_KIND=
     STATE_FINISHED="$(date -u +%FT%TZ)"
