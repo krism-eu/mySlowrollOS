@@ -74,6 +74,11 @@ local base = 'https://raw.githubusercontent.com/krism-eu/mySlowrollOS/main/';
   ],
 
   scripts: {
+    post: [{
+      name: 'myslowroll-native-sddm-before-first-boot',
+      chroot: true,
+      url: base + 'agama/post-chroot-boot-policy.sh',
+    }],
     init: [{
       name: 'myslowroll-firstboot-policy',
       url: base + 'agama/init-firstboot.sh',
