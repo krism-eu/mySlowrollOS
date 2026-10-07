@@ -47,6 +47,9 @@ Storage is intentionally **not** declared in the active Agama profile.
 Disk selection, partition creation/reuse, formatting and mount assignments are manual choices in the Agama UI.
 The profile must not preselect a disk or perform unattended storage changes.
 
+Authentication is also intentionally omitted from the active profile.
+User creation, username, password and root credentials are entered manually in the Agama UI at install time.
+
 Target layout for the real machine remains a user choice at install time (EFI + Btrfs root + separate /home, no disk swap; zram is used).
 
 ## Remaining work
