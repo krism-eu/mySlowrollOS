@@ -1,0 +1,24 @@
+-------------------------------------------------------------------
+Thu Oct 08 2026 - krism
+
+- Update to 5.7.1.
+- Preserve the v5 state/cache namespace so a 5.6.1 pending-reboot transaction
+  remains confirmable after the updater package itself is upgraded.
+- Add durable PREPARED -> REVALIDATED barrier before tukit open.
+- Replace exact help/version hashing with semantic capability checks.
+- Add typed needs-inspection outcomes for ambiguous open/close/abort states.
+- Require TARGET quiescence before automatic abort.
+- Treat tukit close timeout/failure as ambiguous; never blind-abort afterwards.
+- Move TARGET boot cleanup behind a verified abort.
+- Add typed recovery inspect/abort-target/adopt-target/clear-opening commands.
+- Keep strict manifest, critical-package, bootability and purge-kernels checks.
+- Add procps runtime dependency for quiescence inspection and keep diffutils
+  for cmp.
+- No timer, daemon or unattended scheduler.
+
+-------------------------------------------------------------------
+Tue Sep 29 2026 - krism
+
+- Keep guarded updater at 5.6.1.
+- Add missing diffutils runtime dependency for cmp.
+- Keep updater manual: no timer, daemon or unattended scheduling.
