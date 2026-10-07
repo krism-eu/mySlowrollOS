@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# First-boot policy for mySlowrollOS.
-# Runs through Agama init scripts, when the installed system and systemd
-# are fully operational. User creation/passwords remain an Agama decision.
+# First-boot runtime policy for mySlowrollOS.
+# The native SDDM/default-target symlinks are already prepared offline by
+# post-chroot-boot-policy.sh so the very first boot can reach SDDM directly.
 
 systemctl set-default graphical.target
 
-# Select SDDM explicitly.
-ln -sfn /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service
+# Defensive check: keep the native SDDM selector authoritative.
+if [[ "$(readlink -f /etc/systemd/system/display-manager.service 2>/dev/null || true)" != "/usr/lib/systemd/system/sddm.service" ]]; then
+  systemctl disable --now display-manager-legacy.service >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/display-manager.service
+  ln -s /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service
+  systemctl daemon-reload
+fi
 
 # Apply intended runtime service policy.
 systemctl enable NetworkManager.service firewalld.service || true
