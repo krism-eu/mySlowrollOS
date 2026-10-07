@@ -26,7 +26,7 @@ agama questions list 2>/dev/null || true
 echo '=== ISSUES ==='
 agama issues list 2>/dev/null || true
 
-echo '=== STORAGE/BOOTLOADER CONFIG ==='
+echo '=== BOOTLOADER / STORAGE (STORAGE EXPECTED UNSET) ==='
 agama config show >/tmp/myslowroll-test02-current.json
 python3 - <<'PY'
 import json
