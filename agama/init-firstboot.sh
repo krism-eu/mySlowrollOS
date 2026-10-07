@@ -15,6 +15,13 @@ if [[ "$(readlink -f /etc/systemd/system/display-manager.service 2>/dev/null || 
   systemctl daemon-reload
 fi
 
+# Persist trust for the OBS repository used by criscore/atomic-update.
+# Agama's gpgFingerprints authenticates the installation repository but does
+# not globally import that key for future package verification.
+if [[ -f /etc/zypp/repos.d/home_krism.key ]]; then
+  rpm --import /etc/zypp/repos.d/home_krism.key
+fi
+
 # Apply intended runtime service policy.
 systemctl enable NetworkManager.service firewalld.service || true
 systemctl disable NetworkManager-wait-online.service || true
