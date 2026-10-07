@@ -68,6 +68,8 @@ local base = 'https://raw.githubusercontent.com/krism-eu/mySlowrollOS/main/';
     { url: base + 'myslowroll-policy/90-myslowroll-zypp.conf', destination: '/etc/zypp/zypp.conf.d/90-myslowroll.conf', permissions: '0644' },
     { url: base + 'myslowroll-policy/home_krism.repo', destination: '/etc/zypp/repos.d/home_krism.repo', permissions: '0644' },
     { url: base + 'agama/keys/home_krism.asc', destination: '/etc/zypp/repos.d/home_krism.key', permissions: '0644' },
+    { url: base + 'myslowroll-policy/99-myslowroll-passwordless-admin', destination: '/etc/sudoers.d/99-myslowroll-passwordless-admin', permissions: '0440' },
+    { url: base + 'myslowroll-policy/10-myslowroll-passwordless-admin.rules', destination: '/etc/polkit-1/rules.d/10-myslowroll-passwordless-admin.rules', permissions: '0644' },
     { url: base + 'myslowroll-policy/kdesurc', destination: '/etc/skel/.config/kdesurc', permissions: '0644' },
     { url: base + 'myslowroll-policy/kernel-cmdline', destination: '/etc/kernel/cmdline', permissions: '0644' },
   ],
