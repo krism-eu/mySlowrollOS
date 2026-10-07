@@ -7,10 +7,6 @@ local base = 'https://raw.githubusercontent.com/krism-eu/mySlowrollOS/main/';
 {
   product: { id: 'Slowroll' },
 
-  // Test-only credential so Agama can fully validate the profile.
-  // Hardware installation will set authentication interactively.
-  root: { password: 'test1234' },
-
   software: {
     patterns: [],
     packages: [
