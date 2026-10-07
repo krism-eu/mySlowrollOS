@@ -42,9 +42,15 @@ Never disable signature checking to work around trust failures.
 - Agama reports no issues/questions and libsolv reports 0 problems / 0 unsolvable;
 - recovered post-install script passes `bash -n`.
 
+## Storage policy
+Storage is intentionally **not** declared in the active Agama profile.
+Disk selection, partition creation/reuse, formatting and mount assignments are manual choices in the Agama UI.
+The profile must not preselect a disk or perform unattended storage changes.
+
+Target layout for the real machine remains a user choice at install time (EFI + Btrfs root + separate /home, no disk swap; zram is used).
+
 ## Remaining work
-1. Convert static policy into Agama `files` entries where appropriate.
-2. Move operations that require a running systemd from post-chroot to an Agama `init` script.
-3. Finalize storage for the actual hardware interactively/profile-assisted.
-4. Test systemd-boot with the Agama systemd-boot preview enabled if required by the media/product.
-5. Perform one complete VM installation before hardware installation.
+1. Validate policy files + init script with storage omitted.
+2. Configure the target disk manually in Agama UI.
+3. Verify systemd-boot/UEFI on the resulting manual layout.
+4. Perform one complete VM installation before hardware installation.
