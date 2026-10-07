@@ -1,0 +1,10 @@
+enable NetworkManager.service
+enable firewalld.service
+disable NetworkManager-wait-online.service
+disable ModemManager.service
+disable smartd.service
+disable smartd_generate_opts.path
+disable snapper-timeline.timer
+disable sshd.service
+disable sshd.socket
+disable display-manager-legacy.service
