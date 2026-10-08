@@ -101,7 +101,8 @@
   },
   "bootloader": {
     "timeout": 3,
-    "updateNvram": true
+    "updateNvram": true,
+    "extraKernelParams": "security=apparmor systemd.show_status=1"
   },
   "l10n": {
     "locale": "it_IT.UTF-8",
