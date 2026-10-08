@@ -15,7 +15,6 @@ Requires(meta): criscore2 = %{version}-%{release}
 Requires:       Mesa-dri
 Requires:       Mesa-vulkan-device-select
 Requires:       NetworkManager
-Requires:       NetworkManager-bluetooth
 Requires:       aaa_base
 Requires:       alsa-ucm-conf
 Requires:       alsa-utils
@@ -145,7 +144,6 @@ Requires(meta): criscore1 = %{version}-%{release}
 Requires:       Mesa-dri
 Requires:       Mesa-vulkan-device-select
 Requires:       NetworkManager
-Requires:       NetworkManager-bluetooth
 Requires:       aaa_base
 Requires:       alsa-ucm-conf
 Requires:       alsa-utils

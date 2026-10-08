@@ -10,7 +10,6 @@ Requires:       7zip
 Requires:       Mesa-dri
 Requires:       Mesa-vulkan-device-select
 Requires:       NetworkManager
-Requires:       NetworkManager-bluetooth
 Requires:       aaa_base
 Requires:       alsa-ucm-conf
 Requires:       alsa-utils

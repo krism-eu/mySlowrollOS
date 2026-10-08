@@ -21,7 +21,6 @@
       "Mesa-dri",
       "Mesa-vulkan-device-select",
       "NetworkManager",
-      "NetworkManager-bluetooth",
       "aaa_base",
       "alsa-ucm-conf",
       "alsa-utils",
