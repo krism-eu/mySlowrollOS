@@ -928,10 +928,10 @@ prepare_plan_for_upgrade() {
 }
 
 find_owned_targets() {
-    # Resolve TARGET ownership from the exact tukit description.  This is used
-    # only as a recovery aid when stdout parsing is absent/changed.
-    local line number description wanted
+    local line number description wanted listing
     wanted="${TUKIT_DESCRIPTION_PREFIX} ${STATE_TXID}"
+    listing="$(LC_ALL=C snapper --csvout --no-headers -c "${SNAPPER_CONFIG}" \
+        list --disable-used-space --columns number,description)" || return 1
     while IFS= read -r line; do
         line="${line//\"/}"
         number="${line%%,*}"
@@ -940,13 +940,19 @@ find_owned_targets() {
         description="${description#${description%%[![:space:]]*}}"
         description="${description%${description##*[![:space:]]}}"
         [[ "${number}" =~ ^[0-9]+$ ]] || continue
-        [[ "${description}" == "${wanted}" ]] && printf '%s\n' "${number}"
-    done < <(LC_ALL=C snapper --csvout --no-headers -c "${SNAPPER_CONFIG}"              list --disable-used-space --columns number,description 2>/dev/null)
+        if [[ "${description}" == "${wanted}" ]]; then
+            printf '%s\n' "${number}" || return 1
+        fi
+    done <<<"${listing}"
+    return 0
 }
 
 resolve_owned_target() {
+    local matching
     local -a found=()
-    mapfile -t found < <(find_owned_targets)
+    matching="$(find_owned_targets)" || return 1
+    [[ -n "${matching}" ]] || return 1
+    mapfile -t found <<<"${matching}"
     (( ${#found[@]} == 1 )) || return 1
     printf '%s\n' "${found[0]}"
 }
@@ -1887,9 +1893,10 @@ recover_clear_opening() {
     # Fail closed: clear only when neither state nor Snapper reveal a TARGET
     # owned by this TXID.  A parse failure is not proof that open created none.
     [[ -z "${STATE_TARGET}" ]] || die 'TARGET numerica registrata: usare inspect/abort-target.'
-    if find_owned_targets | grep -q .; then
+    local owned
+    owned="$(find_owned_targets)" || die 'Elenco Snapper non verificabile: clear-opening vietato.'
+    [[ -z "${owned}" ]] ||
         die 'Esiste almeno una snapshot con la descrizione di questa transazione: clear-opening vietato.'
-    fi
     STATE_STATUS=aborted
     STATE_INSPECTION_KIND=
     STATE_FINISHED="$(date -u +%FT%TZ)"
