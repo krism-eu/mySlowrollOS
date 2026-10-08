@@ -21,6 +21,11 @@ Thu Oct 08 2026 - krism
 - Treat tukit close timeout/failure as ambiguous; never blind-abort afterwards.
 - Move TARGET boot cleanup behind a verified abort.
 - Add typed recovery inspect/abort-target/adopt-target/clear-opening commands.
+- Remove persistent toolchain hashing; re-check only consumed capabilities.
+- Collapse native transaction states; legacy 5.6 intermediate states are mapped on read.
+- Replace split RPMDB/ZYpp/cache/whole-/etc drift hashes with one source fingerprint
+  plus plan and post-TARGET manifest hashes.
+- Remove whole-/etc hashing to avoid unrelated configuration false positives.
 - Keep strict manifest, critical-package, bootability and purge-kernels checks.
 - Add procps runtime dependency for quiescence inspection and keep diffutils
   for cmp.
