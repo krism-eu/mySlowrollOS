@@ -18,6 +18,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Bash syntax
         run: bash -n atomic-update/atomic-update-5.7.1.sh
+      - name: Mocked recovery regression tests
+        run: bash atomic-update/tests/ci-regression.sh
+      - name: Single-version source and paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e atomic-update/atomic-update-5.6.1.sh
+          grep -Fq "readonly STATE_VERSION=1" atomic-update/atomic-update-5.7.1.sh
+          grep -Fq "readonly STATE_DIR=/var/lib/myslowroll/atomic-update" atomic-update/atomic-update-5.7.1.sh
+          ! grep -Eq 'atomic-dup-v5|myslowroll-v6|5[.]6[.]1' atomic-update/atomic-update-5.7.1.sh
       - name: Static design invariants
         shell: bash
         run: |
