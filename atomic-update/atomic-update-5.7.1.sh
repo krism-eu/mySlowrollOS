@@ -4,32 +4,24 @@ umask 077
 
 # mySlowrollOS guarded offline distribution upgrade v5.7.1
 #
-# Evolution of the tested 5.6.1 engine:
-# - durable PREPARED -> REVALIDATED barrier before tukit open;
-# - capability-based tukit/sdbootutil gate instead of exact help/version hashes;
-# - fail-closed needs-inspection state for ambiguous open/close/abort outcomes;
-# - TARGET quiescence proof before automatic abort;
-# - v5 state/cache namespace retained deliberately so an in-flight 5.6.1
-#   pending-reboot transaction remains confirmable after atomic-update upgrades.
+# Unico motore supportato: barriera REVALIDATED, TARGET offline e recovery fail-closed.
 #
 # SOURCE is never the RPM transaction root.  All package changes happen only
 # inside the offline tukit TARGET.  Unknown outcomes never trigger blind cleanup.
 
 readonly PROG="${0##*/}"
 readonly PROGRAM_VERSION='5.7.1-guarded'
-readonly STATE_VERSION=6
-readonly STATE_DIR=/var/lib/myslowroll/atomic-dup-v5
+readonly STATE_VERSION=1
+readonly STATE_DIR=/var/lib/myslowroll/atomic-update
 readonly STATE_FILE="${STATE_DIR}/state"
 readonly HISTORY_FILE="${STATE_DIR}/history.log"
-readonly CACHE_ROOT=/var/cache/myslowroll-atomic-dup-v5
-readonly LOG_ROOT=/var/log/myslowroll-atomic-dup-v5
-readonly LOCK_FILE=/run/myslowroll-atomic-dup-v5.lock
+readonly CACHE_ROOT=/var/cache/myslowroll-atomic-update
+readonly LOG_ROOT=/var/log/myslowroll-atomic-update
+readonly LOCK_FILE=/run/myslowroll-atomic-update.lock
 readonly SNAPPER_CONFIG=root
 readonly REQUIRED_OS_ID=opensuse-slowroll
-# Description namespace for NEW 5.7.x transactions only.  Legacy 5.6.1
-# pending-reboot state is still readable/confirmable through the retained v5
-# state namespace, but is not rediscovered through this v6 description prefix.
-readonly TUKIT_DESCRIPTION_PREFIX='mySlowrollOS v6'
+# Identificatore persistente delle TARGET; indipendente dalla versione dello schema.
+readonly TUKIT_DESCRIPTION_PREFIX='mySlowrollOS atomic-update'
 
 readonly PLAN_MAX_AGE_SECONDS="${MYSLOWROLL_PLAN_MAX_AGE_SECONDS:-86400}"
 readonly TARGET_MAX_AGE_SECONDS="${MYSLOWROLL_TARGET_MAX_AGE_SECONDS:-14400}"
@@ -105,7 +97,7 @@ Comandi:
   recover clear-opening       archivia open ambiguo solo senza TARGET registrata
   rollback [SNAPSHOT]         rollback esplicito e reboot
   status                      stato corrente
-  prune [GIORNI]              elimina vecchi cache/log v5, mai snapshot
+  prune [GIORNI]              elimina vecchi cache/log, mai snapshot
 
 Gli esiti ambigui convergono in needs-inspection: recover applica solo
 classificazioni dimostrabili; altrimenti richiede una recovery tipizzata.
@@ -233,10 +225,8 @@ load_state() {
             target_snapshot) STATE_TARGET="${value}" ;;
             boot_id_before) STATE_BOOT_ID_BEFORE="${value}" ;;
             plan_hash) STATE_PLAN_HASH="${value}" ;;
-            rpmdb_hash|zypp_hash|cache_hash|source_open_rpm_hash|source_open_etc_hash) : ;; # legacy v5
             source_fingerprint) STATE_SOURCE_FINGERPRINT="${value}" ;;
             rpmdb_post_hash) STATE_RPMDB_POST_HASH="${value}" ;;
-            toolchain_hash) : ;; # legacy v5 field, ignored in 5.7
             created_utc) STATE_CREATED="${value}" ;;
             target_opened_utc) STATE_TARGET_OPENED="${value}" ;;
             dup_started_utc) STATE_DUP_STARTED="${value}" ;;
@@ -249,33 +239,9 @@ load_state() {
     done < "${STATE_FILE}"
 
     (( seen_version == 1 )) || die 'state privo di versione.'
-    case "${file_version}" in
-        5|6) ;;
-        *) die "state v${file_version} incompatibile con v${STATE_VERSION}." ;;
-    esac
+    [[ "${file_version}" == "${STATE_VERSION}" ]] || die "schema state ${file_version} non supportato."
     [[ -n "${STATE_STATUS}" ]] || die 'state privo di status.'
 
-    # Read compatibility: collapse 5.6.x intermediate states into the smaller
-    # 5.7 model.  5.7 itself writes only the native states above.
-    case "${STATE_STATUS}" in
-        confirming) STATE_STATUS=pending-reboot ;;
-        target-opening|target-open-ambiguous)
-            STATE_STATUS=needs-inspection
-            [[ -n "${STATE_INSPECTION_KIND}" ]] || STATE_INSPECTION_KIND=legacy-open-ambiguous
-            ;;
-        target-prepared|target-updating|target-update-failed|target-updated|target-verifying|target-verification-failed)
-            STATE_STATUS=target
-            ;;
-        target-verified) STATE_STATUS=verified ;;
-        aborting)
-            STATE_STATUS=needs-inspection
-            [[ -n "${STATE_INSPECTION_KIND}" ]] || STATE_INSPECTION_KIND=legacy-abort-ambiguous
-            ;;
-        rollback-preparing|rollback-unverified)
-            STATE_STATUS=needs-inspection
-            [[ -n "${STATE_INSPECTION_KIND}" ]] || STATE_INSPECTION_KIND=legacy-rollback-ambiguous
-            ;;
-    esac
     state_value_valid "${STATE_STATUS}" || die "state sconosciuto: ${STATE_STATUS}"
     [[ -z "${STATE_TXID}" ]] || is_uuid "${STATE_TXID}" || die 'txid non valido.'
     [[ -z "${STATE_SOURCE}" || "${STATE_SOURCE}" =~ ^[0-9]+$ ]] || die 'SOURCE non valida.'
@@ -451,7 +417,7 @@ systemd_unit_exists() {
 }
 
 check_conflicting_update_units_idle() {
-    # The intended v5.6 host does not require the transactional-update package.
+    # The intended host does not require the transactional-update package.
     # If stale/optional units exist, they must not be enabled/active/failed.
     if systemd_unit_exists transactional-update.timer \
        && systemctl is-enabled --quiet transactional-update.timer 2>/dev/null; then
@@ -1160,7 +1126,7 @@ run_target_dup() {
     sync || { STATE_LAST_ERROR='sync barrier fallita prima del dup TARGET'; persist_state_or_die; return 1; }
 
     set +e
-    systemd-inhibit --what=shutdown:sleep:idle --mode=block --who="${PROG}" --why='mySlowrollOS v5.7 offline target update'       tukit call "${t}" env DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C       zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive --userdata "myslowroll-v6:${STATE_TXID}" dup         "${ZYPPER_LICENSE_ARGS[@]}" --download-in-advance --no-recommends --no-allow-vendor-change 2>&1 | tee "${DUP_LOG}"
+    systemd-inhibit --what=shutdown:sleep:idle --mode=block --who="${PROG}" --why='mySlowrollOS offline target update'       tukit call "${t}" env DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C       zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive --userdata "myslowroll-atomic-update:${STATE_TXID}" dup         "${ZYPPER_LICENSE_ARGS[@]}" --download-in-advance --no-recommends --no-allow-vendor-change 2>&1 | tee "${DUP_LOG}"
     rc=("${PIPESTATUS[@]}")
     set -e
 
@@ -1810,7 +1776,7 @@ prune() {
     esac
     [[ -d "${CACHE_ROOT}" ]] && while IFS= read -r p; do base="${p##*/}"; is_uuid "${base}" || continue; [[ "${base}" == "${STATE_TXID}" && "${STATE_STATUS}" == planned ]] || files+=("${p}"); done < <(find "${CACHE_ROOT}" -mindepth 1 -maxdepth 1 -type d -mtime "+${days}" -print)
     [[ -d "${LOG_ROOT}" ]] && while IFS= read -r p; do files+=("${p}"); done < <(find "${LOG_ROOT}" -mindepth 1 -maxdepth 1 -type f -mtime "+${days}" -print)
-    printf 'Artefatti v5 candidati: %s. Snapshot Btrfs: mai eliminate da prune.\n' "${#files[@]}"
+    printf 'Artefatti candidati: %s. Snapshot Btrfs: mai eliminate da prune.\n' "${#files[@]}"
     (( ${#files[@]} )) || return 0
     printf 'Scrivi esattamente: PRUNE V5 %s\n> ' "${days}"; local ans; IFS= read -r ans || die 'prune annullato.'; [[ "${ans}" == "PRUNE V5 ${days}" ]] || die 'prune annullato.'
     for p in "${files[@]}"; do [[ -d "${p}" ]] && rm -rf -- "${p}" || rm -f -- "${p}"; done
