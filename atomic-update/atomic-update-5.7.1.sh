@@ -26,6 +26,9 @@ readonly LOG_ROOT=/var/log/myslowroll-atomic-dup-v5
 readonly LOCK_FILE=/run/myslowroll-atomic-dup-v5.lock
 readonly SNAPPER_CONFIG=root
 readonly REQUIRED_OS_ID=opensuse-slowroll
+# Description namespace for NEW 5.7.x transactions only.  Legacy 5.6.1
+# pending-reboot state is still readable/confirmable through the retained v5
+# state namespace, but is not rediscovered through this v6 description prefix.
 readonly TUKIT_DESCRIPTION_PREFIX='mySlowrollOS v6'
 
 readonly PLAN_MAX_AGE_SECONDS="${MYSLOWROLL_PLAN_MAX_AGE_SECONDS:-86400}"
@@ -601,7 +604,7 @@ verify_cli_surface() {
     grep -Fq -- '--disable-predictions' <<<"${rh}" || return 1
     grep -Fq -- '--disable-predictions' <<<"${ch}" || return 1
     # Stable semantic token: stored plans survive harmless help/version changes.
-    printf 'capabilities-v1\n'
+    printf 'capabilities-v1\n' | sha256sum | awk '{print $1}'
 }
 
 toolchain_unchanged() {
@@ -845,7 +848,7 @@ check_state_for_new() {
     load_state
     case "${STATE_STATUS}" in
         ''|confirmed|aborted|rolled-back) return 0 ;;
-        planned) return 0 ;;
+        planned|revalidated) return 0 ;;
         *) die "transazione ${STATE_TXID:-?} in stato ${STATE_STATUS}; usare recover/status prima di continuare." ;;
     esac
 }
@@ -901,7 +904,8 @@ make_plan() {
     has_installs="$(grep -cvE '^[[:space:]]*remove[[:space:]]' "${PLAN_OPS}" || true)"
     if (( has_installs > 0 )) && ! pkg_cache_has_rpms; then
         mark_aborted 'piano richiede pacchetti ma la cache RPM e vuota'
-        return 1    fi
+        return 1
+    fi
 
     build_expected_manifest "${RPMDB_PRE_MANIFEST}" "${PLAN_OPS}" "${RPMDB_EXPECTED_MANIFEST}" || { mark_aborted 'manifest atteso fallito'; return 1; }
     sync "${RPMDB_PRE_MANIFEST}" "${RPMDB_EXPECTED_MANIFEST}" "${PLAN_OPS}" || { mark_aborted 'sync manifest fallito'; return 1; }
@@ -925,6 +929,12 @@ revalidate_plan() {
     [[ "$(rpmdb_hash_host)" == "${STATE_RPMDB_HASH}" ]] || return 1
     [[ "$(zypp_semantic_hash)" == "${STATE_ZYPP_HASH}" ]] || return 1
     [[ "$(pkg_cache_hash)" == "${STATE_CACHE_HASH}" ]] || return 1
+
+    # REVALIDATED must use current repository metadata.  If publishing changed
+    # the solver result, the prepared plan is invalidated before any TARGET exists.
+    zypper --non-interactive refresh >/dev/null || return 1
+    [[ "$(rpmdb_hash_host)" == "${STATE_RPMDB_HASH}" ]] || return 1
+    [[ "$(zypp_semantic_hash)" == "${STATE_ZYPP_HASH}" ]] || return 1
     generate_xml_plan "${PLAN_XML_FINAL}" || return 1
     local h
     local ops="${TX_CACHE_DIR}/plan-operations.revalidate.tsv"
@@ -1895,11 +1905,26 @@ recover_inspect() {
 
 recover_typed_abort() {
     local t="$1"
+    local owned=
     preflight recovery >/dev/null
     load_state
     [[ "${STATE_STATUS}" == needs-inspection ]] || die 'abort-target ammesso solo da needs-inspection.'
-    [[ "${STATE_TARGET}" == "${t}" ]] || die 'snapshot richiesta diversa dalla TARGET registrata.'
-    abort_target_safe "${t}" || die 'abort-target non concluso in modo verificabile; rieseguire recover inspect.'
+    [[ "${t}" =~ ^[0-9]+$ ]] || die 'TARGET richiesta non numerica.'
+
+    if [[ -n "${STATE_TARGET}" ]]; then
+        [[ "${STATE_TARGET}" == "${t}" ]] ||
+            die 'snapshot richiesta diversa dalla TARGET registrata.'
+    else
+        owned="$(resolve_owned_target || true)"
+        [[ "${owned}" == "${t}" ]] ||
+            die 'TARGET non registrata e ownership descrizione/txid non univoca per la snapshot richiesta.'
+        STATE_TARGET="${t}"
+        persist_state_or_die
+        history_or_warn target-adopted-for-abort "target=${t} source=description"
+    fi
+
+    abort_target_safe "${t}" ||
+        die 'abort-target non concluso in modo verificabile; rieseguire recover inspect.'
 }
 
 recover_adopt_target() {
