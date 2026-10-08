@@ -59,11 +59,7 @@ STATE_SOURCE=
 STATE_TARGET=
 STATE_BOOT_ID_BEFORE=
 STATE_PLAN_HASH=
-STATE_RPMDB_HASH=
-STATE_ZYPP_HASH=
-STATE_CACHE_HASH=
-STATE_SOURCE_OPEN_RPM_HASH=
-STATE_SOURCE_OPEN_ETC_HASH=
+STATE_SOURCE_FINGERPRINT=
 STATE_RPMDB_POST_HASH=
 STATE_CREATED=
 STATE_TARGET_OPENED=
@@ -215,8 +211,7 @@ set_tx_paths() {
 
 reset_state() {
     STATE_STATUS= STATE_TXID= STATE_SOURCE= STATE_TARGET= STATE_BOOT_ID_BEFORE=
-    STATE_PLAN_HASH= STATE_RPMDB_HASH= STATE_ZYPP_HASH= STATE_CACHE_HASH=
-    STATE_SOURCE_OPEN_RPM_HASH= STATE_SOURCE_OPEN_ETC_HASH= STATE_RPMDB_POST_HASH=
+    STATE_PLAN_HASH= STATE_SOURCE_FINGERPRINT= STATE_RPMDB_POST_HASH=
     STATE_CREATED= STATE_TARGET_OPENED= STATE_DUP_STARTED=
     STATE_FINISHED= STATE_LAST_ERROR= STATE_INSPECTION_KIND=
     TX_CACHE_DIR= PLAN_TXT= PLAN_XML_A= PLAN_XML_B= PLAN_XML_FINAL= DOWNLOAD_LOG=
@@ -240,11 +235,8 @@ load_state() {
             target_snapshot) STATE_TARGET="${value}" ;;
             boot_id_before) STATE_BOOT_ID_BEFORE="${value}" ;;
             plan_hash) STATE_PLAN_HASH="${value}" ;;
-            rpmdb_hash) STATE_RPMDB_HASH="${value}" ;;
-            zypp_hash) STATE_ZYPP_HASH="${value}" ;;
-            cache_hash) STATE_CACHE_HASH="${value}" ;;
-            source_open_rpm_hash) STATE_SOURCE_OPEN_RPM_HASH="${value}" ;;
-            source_open_etc_hash) STATE_SOURCE_OPEN_ETC_HASH="${value}" ;;
+            rpmdb_hash|zypp_hash|cache_hash|source_open_rpm_hash|source_open_etc_hash) : ;; # legacy v5
+            source_fingerprint) STATE_SOURCE_FINGERPRINT="${value}" ;;
             rpmdb_post_hash) STATE_RPMDB_POST_HASH="${value}" ;;
             toolchain_hash) : ;; # legacy v5 field, ignored in 5.7
             created_utc) STATE_CREATED="${value}" ;;
@@ -291,7 +283,7 @@ load_state() {
     [[ -z "${STATE_SOURCE}" || "${STATE_SOURCE}" =~ ^[0-9]+$ ]] || die 'SOURCE non valida.'
     [[ -z "${STATE_TARGET}" || "${STATE_TARGET}" =~ ^[0-9]+$ ]] || die 'TARGET non valida.'
     local h
-    for h in STATE_PLAN_HASH STATE_RPMDB_HASH STATE_ZYPP_HASH STATE_CACHE_HASH STATE_SOURCE_OPEN_RPM_HASH STATE_SOURCE_OPEN_ETC_HASH STATE_RPMDB_POST_HASH; do
+    for h in STATE_PLAN_HASH STATE_SOURCE_FINGERPRINT STATE_RPMDB_POST_HASH; do
         [[ -z "${!h}" || "${!h}" =~ ^[0-9a-f]{64}$ ]] || die "hash non valido: ${h}"
     done
     set_tx_paths
@@ -312,11 +304,7 @@ persist_state() {
         printf 'target_snapshot=%s\n' "${STATE_TARGET}"
         printf 'boot_id_before=%s\n' "${STATE_BOOT_ID_BEFORE}"
         printf 'plan_hash=%s\n' "${STATE_PLAN_HASH}"
-        printf 'rpmdb_hash=%s\n' "${STATE_RPMDB_HASH}"
-        printf 'zypp_hash=%s\n' "${STATE_ZYPP_HASH}"
-        printf 'cache_hash=%s\n' "${STATE_CACHE_HASH}"
-        printf 'source_open_rpm_hash=%s\n' "${STATE_SOURCE_OPEN_RPM_HASH}"
-        printf 'source_open_etc_hash=%s\n' "${STATE_SOURCE_OPEN_ETC_HASH}"
+        printf 'source_fingerprint=%s\n' "${STATE_SOURCE_FINGERPRINT}"
         printf 'rpmdb_post_hash=%s\n' "${STATE_RPMDB_POST_HASH}"
         printf 'created_utc=%s\n' "${STATE_CREATED}"
         printf 'target_opened_utc=%s\n' "${STATE_TARGET_OPENED}"
@@ -529,45 +517,6 @@ rpmdb_hash_host() {
     [[ "${h}" =~ ^[0-9a-f]{64}$ ]] || return 1; printf '%s\n' "${h}"
 }
 
-etc_tree_hash() {
-    local tmp1
-    local tmp2
-    local h
-    tmp1="$(mktemp /run/myslowroll-etc-meta.XXXXXX)" || return 1
-    tmp2="$(mktemp /run/myslowroll-etc-files.XXXXXX)" || { rm -f -- "${tmp1}"; return 1; }
-
-    # Exclude volatile runtime state and DHCP/netconfig managed resolv.conf files
-    LC_ALL=C find /etc -xdev \
-        ! -path '/etc/resolv.conf*' \
-        ! -path '/etc/adjtime' \
-        ! -path '/etc/machine-info' \
-        ! -name '*.lease' \
-        ! -name '*.lock' \
-        ! -name '*.tmp' \
-        -printf '%y|%m|%U|%G|%p|%l\0' |
-        LC_ALL=C sort -z |
-        sha256sum |
-        awk '{print $1}' >"${tmp1}" || { rm -f -- "${tmp1}" "${tmp2}"; return 1; }
-
-    LC_ALL=C find /etc -xdev \
-        ! -path '/etc/resolv.conf*' \
-        ! -path '/etc/adjtime' \
-        ! -path '/etc/machine-info' \
-        ! -name '*.lease' \
-        ! -name '*.lock' \
-        ! -name '*.tmp' \
-        -type f -print0 |
-        LC_ALL=C sort -z |
-        xargs -0 -r sha256sum -- |
-        sha256sum |
-        awk '{print $1}' >"${tmp2}" || { rm -f -- "${tmp1}" "${tmp2}"; return 1; }
-
-    h="$(cat "${tmp1}" "${tmp2}" | sha256sum | awk '{print $1}')"
-    rm -f -- "${tmp1}" "${tmp2}"
-    [[ "${h}" =~ ^[0-9a-f]{64}$ ]] || return 1
-    printf '%s\n' "${h}"
-}
-
 zypp_semantic_hash() {
     {
         printf 'solver.onlyRequires=%s\n' "$(zypp_value solver.onlyRequires)"
@@ -576,19 +525,13 @@ zypp_semantic_hash() {
     } | sed -E 's/[[:space:]]+$//' | sha256sum | awk '{print $1}'
 }
 
-pkg_cache_hash() {
-    [[ -d "${TX_PKG_CACHE}" ]] || return 1
-    local f
-    local tmp
-    local hash
-    tmp="$(mktemp "${TX_CACHE_DIR}/.cache-hash.XXXXXX")" || return 1
-    while IFS= read -r -d '' f; do
-        sha256sum "${f}" >>"${tmp}" || { rm -f -- "${tmp}"; return 1; }
-    done < <(find "${TX_PKG_CACHE}" -type f -name '*.rpm' -print0 | LC_ALL=C sort -z)
-    hash="$(sha256sum "${tmp}" | awk '{print $1}')"
-    rm -f -- "${tmp}"
-    [[ "${hash}" =~ ^[0-9a-f]{64}$ ]] || return 1
-    printf '%s\n' "${hash}"
+
+source_fingerprint() {
+    local rpmh zypph
+    rpmh="$(rpmdb_hash_host)" || return 1
+    zypph="$(zypp_semantic_hash)" || return 1
+    printf 'rpm=%s\nzypp=%s\n' "${rpmh}" "${zypph}" |
+        sha256sum | awk '{print $1}'
 }
 
 pkg_cache_has_rpms() {
@@ -850,7 +793,7 @@ check_state_for_new() {
 
 make_plan() {
     local already_locked="${1:-0}"
-    local hash_a hash_b rpm_a rpm_b zypp_a zypp_b cache_b a d
+    local hash_a hash_b source_a source_b rpm_post a d
     local -a rc
     if (( already_locked == 0 )); then
         preflight
@@ -867,7 +810,7 @@ make_plan() {
 
     log 'Refresh repository...'; zypper --non-interactive refresh || { mark_aborted 'refresh fallito'; return 1; }
     write_rpm_manifest_host "${RPMDB_PRE_MANIFEST}" || { mark_aborted 'manifest RPM pre fallito'; return 1; }
-    rpm_a="$(sha256sum "${RPMDB_PRE_MANIFEST}" | awk '{print $1}')"; zypp_a="$(zypp_semantic_hash)"
+    source_a="$(source_fingerprint)" || { mark_aborted 'fingerprint SOURCE pre fallita'; return 1; }
 
     generate_xml_plan "${PLAN_XML_A}" || { mark_aborted 'piano XML A fallito'; return 1; }
     scan_plan_for_critical_removals "${PLAN_XML_A}" || { mark_aborted 'rimozioni critiche nel piano'; return 1; }
@@ -883,9 +826,8 @@ make_plan() {
     sync "${DOWNLOAD_LOG}" || { mark_aborted 'sync download log fallito'; return 1; }
     sync -f "${TX_PKG_CACHE}" || { mark_aborted 'sync cache RPM fallito'; return 1; }
 
-    rpm_b="$(rpmdb_hash_host)"; zypp_b="$(zypp_semantic_hash)"
-    [[ "${rpm_a}" == "${rpm_b}" && "${zypp_a}" == "${zypp_b}" ]] || { mark_aborted 'SOURCE/ZYpp cambiati durante pre-download'; return 1; }
-    cache_b="$(pkg_cache_hash)" || { mark_aborted 'hash cache fallito'; return 1; }
+    source_b="$(source_fingerprint)" || { mark_aborted 'fingerprint SOURCE post-download fallita'; return 1; }
+    [[ "${source_a}" == "${source_b}" ]] || { mark_aborted 'SOURCE/ZYpp cambiati durante pre-download'; return 1; }
 
     generate_xml_plan "${PLAN_XML_B}" || { mark_aborted 'piano XML B fallito'; return 1; }
     hash_b="$(plan_hash "${PLAN_XML_B}")" || { mark_aborted 'hash piano B fallito'; return 1; }
@@ -904,30 +846,29 @@ make_plan() {
     sync "${RPMDB_PRE_MANIFEST}" "${RPMDB_EXPECTED_MANIFEST}" "${PLAN_OPS}" || { mark_aborted 'sync manifest fallito'; return 1; }
 
     if [[ ! -s "${PLAN_OPS}" ]]; then
-        STATE_STATUS=confirmed; STATE_PLAN_HASH="${hash_b}"; STATE_RPMDB_HASH="${rpm_b}"; STATE_ZYPP_HASH="${zypp_b}"; STATE_CACHE_HASH="${cache_b}"; STATE_RPMDB_POST_HASH="${rpm_b}"; STATE_FINISHED="$(date -u +%FT%TZ)"; persist_state_or_die; history_or_warn plan-noop; log 'Nessun aggiornamento disponibile.'; return 0
+        rpm_post="$(sha256sum "${RPMDB_PRE_MANIFEST}" | awk '{print $1}')"
+        STATE_STATUS=confirmed; STATE_PLAN_HASH="${hash_b}"; STATE_SOURCE_FINGERPRINT="${source_b}"; STATE_RPMDB_POST_HASH="${rpm_post}"; STATE_FINISHED="$(date -u +%FT%TZ)"; persist_state_or_die; history_or_warn plan-noop; log 'Nessun aggiornamento disponibile.'; return 0
     fi
 
     DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup \
         "${ZYPPER_LICENSE_ARGS[@]}" --dry-run --no-recommends --no-allow-vendor-change --details >"${PLAN_TXT}" || { mark_aborted 'dry-run leggibile fallito'; return 1; }
 
     [[ "$(active_snapshot)" == "${STATE_SOURCE}" && "$(default_snapshot)" == "${STATE_SOURCE}" ]] || { mark_aborted 'snapshot cambiata durante planning'; return 1; }
-    STATE_STATUS=planned; STATE_PLAN_HASH="${hash_b}"; STATE_RPMDB_HASH="${rpm_b}"; STATE_ZYPP_HASH="${zypp_b}"; STATE_CACHE_HASH="${cache_b}"; STATE_LAST_ERROR=
-    persist_state_or_die; history_or_warn planned "plan=${hash_b} cache=${cache_b}"; log "Piano stabile: ${hash_b}"
+    STATE_STATUS=planned; STATE_PLAN_HASH="${hash_b}"; STATE_SOURCE_FINGERPRINT="${source_b}"; STATE_LAST_ERROR=
+    persist_state_or_die; history_or_warn planned "plan=${hash_b} source=${source_b}"; log "Piano stabile: ${hash_b}"
 }
 
 revalidate_plan() {
     [[ "${STATE_STATUS}" == planned ]] || return 1
     planned_is_fresh || return 1
-    verify_cli_surface
-    [[ "$(rpmdb_hash_host)" == "${STATE_RPMDB_HASH}" ]] || return 1
-    [[ "$(zypp_semantic_hash)" == "${STATE_ZYPP_HASH}" ]] || return 1
-    [[ "$(pkg_cache_hash)" == "${STATE_CACHE_HASH}" ]] || return 1
+    verify_cli_surface || return 1
+    [[ "$(source_fingerprint)" == "${STATE_SOURCE_FINGERPRINT}" ]] || return 1
 
-    # REVALIDATED must use current repository metadata.  If publishing changed
-    # the solver result, the prepared plan is invalidated before any TARGET exists.
+    # Current repository metadata is authoritative.  A newly published solver
+    # result invalidates PREPARED before tukit open.
     zypper --non-interactive refresh >/dev/null || return 1
-    [[ "$(rpmdb_hash_host)" == "${STATE_RPMDB_HASH}" ]] || return 1
-    [[ "$(zypp_semantic_hash)" == "${STATE_ZYPP_HASH}" ]] || return 1
+    [[ "$(source_fingerprint)" == "${STATE_SOURCE_FINGERPRINT}" ]] || return 1
+
     generate_xml_plan "${PLAN_XML_FINAL}" || return 1
     local h
     local ops="${TX_CACHE_DIR}/plan-operations.revalidate.tsv"
@@ -1006,15 +947,11 @@ same_boot() {
 }
 
 source_unchanged() {
-    local r
-    local e
     same_boot || return 1
-    [[ "${STATE_SOURCE_OPEN_RPM_HASH}" =~ ^[0-9a-f]{64}$ ]] || return 1
-    [[ "${STATE_SOURCE_OPEN_ETC_HASH}" =~ ^[0-9a-f]{64}$ ]] || return 1
-    r="$(rpmdb_hash_host)" || return 1
-    e="$(etc_tree_hash)" || return 1
-    [[ "${r}" == "${STATE_SOURCE_OPEN_RPM_HASH}" ]] || return 1
-    [[ "${e}" == "${STATE_SOURCE_OPEN_ETC_HASH}" ]]
+    [[ "${STATE_SOURCE_FINGERPRINT}" =~ ^[0-9a-f]{64}$ ]] || return 1
+    [[ "$(source_fingerprint)" == "${STATE_SOURCE_FINGERPRINT}" ]] || return 1
+    [[ "$(active_snapshot)" == "${STATE_SOURCE}" ]] || return 1
+    [[ "$(default_snapshot)" == "${STATE_SOURCE}" ]] || return 1
 }
 
 assert_source_unchanged() {
@@ -1102,18 +1039,8 @@ open_target() {
     STATE_LAST_ERROR=
     persist_state_or_die
 
-    if ! STATE_SOURCE_OPEN_RPM_HASH="$(rpmdb_hash_host)"; then
-        STATE_LAST_ERROR='hash RPM SOURCE post-open fallito'
-        persist_state_or_die
-        return 1
-    fi
-    if ! STATE_SOURCE_OPEN_ETC_HASH="$(etc_tree_hash)"; then
-        STATE_LAST_ERROR='hash /etc SOURCE post-open fallito'
-        persist_state_or_die
-        return 1
-    fi
-    if [[ "${STATE_SOURCE_OPEN_RPM_HASH}" != "${STATE_RPMDB_HASH}" ]]; then
-        STATE_LAST_ERROR='RPMDB SOURCE cambiata tra piano e clone'
+    if ! source_unchanged; then
+        STATE_LAST_ERROR='SOURCE cambiata tra PREPARED e apertura TARGET'
         persist_state_or_die
         return 1
     fi
