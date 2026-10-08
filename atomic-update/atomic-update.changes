@@ -2,6 +2,16 @@
 Thu Oct 08 2026 - krism
 
 - Update to 5.7.1.
+- Fix capability token persistence: keep toolchain_hash a 64-hex SHA256 value.
+- Fix malformed make_plan branch around the empty RPM-cache guard.
+- Allow revalidated through the state gate so interrupted PREPARED -> REVALIDATED
+  transactions can safely return to PREPARED and revalidate again.
+- Refresh repository metadata during REVALIDATED and reject stale plans before
+  opening any TARGET.
+- Permit typed abort of an unrecorded TARGET only when exact description/TXID
+  ownership resolves uniquely to the requested snapshot.
+- Align the design contract with the intentionally hybrid 5.6.1 + 5.7.1
+  implementation.
 - Preserve the v5 state/cache namespace so a 5.6.1 pending-reboot transaction
   remains confirmable after the updater package itself is upgraded.
 - Add durable PREPARED -> REVALIDATED barrier before tukit open.
