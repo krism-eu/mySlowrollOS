@@ -48,15 +48,9 @@ readonly -a CRITICAL_PKGS=(
 )
 
 readonly -a VALID_STATES=(
-    # 5.7 native states
-    planning planned revalidated needs-inspection
-    target-opening target-prepared target-updating target-update-failed target-updated
-    target-verifying target-verification-failed target-verified
-    committing pending-reboot confirmed aborted
-    rollback-preparing rollback-pending rolled-back
-
-    # Accepted only to read/recover state written by 5.6.x.
-    target-open-ambiguous aborting rollback-unverified
+    planning planned revalidated opening target verified committing
+    pending-reboot needs-inspection rollback-pending
+    confirmed aborted rolled-back
 )
 
 STATE_STATUS=
@@ -71,8 +65,6 @@ STATE_CACHE_HASH=
 STATE_SOURCE_OPEN_RPM_HASH=
 STATE_SOURCE_OPEN_ETC_HASH=
 STATE_RPMDB_POST_HASH=
-STATE_TOOLCHAIN_HASH=
-PREFLIGHT_TOOLCHAIN_HASH=
 STATE_CREATED=
 STATE_TARGET_OPENED=
 STATE_DUP_STARTED=
@@ -225,7 +217,7 @@ reset_state() {
     STATE_STATUS= STATE_TXID= STATE_SOURCE= STATE_TARGET= STATE_BOOT_ID_BEFORE=
     STATE_PLAN_HASH= STATE_RPMDB_HASH= STATE_ZYPP_HASH= STATE_CACHE_HASH=
     STATE_SOURCE_OPEN_RPM_HASH= STATE_SOURCE_OPEN_ETC_HASH= STATE_RPMDB_POST_HASH=
-    STATE_TOOLCHAIN_HASH= STATE_CREATED= STATE_TARGET_OPENED= STATE_DUP_STARTED=
+    STATE_CREATED= STATE_TARGET_OPENED= STATE_DUP_STARTED=
     STATE_FINISHED= STATE_LAST_ERROR= STATE_INSPECTION_KIND=
     TX_CACHE_DIR= PLAN_TXT= PLAN_XML_A= PLAN_XML_B= PLAN_XML_FINAL= DOWNLOAD_LOG=
     TX_PKG_CACHE= DUP_LOG= TUKIT_OPEN_LOG= SDBOOT_LOG= POSTCHECK_LOG=
@@ -254,7 +246,7 @@ load_state() {
             source_open_rpm_hash) STATE_SOURCE_OPEN_RPM_HASH="${value}" ;;
             source_open_etc_hash) STATE_SOURCE_OPEN_ETC_HASH="${value}" ;;
             rpmdb_post_hash) STATE_RPMDB_POST_HASH="${value}" ;;
-            toolchain_hash) STATE_TOOLCHAIN_HASH="${value}" ;;
+            toolchain_hash) : ;; # legacy v5 field, ignored in 5.7
             created_utc) STATE_CREATED="${value}" ;;
             target_opened_utc) STATE_TARGET_OPENED="${value}" ;;
             dup_started_utc) STATE_DUP_STARTED="${value}" ;;
@@ -272,15 +264,34 @@ load_state() {
         *) die "state v${file_version} incompatibile con v${STATE_VERSION}." ;;
     esac
     [[ -n "${STATE_STATUS}" ]] || die 'state privo di status.'
-    # v5.5 could persist an intermediate confirming state. v5.6 never writes it:
-    # treat it as pending-reboot so confirm can be safely repeated after a crash.
-    [[ "${STATE_STATUS}" == confirming ]] && STATE_STATUS=pending-reboot
+
+    # Read compatibility: collapse 5.6.x intermediate states into the smaller
+    # 5.7 model.  5.7 itself writes only the native states above.
+    case "${STATE_STATUS}" in
+        confirming) STATE_STATUS=pending-reboot ;;
+        target-opening|target-open-ambiguous)
+            STATE_STATUS=needs-inspection
+            [[ -n "${STATE_INSPECTION_KIND}" ]] || STATE_INSPECTION_KIND=legacy-open-ambiguous
+            ;;
+        target-prepared|target-updating|target-update-failed|target-updated|target-verifying|target-verification-failed)
+            STATE_STATUS=target
+            ;;
+        target-verified) STATE_STATUS=verified ;;
+        aborting)
+            STATE_STATUS=needs-inspection
+            [[ -n "${STATE_INSPECTION_KIND}" ]] || STATE_INSPECTION_KIND=legacy-abort-ambiguous
+            ;;
+        rollback-preparing|rollback-unverified)
+            STATE_STATUS=needs-inspection
+            [[ -n "${STATE_INSPECTION_KIND}" ]] || STATE_INSPECTION_KIND=legacy-rollback-ambiguous
+            ;;
+    esac
     state_value_valid "${STATE_STATUS}" || die "state sconosciuto: ${STATE_STATUS}"
     [[ -z "${STATE_TXID}" ]] || is_uuid "${STATE_TXID}" || die 'txid non valido.'
     [[ -z "${STATE_SOURCE}" || "${STATE_SOURCE}" =~ ^[0-9]+$ ]] || die 'SOURCE non valida.'
     [[ -z "${STATE_TARGET}" || "${STATE_TARGET}" =~ ^[0-9]+$ ]] || die 'TARGET non valida.'
     local h
-    for h in STATE_PLAN_HASH STATE_RPMDB_HASH STATE_ZYPP_HASH STATE_CACHE_HASH STATE_SOURCE_OPEN_RPM_HASH STATE_SOURCE_OPEN_ETC_HASH STATE_RPMDB_POST_HASH STATE_TOOLCHAIN_HASH; do
+    for h in STATE_PLAN_HASH STATE_RPMDB_HASH STATE_ZYPP_HASH STATE_CACHE_HASH STATE_SOURCE_OPEN_RPM_HASH STATE_SOURCE_OPEN_ETC_HASH STATE_RPMDB_POST_HASH; do
         [[ -z "${!h}" || "${!h}" =~ ^[0-9a-f]{64}$ ]] || die "hash non valido: ${h}"
     done
     set_tx_paths
@@ -307,7 +318,6 @@ persist_state() {
         printf 'source_open_rpm_hash=%s\n' "${STATE_SOURCE_OPEN_RPM_HASH}"
         printf 'source_open_etc_hash=%s\n' "${STATE_SOURCE_OPEN_ETC_HASH}"
         printf 'rpmdb_post_hash=%s\n' "${STATE_RPMDB_POST_HASH}"
-        printf 'toolchain_hash=%s\n' "${STATE_TOOLCHAIN_HASH}"
         printf 'created_utc=%s\n' "${STATE_CREATED}"
         printf 'target_opened_utc=%s\n' "${STATE_TARGET_OPENED}"
         printf 'dup_started_utc=%s\n' "${STATE_DUP_STARTED}"
@@ -587,8 +597,6 @@ pkg_cache_has_rpms() {
 }
 
 verify_cli_surface() {
-    # Capability contract only.  Do not hash complete --help/version output:
-    # wording/version changes that preserve the consumed interface are harmless.
     local th sv rh ch sub
     th="$(LC_ALL=C tukit --help 2>&1 || true)"
     sv="$(LC_ALL=C sdbootutil --help 2>&1 || true)"
@@ -603,18 +611,7 @@ verify_cli_surface() {
     done
     grep -Fq -- '--disable-predictions' <<<"${rh}" || return 1
     grep -Fq -- '--disable-predictions' <<<"${ch}" || return 1
-    # Stable semantic token: stored plans survive harmless help/version changes.
-    printf 'capabilities-v1\n' | sha256sum | awk '{print $1}'
-}
-
-toolchain_unchanged() {
-    local now
-    now="$(verify_cli_surface)" || return 1
-    [[ "${STATE_TOOLCHAIN_HASH}" == "${now}" ]]
-}
-
-assert_toolchain_unchanged() {
-    toolchain_unchanged || die 'toolchain tukit/sdbootutil cambiata o non piu compatibile.'
+    return 0
 }
 
 ensure_snapshot_bootable() {
@@ -785,8 +782,7 @@ scan_plan_for_critical_removals() {
 
 preflight() {
     local mode="${1:-update}"
-    local p a d toolhash
-    PREFLIGHT_TOOLCHAIN_HASH=
+    local p a d
     require_root; acquire_lock
     if [[ "${mode}" == recovery ]]; then require_recovery_commands; else require_commands; fi
     validate_policy
@@ -805,8 +801,7 @@ preflight() {
         check_boot_space || die 'spazio boot insufficiente/non determinabile.'
     fi
 
-    toolhash="$(verify_cli_surface)" || die 'CLI tukit/sdbootutil incompatibile.'
-    PREFLIGHT_TOOLCHAIN_HASH="${toolhash}"
+    verify_cli_surface || die 'CLI tukit/sdbootutil incompatibile.'
 
     [[ "${mode}" == recovery ]] && return 0
     [[ "${mode}" =~ ^(update|confirm)$ ]] || die "modalita preflight sconosciuta: ${mode}"
@@ -855,20 +850,18 @@ check_state_for_new() {
 
 make_plan() {
     local already_locked="${1:-0}"
-    local toolhash
     local hash_a hash_b rpm_a rpm_b zypp_a zypp_b cache_b a d
     local -a rc
     if (( already_locked == 0 )); then
         preflight
         check_state_for_new
     fi
-    toolhash="${PREFLIGHT_TOOLCHAIN_HASH}"
     a="$(active_snapshot)"; d="$(default_snapshot)"; [[ "${a}" == "${d}" ]] || die 'active/default cambiati durante preflight.'
     if [[ "${STATE_STATUS}" == planned ]]; then mark_aborted 'piano precedente sostituito'; fi
     # A new TXID must never inherit transaction-specific fields from the previous state.
     reset_state
     STATE_TXID="$(new_txid)"; STATE_CREATED="$(date -u +%FT%TZ)"; STATE_STATUS=planning; STATE_SOURCE="${a}"; STATE_TARGET=
-    STATE_TOOLCHAIN_HASH="${toolhash}"; STATE_LAST_ERROR=; set_tx_paths
+    STATE_LAST_ERROR=; set_tx_paths
     install -d -o root -g root -m 0700 "${STATE_DIR}" "${TX_CACHE_DIR}" "${TX_PKG_CACHE}" "${LOG_ROOT}" || die 'creazione directory transazione fallita.'
     persist_state_or_die; history_or_warn planning-started
 
@@ -925,7 +918,7 @@ make_plan() {
 revalidate_plan() {
     [[ "${STATE_STATUS}" == planned ]] || return 1
     planned_is_fresh || return 1
-    assert_toolchain_unchanged
+    verify_cli_surface
     [[ "$(rpmdb_hash_host)" == "${STATE_RPMDB_HASH}" ]] || return 1
     [[ "$(zypp_semantic_hash)" == "${STATE_ZYPP_HASH}" ]] || return 1
     [[ "$(pkg_cache_hash)" == "${STATE_CACHE_HASH}" ]] || return 1
@@ -946,9 +939,7 @@ revalidate_plan() {
 }
 
 prepare_plan_for_upgrade() {
-    local toolhash
     preflight update
-    toolhash="${PREFLIGHT_TOOLCHAIN_HASH}"
     check_state_for_new
     if [[ "${STATE_STATUS}" == revalidated ]]; then
         # Crash between the durable REVALIDATED barrier and tukit open: no
@@ -957,7 +948,7 @@ prepare_plan_for_upgrade() {
         persist_state_or_die
     fi
     if [[ "${STATE_STATUS}" == planned ]]; then
-        [[ "${STATE_TOOLCHAIN_HASH}" == "${toolhash}" ]] && revalidate_plan && {
+        revalidate_plan && {
             log "Riutilizzo piano PREPARED ${STATE_TXID}."
             return 0
         }
@@ -1150,7 +1141,7 @@ run_target_dup() {
     local zok=0
     local -a rc
 
-    if ! toolchain_unchanged; then
+    if ! verify_cli_surface; then
         STATE_STATUS=target-update-failed
         STATE_LAST_ERROR='toolchain tukit/sdbootutil cambiata o non compatibile prima del dup'
         persist_state_or_die
@@ -1266,7 +1257,7 @@ verify_target() {
         return 1
     fi
 
-    if ! toolchain_unchanged; then
+    if ! verify_cli_surface; then
         STATE_STATUS=target-verification-failed
         STATE_LAST_ERROR='toolchain tukit/sdbootutil cambiata o non compatibile durante verify'
         persist_state_or_die
@@ -1412,7 +1403,7 @@ abort_target_safe() {
 precommit_target_valid() {
     local t="$1"
     [[ "${STATE_STATUS}" == target-verified ]] || return 1
-    toolchain_unchanged || return 1
+    verify_cli_surface || return 1
     source_unchanged || return 1
     target_window_valid || return 1
     [[ "$(active_snapshot)" == "${STATE_SOURCE}" ]] || return 1
