@@ -1,0 +1,37 @@
+name: atomic-update 5.7 checks
+
+on:
+  push:
+    branches:
+      - work/atomic-update-5.7
+    paths:
+      - 'atomic-update/**'
+      - '.github/workflows/atomic-update-57-check.yml'
+  pull_request:
+    paths:
+      - 'atomic-update/**'
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bash syntax
+        run: bash -n atomic-update/atomic-update-5.7.1.sh
+      - name: Static design invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          f=atomic-update/atomic-update-5.7.1.sh
+          grep -Fq "PROGRAM_VERSION='5.7.1-guarded'" "$f"
+          grep -Fq 'STATE_SOURCE_FINGERPRINT=' "$f"
+          grep -Fq 'PLAN_XML_PREPARED=' "$f"
+          grep -Fq 'PLAN_XML_REVALIDATED=' "$f"
+          ! grep -Fq 'PLAN_XML_B=' "$f"
+          ! grep -Fq 'etc_tree_hash()' "$f"
+          ! grep -Fq 'STATE_TOOLCHAIN_HASH=' "$f"
+          grep -Fq 'planning planned revalidated opening target verified committing' "$f"
+          grep -Fq 'STATE_STATUS=revalidated' "$f"
+          grep -Fq 'STATE_STATUS=needs-inspection' "$f"
+          grep -Fq 'recover_typed_abort()' "$f"
+          grep -Fq 'target_quiescent()' "$f"
