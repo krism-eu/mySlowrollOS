@@ -1705,7 +1705,9 @@ recover() {
             ;;
         rollback-pending)
             [[ "${boot}" != "${STATE_BOOT_ID_BEFORE}" ]] || { log 'Rollback preparato; reboot ancora da fare.'; return 0; }
-            if [[ "${a}" == "${STATE_TARGET}" && "${d}" == "${STATE_TARGET}" ]]                 && snapshot_is_rw "${STATE_TARGET}" && snapshot_is_bootable "${STATE_TARGET}"; then
+            if [[ "${a}" == "${STATE_TARGET}" && "${d}" == "${STATE_TARGET}" ]] \
+                && snapshot_is_rw "${STATE_TARGET}" \
+                && snapshot_is_bootable "${STATE_TARGET}"; then
                 STATE_STATUS=rolled-back
                 STATE_LAST_ERROR=
                 persist_state_or_die
@@ -1721,7 +1723,13 @@ recover() {
             ;;
         needs-inspection)
             if [[ "${STATE_INSPECTION_KIND}" == rollback-ambiguous || "${STATE_INSPECTION_KIND}" == legacy-rollback-ambiguous ]]; then
-                if [[ "${boot}" == "${STATE_BOOT_ID_BEFORE}"                    && "${d}" =~ ^[0-9]+$ && "${d}" != "${a}"                    && snapshot_exists "${d}" && snapshot_is_rw "${d}"                    && "$(snapshot_os_id "${d}")" == "${REQUIRED_OS_ID}" ]]                    && ensure_snapshot_bootable "${d}"; then
+                if [[ "${boot}" == "${STATE_BOOT_ID_BEFORE}" \
+                    && "${d}" =~ ^[0-9]+$ \
+                    && "${d}" != "${a}" ]] \
+                    && snapshot_exists "${d}" \
+                    && snapshot_is_rw "${d}" \
+                    && [[ "$(snapshot_os_id "${d}")" == "${REQUIRED_OS_ID}" ]] \
+                    && ensure_snapshot_bootable "${d}"; then
                     STATE_TARGET="${d}"
                     STATE_STATUS=rollback-pending
                     STATE_INSPECTION_KIND=
