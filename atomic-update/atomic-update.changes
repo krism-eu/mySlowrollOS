@@ -1,0 +1,15 @@
+-------------------------------------------------------------------
+Thu Oct 08 2026 - krism
+
+- 5.7.1: sole supported offline atomic-update engine (development candidate).
+- New independent state schema 1, with unversioned persistent state, cache,
+  log and lock paths. No legacy state migration or multi-version support.
+- Manual PREPARED -> REVALIDATED -> tukit TARGET -> verification -> reboot flow.
+- Preserve manifest, protected core packages, bootability and explicit rollback.
+- Add semantic capability checks and typed needs-inspection recovery.
+- Fix find_owned_targets status propagation and fail-closed clear-opening when
+  Snapper listing fails or any owned TARGET is present.
+- Make df output validity explicit; remove unused preflight probes and helpers.
+- Remove unused transaction state timestamps; history remains persistent.
+- No timer, daemon or unattended scheduler.
+- Candidate is not production-stable until VM failure/recovery matrix passes.
