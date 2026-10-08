@@ -70,9 +70,8 @@ STATE_INSPECTION_KIND=
 
 TX_CACHE_DIR=
 PLAN_TXT=
-PLAN_XML_A=
-PLAN_XML_B=
-PLAN_XML_FINAL=
+PLAN_XML_PREPARED=
+PLAN_XML_REVALIDATED=
 DOWNLOAD_LOG=
 TX_PKG_CACHE=
 DUP_LOG=
@@ -96,7 +95,7 @@ Uso: ${PROG} COMMAND
 
 Comandi:
   check                       preflight completo, nessuna modifica
-  plan                        refresh + doppio piano + pre-download + fingerprint
+  plan                        refresh + pre-download + singolo PREPARED verificato
   upgrade                     PREPARED -> REVALIDATED -> TARGET -> verifica -> reboot
   confirm                     conferma dopo il reboot sul TARGET
   recover                     recovery fail-closed automatica
@@ -194,9 +193,8 @@ set_tx_paths() {
     [[ -n "${STATE_TXID}" ]] || return 0
     TX_CACHE_DIR="${CACHE_ROOT}/${STATE_TXID}"
     PLAN_TXT="${TX_CACHE_DIR}/dup-plan.txt"
-    PLAN_XML_A="${TX_CACHE_DIR}/dup-plan-a.xml"
-    PLAN_XML_B="${TX_CACHE_DIR}/dup-plan-b.xml"
-    PLAN_XML_FINAL="${TX_CACHE_DIR}/dup-plan-final.xml"
+    PLAN_XML_PREPARED="${TX_CACHE_DIR}/dup-plan-prepared.xml"
+    PLAN_XML_REVALIDATED="${TX_CACHE_DIR}/dup-plan-revalidated.xml"
     DOWNLOAD_LOG="${TX_CACHE_DIR}/download.log"
     TX_PKG_CACHE="${TX_CACHE_DIR}/packages"
     RPMDB_PRE_MANIFEST="${TX_CACHE_DIR}/rpmdb-pre.tsv"
@@ -214,7 +212,7 @@ reset_state() {
     STATE_PLAN_HASH= STATE_SOURCE_FINGERPRINT= STATE_RPMDB_POST_HASH=
     STATE_CREATED= STATE_TARGET_OPENED= STATE_DUP_STARTED=
     STATE_FINISHED= STATE_LAST_ERROR= STATE_INSPECTION_KIND=
-    TX_CACHE_DIR= PLAN_TXT= PLAN_XML_A= PLAN_XML_B= PLAN_XML_FINAL= DOWNLOAD_LOG=
+    TX_CACHE_DIR= PLAN_TXT= PLAN_XML_PREPARED= PLAN_XML_REVALIDATED= DOWNLOAD_LOG=
     TX_PKG_CACHE= DUP_LOG= TUKIT_OPEN_LOG= SDBOOT_LOG= POSTCHECK_LOG=
     RPMDB_PRE_MANIFEST= RPMDB_EXPECTED_MANIFEST= RPMDB_POST_MANIFEST= PLAN_OPS=
 }
@@ -793,91 +791,149 @@ check_state_for_new() {
 
 make_plan() {
     local already_locked="${1:-0}"
-    local hash_a hash_b source_a source_b rpm_post a d
+    local source_before source_after planh rpm_post a d
+    local cache_avail root_avail has_installs
     local -a rc
+
     if (( already_locked == 0 )); then
         preflight
         check_state_for_new
     fi
-    a="$(active_snapshot)"; d="$(default_snapshot)"; [[ "${a}" == "${d}" ]] || die 'active/default cambiati durante preflight.'
+
+    a="$(active_snapshot)"; d="$(default_snapshot)"
+    [[ "${a}" == "${d}" ]] || die 'active/default cambiati durante preflight.'
     if [[ "${STATE_STATUS}" == planned ]]; then mark_aborted 'piano precedente sostituito'; fi
-    # A new TXID must never inherit transaction-specific fields from the previous state.
+
     reset_state
-    STATE_TXID="$(new_txid)"; STATE_CREATED="$(date -u +%FT%TZ)"; STATE_STATUS=planning; STATE_SOURCE="${a}"; STATE_TARGET=
-    STATE_LAST_ERROR=; set_tx_paths
-    install -d -o root -g root -m 0700 "${STATE_DIR}" "${TX_CACHE_DIR}" "${TX_PKG_CACHE}" "${LOG_ROOT}" || die 'creazione directory transazione fallita.'
-    persist_state_or_die; history_or_warn planning-started
+    STATE_TXID="$(new_txid)"
+    STATE_CREATED="$(date -u +%FT%TZ)"
+    STATE_STATUS=planning
+    STATE_SOURCE="${a}"
+    set_tx_paths
+    install -d -o root -g root -m 0700 "${STATE_DIR}" "${TX_CACHE_DIR}" "${TX_PKG_CACHE}" "${LOG_ROOT}" ||
+        die 'creazione directory transazione fallita.'
+    persist_state_or_die
+    history_or_warn planning-started
 
-    log 'Refresh repository...'; zypper --non-interactive refresh || { mark_aborted 'refresh fallito'; return 1; }
-    write_rpm_manifest_host "${RPMDB_PRE_MANIFEST}" || { mark_aborted 'manifest RPM pre fallito'; return 1; }
-    source_a="$(source_fingerprint)" || { mark_aborted 'fingerprint SOURCE pre fallita'; return 1; }
+    log 'Refresh repository...'
+    zypper --non-interactive refresh || { mark_aborted 'refresh fallito'; return 1; }
 
-    generate_xml_plan "${PLAN_XML_A}" || { mark_aborted 'piano XML A fallito'; return 1; }
-    scan_plan_for_critical_removals "${PLAN_XML_A}" || { mark_aborted 'rimozioni critiche nel piano'; return 1; }
-    hash_a="$(plan_hash "${PLAN_XML_A}")" || { mark_aborted 'hash piano A fallito'; return 1; }
-    check_plan_space "${PLAN_XML_A}" || { mark_aborted 'spazio insufficiente'; return 1; }
+    write_rpm_manifest_host "${RPMDB_PRE_MANIFEST}" ||
+        { mark_aborted 'manifest RPM pre fallito'; return 1; }
+    source_before="$(source_fingerprint)" ||
+        { mark_aborted 'fingerprint SOURCE pre fallita'; return 1; }
+
+    # Cheap margins before downloading.  Exact requirements are checked once,
+    # against the canonical PREPARED plan generated after pre-download.
+    cache_avail="$(available_bytes "${TX_PKG_CACHE}")" || { mark_aborted 'spazio cache non determinabile'; return 1; }
+    root_avail="$(available_bytes /)" || { mark_aborted 'spazio root non determinabile'; return 1; }
+    (( cache_avail >= CACHE_MIN_MARGIN_BYTES && root_avail >= ROOT_MIN_MARGIN_BYTES )) ||
+        { mark_aborted 'margine minimo cache/root insufficiente prima del download'; return 1; }
 
     log 'Pre-download RPM...'
     set +e
-    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup \
-        "${ZYPPER_LICENSE_ARGS[@]}" --download-only --no-recommends --no-allow-vendor-change 2>&1 | tee "${DOWNLOAD_LOG}"
-    rc=("${PIPESTATUS[@]}"); set -e
-    (( rc[0] == 0 && rc[1] == 0 )) || { mark_aborted "pre-download/log fallito zypper=${rc[0]} tee=${rc[1]}"; return 1; }
+    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup         "${ZYPPER_LICENSE_ARGS[@]}" --download-only --no-recommends --no-allow-vendor-change 2>&1 | tee "${DOWNLOAD_LOG}"
+    rc=("${PIPESTATUS[@]}")
+    set -e
+    (( rc[0] == 0 && rc[1] == 0 )) ||
+        { mark_aborted "pre-download/log fallito zypper=${rc[0]} tee=${rc[1]}"; return 1; }
     sync "${DOWNLOAD_LOG}" || { mark_aborted 'sync download log fallito'; return 1; }
     sync -f "${TX_PKG_CACHE}" || { mark_aborted 'sync cache RPM fallito'; return 1; }
 
-    source_b="$(source_fingerprint)" || { mark_aborted 'fingerprint SOURCE post-download fallita'; return 1; }
-    [[ "${source_a}" == "${source_b}" ]] || { mark_aborted 'SOURCE/ZYpp cambiati durante pre-download'; return 1; }
+    source_after="$(source_fingerprint)" ||
+        { mark_aborted 'fingerprint SOURCE post-download fallita'; return 1; }
+    [[ "${source_before}" == "${source_after}" ]] ||
+        { mark_aborted 'SOURCE/ZYpp cambiati durante pre-download'; return 1; }
 
-    generate_xml_plan "${PLAN_XML_B}" || { mark_aborted 'piano XML B fallito'; return 1; }
-    hash_b="$(plan_hash "${PLAN_XML_B}")" || { mark_aborted 'hash piano B fallito'; return 1; }
-    [[ "${hash_a}" == "${hash_b}" ]] || { mark_aborted 'piano cambiato dopo download'; return 1; }
-    extract_plan_operations "${PLAN_XML_B}" "${PLAN_OPS}" || { mark_aborted 'estrazione operazioni fallita'; return 1; }
-    validate_plan_operation_count "${PLAN_XML_B}" "${PLAN_OPS}" || { mark_aborted 'conteggio operazioni incoerente'; return 1; }
+    # One canonical PREPARED solver result.
+    generate_xml_plan "${PLAN_XML_PREPARED}" ||
+        { mark_aborted 'piano PREPARED fallito'; return 1; }
+    scan_plan_for_critical_removals "${PLAN_XML_PREPARED}" ||
+        { mark_aborted 'rimozioni critiche nel piano'; return 1; }
+    planh="$(plan_hash "${PLAN_XML_PREPARED}")" ||
+        { mark_aborted 'hash piano PREPARED fallito'; return 1; }
+    check_plan_space "${PLAN_XML_PREPARED}" ||
+        { mark_aborted 'spazio insufficiente'; return 1; }
+    extract_plan_operations "${PLAN_XML_PREPARED}" "${PLAN_OPS}" ||
+        { mark_aborted 'estrazione operazioni fallita'; return 1; }
+    validate_plan_operation_count "${PLAN_XML_PREPARED}" "${PLAN_OPS}" ||
+        { mark_aborted 'conteggio operazioni incoerente'; return 1; }
 
-    local has_installs
     has_installs="$(grep -cvE '^[[:space:]]*remove[[:space:]]' "${PLAN_OPS}" || true)"
     if (( has_installs > 0 )) && ! pkg_cache_has_rpms; then
         mark_aborted 'piano richiede pacchetti ma la cache RPM e vuota'
         return 1
     fi
 
-    build_expected_manifest "${RPMDB_PRE_MANIFEST}" "${PLAN_OPS}" "${RPMDB_EXPECTED_MANIFEST}" || { mark_aborted 'manifest atteso fallito'; return 1; }
-    sync "${RPMDB_PRE_MANIFEST}" "${RPMDB_EXPECTED_MANIFEST}" "${PLAN_OPS}" || { mark_aborted 'sync manifest fallito'; return 1; }
+    build_expected_manifest "${RPMDB_PRE_MANIFEST}" "${PLAN_OPS}" "${RPMDB_EXPECTED_MANIFEST}" ||
+        { mark_aborted 'manifest atteso fallito'; return 1; }
+    sync "${RPMDB_PRE_MANIFEST}" "${RPMDB_EXPECTED_MANIFEST}" "${PLAN_OPS}" ||
+        { mark_aborted 'sync manifest fallito'; return 1; }
 
     if [[ ! -s "${PLAN_OPS}" ]]; then
         rpm_post="$(sha256sum "${RPMDB_PRE_MANIFEST}" | awk '{print $1}')"
-        STATE_STATUS=confirmed; STATE_PLAN_HASH="${hash_b}"; STATE_SOURCE_FINGERPRINT="${source_b}"; STATE_RPMDB_POST_HASH="${rpm_post}"; STATE_FINISHED="$(date -u +%FT%TZ)"; persist_state_or_die; history_or_warn plan-noop; log 'Nessun aggiornamento disponibile.'; return 0
+        STATE_STATUS=confirmed
+        STATE_PLAN_HASH="${planh}"
+        STATE_SOURCE_FINGERPRINT="${source_after}"
+        STATE_RPMDB_POST_HASH="${rpm_post}"
+        STATE_FINISHED="$(date -u +%FT%TZ)"
+        persist_state_or_die
+        history_or_warn plan-noop
+        log 'Nessun aggiornamento disponibile.'
+        return 0
     fi
 
-    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup \
-        "${ZYPPER_LICENSE_ARGS[@]}" --dry-run --no-recommends --no-allow-vendor-change --details >"${PLAN_TXT}" || { mark_aborted 'dry-run leggibile fallito'; return 1; }
+    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup         "${ZYPPER_LICENSE_ARGS[@]}" --dry-run --no-recommends --no-allow-vendor-change --details >"${PLAN_TXT}" ||
+        { mark_aborted 'dry-run leggibile fallito'; return 1; }
 
-    [[ "$(active_snapshot)" == "${STATE_SOURCE}" && "$(default_snapshot)" == "${STATE_SOURCE}" ]] || { mark_aborted 'snapshot cambiata durante planning'; return 1; }
-    STATE_STATUS=planned; STATE_PLAN_HASH="${hash_b}"; STATE_SOURCE_FINGERPRINT="${source_b}"; STATE_LAST_ERROR=
-    persist_state_or_die; history_or_warn planned "plan=${hash_b} source=${source_b}"; log "Piano stabile: ${hash_b}"
+    [[ "$(active_snapshot)" == "${STATE_SOURCE}" && "$(default_snapshot)" == "${STATE_SOURCE}" ]] ||
+        { mark_aborted 'snapshot cambiata durante planning'; return 1; }
+
+    STATE_STATUS=planned
+    STATE_PLAN_HASH="${planh}"
+    STATE_SOURCE_FINGERPRINT="${source_after}"
+    STATE_LAST_ERROR=
+    persist_state_or_die
+    history_or_warn planned "plan=${planh} source=${source_after}"
+    log "Piano PREPARED stabile: ${planh}"
 }
 
+
 revalidate_plan() {
+    local h ops source_now
     [[ "${STATE_STATUS}" == planned ]] || return 1
     planned_is_fresh || return 1
     verify_cli_surface || return 1
-    [[ "$(source_fingerprint)" == "${STATE_SOURCE_FINGERPRINT}" ]] || return 1
+    [[ "${STATE_SOURCE_FINGERPRINT}" =~ ^[0-9a-f]{64}$ ]] || return 1
 
-    # Current repository metadata is authoritative.  A newly published solver
-    # result invalidates PREPARED before tukit open.
+    source_now="$(source_fingerprint)" || return 1
+    [[ "${source_now}" == "${STATE_SOURCE_FINGERPRINT}" ]] || return 1
+
+    # Current repository metadata is authoritative at execution time.
     zypper --non-interactive refresh >/dev/null || return 1
-    [[ "$(source_fingerprint)" == "${STATE_SOURCE_FINGERPRINT}" ]] || return 1
+    source_now="$(source_fingerprint)" || return 1
+    [[ "${source_now}" == "${STATE_SOURCE_FINGERPRINT}" ]] || return 1
 
-    generate_xml_plan "${PLAN_XML_FINAL}" || return 1
-    local h
-    local ops="${TX_CACHE_DIR}/plan-operations.revalidate.tsv"
-    h="$(plan_hash "${PLAN_XML_FINAL}")" || return 1
+    generate_xml_plan "${PLAN_XML_REVALIDATED}" || return 1
+    scan_plan_for_critical_removals "${PLAN_XML_REVALIDATED}" || return 1
+    h="$(plan_hash "${PLAN_XML_REVALIDATED}")" || return 1
     [[ "${h}" == "${STATE_PLAN_HASH}" ]] || return 1
-    extract_plan_operations "${PLAN_XML_FINAL}" "${ops}" || return 1
+
+    ops="${TX_CACHE_DIR}/plan-operations.revalidate.tsv"
+    extract_plan_operations "${PLAN_XML_REVALIDATED}" "${ops}" || return 1
     cmp -s -- "${PLAN_OPS}" "${ops}" || { rm -f -- "${ops}"; return 1; }
     rm -f -- "${ops}"
+
+    # The solver result is unchanged; make the package cache complete again
+    # before any TARGET exists. This avoids persisting a fragile cache hash.
+    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup         "${ZYPPER_LICENSE_ARGS[@]}" --download-only --no-recommends --no-allow-vendor-change >/dev/null ||
+        return 1
+    sync -f "${TX_PKG_CACHE}" || return 1
+
+    source_now="$(source_fingerprint)" || return 1
+    [[ "${source_now}" == "${STATE_SOURCE_FINGERPRINT}" ]]
 }
+
 
 prepare_plan_for_upgrade() {
     preflight update
