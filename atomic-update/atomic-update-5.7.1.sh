@@ -1613,51 +1613,6 @@ prepare_rollback() {
 }
 
 rollback() {
-    local source="$1"
-    local out
-    local old
-    local active
-    local target
-    snapshot_exists "${source}" || return 1
-    check_boot_space || return 1
-    [[ "$(snapshot_os_id "${source}")" == "${REQUIRED_OS_ID}" ]] || return 1
-    ensure_snapshot_bootable "${source}" || return 1
-    active="$(active_snapshot)"
-    old="$(default_snapshot)"
-    [[ "${active}" =~ ^[0-9]+$ && "${old}" == "${active}" ]] || return 1
-
-    # Persist intent before snapper changes the default subvolume. If the process
-    # dies inside snapper rollback, recover can classify the observed default.
-    STATE_SOURCE="${source}"
-    STATE_TARGET=
-    STATE_BOOT_ID_BEFORE="$(current_boot_id)"
-    STATE_STATUS=rollback-preparing
-    STATE_FINISHED=
-    STATE_LAST_ERROR=
-    persist_state_or_die
-    history_or_warn rollback-preparing "source=${source} old-default=${old}"
-
-    if ! out="$(LC_ALL=C snapper -c "${SNAPPER_CONFIG}" rollback "${source}" 2>&1)"; then
-        STATE_STATUS=rollback-unverified
-        STATE_LAST_ERROR="snapper rollback failed/ambiguous: ${out//$'\n'/ }"
-        persist_state_or_die
-        return 1
-    fi
-    target="$(default_snapshot)"
-    [[ "${target}" =~ ^[0-9]+$ && "${target}" != "${old}" ]] || { STATE_STATUS=rollback-unverified; STATE_LAST_ERROR='rollback default ambiguous'; persist_state_or_die; return 1; }
-    snapshot_exists "${target}" && snapshot_is_rw "${target}" || { STATE_STATUS=rollback-unverified; STATE_LAST_ERROR='rollback TARGET invalid'; persist_state_or_die; return 1; }
-    ensure_snapshot_bootable "${target}" || { STATE_TARGET="${target}"; STATE_STATUS=rollback-unverified; STATE_LAST_ERROR='rollback TARGET not bootable'; persist_state_or_die; return 1; }
-    [[ "$(active_snapshot)" == "${active}" ]] || { STATE_TARGET="${target}"; STATE_STATUS=rollback-unverified; STATE_LAST_ERROR='active snapshot changed while preparing rollback'; persist_state_or_die; return 1; }
-
-    STATE_TARGET="${target}"
-    STATE_STATUS=rollback-pending
-    STATE_FINISHED="$(date -u +%FT%TZ)"
-    STATE_LAST_ERROR=
-    persist_state_or_die
-    history_or_warn rollback-pending "source=${source} target=${target}"
-}
-
-rollback() {
     local requested="${1:-}"
     local source
     local answer
