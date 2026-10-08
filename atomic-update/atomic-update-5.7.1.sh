@@ -55,8 +55,6 @@ STATE_SOURCE_FINGERPRINT=
 STATE_RPMDB_POST_HASH=
 STATE_CREATED=
 STATE_TARGET_OPENED=
-STATE_DUP_STARTED=
-STATE_FINISHED=
 STATE_LAST_ERROR=
 STATE_INSPECTION_KIND=
 
@@ -202,8 +200,7 @@ set_tx_paths() {
 reset_state() {
     STATE_STATUS= STATE_TXID= STATE_SOURCE= STATE_TARGET= STATE_BOOT_ID_BEFORE=
     STATE_PLAN_HASH= STATE_SOURCE_FINGERPRINT= STATE_RPMDB_POST_HASH=
-    STATE_CREATED= STATE_TARGET_OPENED= STATE_DUP_STARTED=
-    STATE_FINISHED= STATE_LAST_ERROR= STATE_INSPECTION_KIND=
+    STATE_CREATED= STATE_TARGET_OPENED= STATE_LAST_ERROR= STATE_INSPECTION_KIND=
     TX_CACHE_DIR= PLAN_TXT= PLAN_XML_PREPARED= PLAN_XML_REVALIDATED= DOWNLOAD_LOG=
     TX_PKG_CACHE= DUP_LOG= TUKIT_OPEN_LOG= SDBOOT_LOG= POSTCHECK_LOG=
     RPMDB_PRE_MANIFEST= RPMDB_EXPECTED_MANIFEST= RPMDB_POST_MANIFEST= PLAN_OPS=
@@ -229,8 +226,6 @@ load_state() {
             rpmdb_post_hash) STATE_RPMDB_POST_HASH="${value}" ;;
             created_utc) STATE_CREATED="${value}" ;;
             target_opened_utc) STATE_TARGET_OPENED="${value}" ;;
-            dup_started_utc) STATE_DUP_STARTED="${value}" ;;
-            finished_utc) STATE_FINISHED="${value}" ;;
             last_error) STATE_LAST_ERROR="${value}" ;;
             inspection_kind) STATE_INSPECTION_KIND="${value}" ;;
             ''|'#'*) ;;
@@ -272,8 +267,6 @@ persist_state() {
         printf 'rpmdb_post_hash=%s\n' "${STATE_RPMDB_POST_HASH}"
         printf 'created_utc=%s\n' "${STATE_CREATED}"
         printf 'target_opened_utc=%s\n' "${STATE_TARGET_OPENED}"
-        printf 'dup_started_utc=%s\n' "${STATE_DUP_STARTED}"
-        printf 'finished_utc=%s\n' "${STATE_FINISHED}"
         printf 'last_error=%s\n' "${safe}"
         printf 'inspection_kind=%s\n' "${STATE_INSPECTION_KIND}"
     } > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
@@ -301,7 +294,6 @@ history_or_warn() { history "$@" || warn 'history.log non aggiornabile; state re
 
 mark_aborted() {
     STATE_STATUS=aborted
-    STATE_FINISHED="$(date -u +%FT%TZ)"
     STATE_LAST_ERROR="$1"
     persist_state_or_die
     history_or_warn aborted "$1"
@@ -850,7 +842,6 @@ make_plan() {
         STATE_PLAN_HASH="${planh}"
         STATE_SOURCE_FINGERPRINT="${source_after}"
         STATE_RPMDB_POST_HASH="${rpm_post}"
-        STATE_FINISHED="$(date -u +%FT%TZ)"
         persist_state_or_die
         history_or_warn plan-noop
         log 'Nessun aggiornamento disponibile.'
@@ -1124,7 +1115,6 @@ run_target_dup() {
     check_conflicting_update_units_idle || { STATE_LAST_ERROR='unita update in conflitto prima del dup TARGET'; persist_state_or_die; return 1; }
     : >"${DUP_LOG}" && chmod 0600 "${DUP_LOG}" || { STATE_LAST_ERROR='impossibile preparare il log dup'; persist_state_or_die; return 1; }
 
-    STATE_DUP_STARTED="$(date -u +%FT%TZ)"
     STATE_LAST_ERROR=
     persist_state_or_die
     sync || { STATE_LAST_ERROR='sync barrier fallita prima del dup TARGET'; persist_state_or_die; return 1; }
@@ -1303,7 +1293,6 @@ abort_target_safe() {
 
     STATE_STATUS=aborted
     STATE_INSPECTION_KIND=
-    STATE_FINISHED="$(date -u +%FT%TZ)"
     if [[ "${cleanup_detail}" == failed ]]; then
         STATE_LAST_ERROR="TARGET ${t} abortita; cleanup boot incompleto, SOURCE intatta"
     else
@@ -1374,7 +1363,6 @@ commit_target() {
 
     STATE_STATUS=pending-reboot
     STATE_INSPECTION_KIND=
-    STATE_FINISHED="$(date -u +%FT%TZ)"
     STATE_LAST_ERROR=
     persist_state_or_die
     history_or_warn pending-reboot "target=${t}"
@@ -1520,7 +1508,7 @@ confirm() {
     fi
     # All confirmation checks are complete. Persist directly to the terminal state;
     # a crash before this write leaves pending-reboot and confirm is safely repeatable.
-    STATE_STATUS=confirmed; STATE_FINISHED="$(date -u +%FT%TZ)"; STATE_LAST_ERROR=; persist_state_or_die; history_or_warn confirmed "target=${STATE_TARGET} rpm=${hash} kernel-purge-tolerated=${tolerated}"
+    STATE_STATUS=confirmed; STATE_LAST_ERROR=; persist_state_or_die; history_or_warn confirmed "target=${STATE_TARGET} rpm=${hash} kernel-purge-tolerated=${tolerated}"
     log "Upgrade ${STATE_TXID} confermato sulla TARGET ${STATE_TARGET}. SOURCE ${STATE_SOURCE} disponibile per recovery finche Snapper la conserva."
 }
 
@@ -1540,7 +1528,6 @@ prepare_rollback() {
     STATE_BOOT_ID_BEFORE="$(current_boot_id)"
     STATE_STATUS=needs-inspection
     STATE_INSPECTION_KIND=rollback-ambiguous
-    STATE_FINISHED=
     STATE_LAST_ERROR='rollback avviato; esito non ancora classificato'
     persist_state_or_die
     history_or_warn rollback-preparing "source=${source} old-default=${old}"
@@ -1564,7 +1551,6 @@ prepare_rollback() {
     STATE_TARGET="${target}"
     STATE_STATUS=rollback-pending
     STATE_INSPECTION_KIND=
-    STATE_FINISHED="$(date -u +%FT%TZ)"
     STATE_LAST_ERROR=
     persist_state_or_die
     history_or_warn rollback-pending "source=${source} target=${target}"
@@ -1733,7 +1719,6 @@ recover() {
                         && ! pgrep -af '[s]napper.*rollback' >/dev/null 2>&1; then
                         STATE_STATUS=aborted
                         STATE_INSPECTION_KIND=
-                        STATE_FINISHED="$(date -u +%FT%TZ)"
                         STATE_LAST_ERROR='rollback interrotto prima di creare/stagiare una TARGET; active/default invariati'
                         persist_state_or_die
                         history_or_warn rollback-aborted-no-default "source=${STATE_SOURCE}"
@@ -1897,7 +1882,6 @@ recover_clear_opening() {
         die 'Esiste almeno una snapshot con la descrizione di questa transazione: clear-opening vietato.'
     STATE_STATUS=aborted
     STATE_INSPECTION_KIND=
-    STATE_FINISHED="$(date -u +%FT%TZ)"
     STATE_LAST_ERROR='opening archiviato manualmente dopo ispezione: nessuna TARGET registrata'
     persist_state_or_die
     history_or_warn clear-opening
