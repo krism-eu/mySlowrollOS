@@ -123,7 +123,7 @@ require_recovery_commands() {
 require_commands() {
     require_recovery_commands
     local cmd
-    for cmd in cmp comm cp env find rpm stat systemd-inhibit tee wc xargs xmllint zypper; do
+    for cmd in cmp comm cp env find rpm systemd-inhibit tee xmllint zypper; do
         command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
     done
 }
@@ -369,7 +369,12 @@ rpmdb_is_in_root_snapshot() {
     [[ "${root_id}" =~ ^[0-9]+$ && "${root_id}" == "${db_id}" ]]
 }
 
-available_bytes() { LC_ALL=C df -B1 --output=avail -- "$1" 2>/dev/null | awk 'NR==2 && $1~/^[0-9]+$/ {print $1}'; }
+available_bytes() {
+    local available
+    available="$(LC_ALL=C df -B1 --output=avail -- "$1" 2>/dev/null | awk 'NR==2 && $1~/^[0-9]+$/ {print $1}')" || return 1
+    [[ "${available}" =~ ^[0-9]+$ ]] || return 1
+    printf '%s\n' "${available}"
+}
 
 check_one_boot_storage() {
     local label="$1"
@@ -702,8 +707,9 @@ preflight() {
     path_is_outside_root_snapshot "${LOG_ROOT}" || die 'LOG_ROOT non persistente fuori root snapshot.'
     grep -qi systemd-boot <<<"$(sdbootutil bootloader 2>/dev/null || true)" || die 'systemd-boot non rilevato.'
 
-    # Boot storage capacity is enforced during update planning, but omitted in recovery and confirm
-    # to avoid deadlocks when confirming or cleaning up.
+    # Recovery uses a reduced structural preflight so diagnosis/cleanup can
+    # operate even when update-only policy or boot-space checks fail.
+    # Confirm separately validates the booted TARGET, OS and RPM manifest.
     if [[ "${mode}" == update ]]; then
         check_boot_space || die 'spazio boot insufficiente/non determinabile.'
     fi
@@ -988,10 +994,6 @@ source_unchanged() {
     [[ "$(default_snapshot)" == "${STATE_SOURCE}" ]] || return 1
 }
 
-assert_source_unchanged() {
-    source_unchanged || die 'SOURCE cambiata o non verificabile dopo apertura TARGET.'
-}
-
 target_age_seconds() {
     local a
     local n
@@ -1005,10 +1007,6 @@ target_window_valid() {
     local a
     a="$(target_age_seconds)" || return 1
     (( a <= TARGET_MAX_AGE_SECONDS ))
-}
-
-assert_target_window() {
-    target_window_valid || die 'TARGET troppo vecchia o eta non determinabile.'
 }
 
 tukit_call() { local t="$1"; shift; tukit call "${t}" "$@"; }
