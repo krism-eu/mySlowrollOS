@@ -29,7 +29,6 @@ readonly CACHE_MIN_MARGIN_BYTES="${MYSLOWROLL_CACHE_MIN_MARGIN_BYTES:-536870912}
 readonly ROOT_MIN_MARGIN_BYTES="${MYSLOWROLL_ROOT_MIN_MARGIN_BYTES:-1073741824}"
 readonly BOOT_MIN_FREE_BYTES="${MYSLOWROLL_BOOT_MIN_FREE_BYTES:-134217728}"
 readonly AUTO_AGREE_LICENSES="${MYSLOWROLL_AUTO_AGREE_LICENSES:-0}"
-readonly VERIFY_PAYLOADS="${MYSLOWROLL_VERIFY_PAYLOADS:-0}"
 readonly AUTO_REBOOT="${MYSLOWROLL_AUTO_REBOOT:-1}"
 readonly OPERATION_TIMEOUT="${MYSLOWROLL_OPERATION_TIMEOUT:-300}"
 
@@ -162,10 +161,6 @@ validate_policy() {
         1|yes|true|on)  ZYPPER_LICENSE_ARGS=(--auto-agree-with-licenses) ;;
         *) die 'MYSLOWROLL_AUTO_AGREE_LICENSES non valido.' ;;
     esac
-    case "${VERIFY_PAYLOADS}" in
-        0|no|false|off|1|yes|true|on) ;;
-        *) die 'MYSLOWROLL_VERIFY_PAYLOADS non valido.' ;;
-    esac
     case "${AUTO_REBOOT}" in
         0|no|false|off|1|yes|true|on) ;;
         *) die 'MYSLOWROLL_AUTO_REBOOT non valido.' ;;
@@ -277,7 +272,7 @@ persist_state() {
 
 persist_state_or_die() { persist_state || die 'impossibile rendere persistente lo state; operazione fermata.'; }
 
-history() {
+hist_log() {
     local event="$1"
     local detail="${2:-}"
     local stamp
@@ -290,9 +285,10 @@ history() {
     chmod 0600 "${HISTORY_FILE}" || return 1
     sync "${HISTORY_FILE}" || return 1
 }
-history_or_warn() { history "$@" || warn 'history.log non aggiornabile; state resta autoritativo.'; }
+history_or_warn() { hist_log "$@" || warn 'history.log non aggiornabile; state resta autoritativo.'; }
 
 mark_aborted() {
+    warn "$1"
     STATE_STATUS=aborted
     STATE_LAST_ERROR="$1"
     persist_state_or_die
@@ -460,10 +456,16 @@ zypp_value() {
     ' "${files[@]}" 2>/dev/null || true
 }
 
+normalize_rpm_manifest() {
+    # libzypp omits a zero epoch; RPM may explicitly report it as 0:.
+    # Preserve nonzero epochs and use identical normalization for host/TARGET.
+    LC_ALL=C sed -E '/^gpg-pubkey\|/d; s/^([^|]+\|)0:/\1/' | LC_ALL=C sort -u
+}
+
 write_rpm_manifest_host() {
     local out="$1"
     local tmp="${out}.tmp"
-    LC_ALL=C rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}:{}|%{VERSION}-%{RELEASE}|%{ARCH}\n' | grep -v '^gpg-pubkey|' | LC_ALL=C sort -u > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+    LC_ALL=C rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}:{}|%{VERSION}-%{RELEASE}|%{ARCH}\n' | normalize_rpm_manifest > "${tmp}" || { rm -f -- "${tmp}"; return 1; }
     [[ -s "${tmp}" ]] || { rm -f -- "${tmp}"; return 1; }
     mv -f -- "${tmp}" "${out}"
 }
@@ -472,7 +474,7 @@ rpmdb_hash_host() {
     local tmp
     local h
     tmp="$(mktemp /run/myslowroll-rpmdb.XXXXXX)" || return 1
-    if ! LC_ALL=C rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}:{}|%{VERSION}-%{RELEASE}|%{ARCH}\n' | grep -v '^gpg-pubkey|' | LC_ALL=C sort -u >"${tmp}"; then rm -f -- "${tmp}"; return 1; fi
+    if ! LC_ALL=C rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}:{}|%{VERSION}-%{RELEASE}|%{ARCH}\n' | normalize_rpm_manifest >"${tmp}"; then rm -f -- "${tmp}"; return 1; fi
     [[ -s "${tmp}" ]] || { rm -f -- "${tmp}"; return 1; }
     h="$(sha256sum "${tmp}" | awk '{print $1}')"; rm -f -- "${tmp}"
     [[ "${h}" =~ ^[0-9a-f]{64}$ ]] || return 1; printf '%s\n' "${h}"
@@ -507,6 +509,7 @@ verify_cli_surface() {
     rh="$(LC_ALL=C sdbootutil remove-all-kernels --help 2>&1 || true)"
     ch="$(LC_ALL=C sdbootutil cleanup --help 2>&1 || true)"
     [[ -n "${th}" && -n "${sv}" && -n "${rh}" && -n "${ch}" ]] || return 1
+    grep -Fq -- '--description' <<<"${th}" || return 1
     for sub in open call close abort; do
         grep -Eq "(^|[[:space:]])${sub}([[:space:]]|$)" <<<"${th}" || return 1
     done
@@ -545,7 +548,8 @@ plan_hash() {
     tmp="$(mktemp "${TX_CACHE_DIR}/.planhash.XXXXXX")" || return 1
     { printf '<myslowroll-plan>'; LC_ALL=C xmllint --xpath '//*[local-name()="install-summary"]' "${plan}" 2>/dev/null || { rm -f -- "${tmp}"; return 1; }; printf '</myslowroll-plan>\n'; } >"${tmp}"
     sed -E -i 's/[[:space:]]+download-size="[0-9]+"//' "${tmp}" || { rm -f -- "${tmp}"; return 1; }
-    hash="$(LC_ALL=C xmllint --c14n "${tmp}" 2>/dev/null | sha256sum | awk '{print $1}')"; rm -f -- "${tmp}"
+    hash="$(LC_ALL=C xmllint --c14n "${tmp}" 2>/dev/null | sha256sum | awk '{print $1}')" || { rm -f -- "${tmp}"; return 1; }
+    rm -f -- "${tmp}"
     [[ "${hash}" =~ ^[0-9a-f]{64}$ ]] || return 1; printf '%s\n' "${hash}"
 }
 
@@ -656,12 +660,16 @@ check_plan_space() {
     cache_avail="$(available_bytes "${TX_PKG_CACHE}")" || return 1
     root_avail="$(available_bytes /)" || return 1
 
-    local cache_dev
-    local root_dev
-    cache_dev="$(findmnt -n -o MAJ:MIN --target "${TX_PKG_CACHE}" 2>/dev/null || true)"
-    root_dev="$(findmnt -n -o MAJ:MIN --target / 2>/dev/null || true)"
+    local cache_uuid
+    local root_uuid
+    cache_uuid="$(findmnt -n -o UUID --target "${TX_PKG_CACHE}" 2>/dev/null)" || return 1
+    root_uuid="$(findmnt -n -o UUID --target / 2>/dev/null)" || return 1
+    [[ -n "${cache_uuid}" && -n "${root_uuid}" ]] || {
+        warn 'UUID filesystem cache/root non determinabile: spazio condiviso non verificabile.'
+        return 1
+    }
 
-    if [[ -n "${cache_dev}" && "${cache_dev}" == "${root_dev}" ]]; then
+    if [[ "${cache_uuid}" == "${root_uuid}" ]]; then
         local total_needed=$(( download + installed + CACHE_MIN_MARGIN_BYTES + ROOT_MIN_MARGIN_BYTES ))
         (( root_avail >= total_needed )) || {
             warn "spazio su pool condiviso insufficiente: disponibili ${root_avail} byte, richiesti ${total_needed} byte."
@@ -926,7 +934,7 @@ prepare_plan_for_upgrade() {
 
 find_owned_targets() {
     local line number description wanted listing
-    wanted="${TUKIT_DESCRIPTION_PREFIX} ${STATE_TXID}"
+    wanted="${1:-${TUKIT_DESCRIPTION_PREFIX} ${STATE_TXID}}"
     listing="$(LC_ALL=C snapper --csvout --no-headers -c "${SNAPPER_CONFIG}" \
         list --disable-used-space --columns number,description)" || return 1
     while IFS= read -r line; do
@@ -1077,7 +1085,7 @@ write_target_manifest() {
     local t="$1"
     local out="$2"
     local tmp="${out}.tmp"
-    if ! LC_ALL=C tukit_call "${t}" rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}:{}|%{VERSION}-%{RELEASE}|%{ARCH}\n' | grep -v '^gpg-pubkey|' | LC_ALL=C sort -u >"${tmp}"; then rm -f -- "${tmp}"; return 1; fi
+    if ! LC_ALL=C tukit_call "${t}" rpm -qa --qf '%{NAME}|%|EPOCH?{%{EPOCH}:}:{}|%{VERSION}-%{RELEASE}|%{ARCH}\n' | normalize_rpm_manifest >"${tmp}"; then rm -f -- "${tmp}"; return 1; fi
     [[ -s "${tmp}" ]] || { rm -f -- "${tmp}"; return 1; }
     mv -f -- "${tmp}" "${out}"
 }
@@ -1146,14 +1154,7 @@ run_target_dup() {
     history_or_warn target-updated "zypper_rc=${zrc}"
 }
 
-verify_target_packages() { local p; for p in "${CRITICAL_PKGS[@]}"; do tukit_call "$1" rpm --quiet -q "${p}" || return 1; done; }
-
-verify_target_payloads() {
-    bool_true "${VERIFY_PAYLOADS}" || return 0
-    local op
-    local name
-    while IFS=$'\t' read -r op name _; do [[ "${op}" == remove || -z "${name}" ]] && continue; tukit_call "$1" rpm -V "${name}" >/dev/null 2>&1 || return 1; done <"${PLAN_OPS}"
-}
+verify_target_packages() { tukit_call "$1" rpm --quiet -q "${CRITICAL_PKGS[@]}"; }
 
 
 verify_target() {
@@ -1183,8 +1184,6 @@ verify_target() {
         { STATE_LAST_ERROR='target RPM manifest differs from expected solver result'; persist_state_or_die; return 1; }
     verify_target_packages "${t}" ||
         { STATE_LAST_ERROR='critical package missing in TARGET'; persist_state_or_die; return 1; }
-    verify_target_payloads "${t}" ||
-        { STATE_LAST_ERROR='optional rpm -V payload verification failed'; persist_state_or_die; return 1; }
     [[ "$(tukit_call "${t}" awk -F= '$1=="ID"{gsub(/^"|"$/,"",$2);print $2;exit}' /usr/lib/os-release)" == "${REQUIRED_OS_ID}" ]] ||
         { STATE_LAST_ERROR='TARGET OS ID invalid'; persist_state_or_die; return 1; }
 
@@ -1328,7 +1327,7 @@ precommit_target_valid() {
 verified_target_evidence() {
     # A staged/default TARGET is adoptable only if the prior verified
     # manifest is intact and the TARGET still matches it exactly.
-    local t="$1" owned observed p rc
+    local t="$1" owned observed rc
     [[ "${t}" =~ ^[0-9]+$ && "${STATE_PLAN_HASH}" =~ ^[0-9a-f]{64}$ ]] || return 1
     [[ "${STATE_RPMDB_POST_HASH}" =~ ^[0-9a-f]{64}$ ]] || return 1
     [[ -s "${RPMDB_POST_MANIFEST}" && -s "${RPMDB_EXPECTED_MANIFEST}" ]] || return 1
@@ -1341,9 +1340,7 @@ verified_target_evidence() {
 
     observed="$(mktemp "${TX_CACHE_DIR}/.recover-rpm.XXXXXX")" || return 1
     if [[ "$(active_snapshot)" == "${t}" ]]; then
-        for p in "${CRITICAL_PKGS[@]}"; do
-            rpm --quiet -q "${p}" || { rm -f -- "${observed}"; return 1; }
-        done
+        rpm --quiet -q "${CRITICAL_PKGS[@]}" || { rm -f -- "${observed}"; return 1; }
         write_rpm_manifest_host "${observed}" || { rm -f -- "${observed}"; return 1; }
     else
         verify_target_packages "${t}" || { rm -f -- "${observed}"; return 1; }
@@ -1552,26 +1549,60 @@ confirm() {
 }
 
 
+rollback_recovery_allowed() {
+    local requested="$1" a d
+    [[ "${STATE_STATUS}" == needs-inspection ]] || return 1
+    case "${STATE_INSPECTION_KIND}" in
+        boot-mismatch|target-active-or-default) ;;
+        *) return 1 ;;
+    esac
+    [[ "${STATE_SOURCE}" =~ ^[0-9]+$ && "${STATE_TARGET}" =~ ^[0-9]+$ ]] || return 1
+    [[ "${STATE_SOURCE}" != "${STATE_TARGET}" && "${requested}" == "${STATE_SOURCE}" ]] || return 1
+    a="$(active_snapshot)"; d="$(default_snapshot)"
+    [[ "${a}" == "${STATE_SOURCE}" || "${a}" == "${STATE_TARGET}" ]] || return 1
+    [[ "${d}" == "${STATE_SOURCE}" || "${d}" == "${STATE_TARGET}" ]]
+}
+
+rollback_target_owned() {
+    local owned
+    owned="$(find_owned_targets "${TUKIT_DESCRIPTION_PREFIX} rollback ${STATE_TXID} source=${STATE_SOURCE}")" || return 1
+    grep -Fxq -- "$1" <<<"${owned}"
+}
+
 prepare_rollback() {
     local source="$1"
+    local recovery="${2:-0}"
     local out old active target
+    local -a rollback_args=()
     snapshot_exists "${source}" || return 1
     check_boot_space || return 1
     [[ "$(snapshot_os_id "${source}")" == "${REQUIRED_OS_ID}" ]] || return 1
     ensure_snapshot_bootable "${source}" || return 1
     active="$(active_snapshot)"; old="$(default_snapshot)"
-    [[ "${active}" =~ ^[0-9]+$ && "${old}" == "${active}" ]] || return 1
+    [[ "${active}" =~ ^[0-9]+$ ]] || return 1
+    if (( recovery )); then
+        rollback_recovery_allowed "${source}" || return 1
+    else
+        [[ "${old}" == "${active}" ]] || return 1
+    fi
 
     STATE_SOURCE="${source}"
-    STATE_TARGET=
     STATE_BOOT_ID_BEFORE="$(current_boot_id)"
     STATE_STATUS=needs-inspection
-    STATE_INSPECTION_KIND=rollback-ambiguous
+    if (( recovery )); then
+        # Keep the failed TARGET and TXID until Snapper stages a new default.
+        # A crash before that must not adopt the failed TARGET as a rollback.
+        STATE_INSPECTION_KIND=rollback-recovery
+        rollback_args=(--description "${TUKIT_DESCRIPTION_PREFIX} rollback ${STATE_TXID} source=${source}")
+    else
+        STATE_TARGET=
+        STATE_INSPECTION_KIND=rollback-ambiguous
+    fi
     STATE_LAST_ERROR='rollback avviato; esito non ancora classificato'
     persist_state_or_die
     history_or_warn rollback-preparing "source=${source} old-default=${old}"
 
-    if ! out="$(LC_ALL=C snapper -c "${SNAPPER_CONFIG}" rollback "${source}" 2>&1)"; then
+    if ! out="$(LC_ALL=C snapper -c "${SNAPPER_CONFIG}" rollback "${rollback_args[@]}" "${source}" 2>&1)"; then
         STATE_LAST_ERROR="snapper rollback failed/ambiguous: ${out//$'\n'/ }"
         persist_state_or_die
         return 1
@@ -1580,6 +1611,14 @@ prepare_rollback() {
     target="$(default_snapshot)"
     [[ "${target}" =~ ^[0-9]+$ && "${target}" != "${old}" ]] ||
         { STATE_LAST_ERROR='rollback default ambiguous'; persist_state_or_die; return 1; }
+    if (( recovery )); then
+        [[ "${target}" != "${STATE_SOURCE}" && "${target}" != "${STATE_TARGET}" ]] ||
+            { STATE_LAST_ERROR='rollback did not stage a new snapshot'; persist_state_or_die; return 1; }
+        rollback_target_owned "${target}" ||
+            { STATE_LAST_ERROR='rollback TARGET ownership not verified'; persist_state_or_die; return 1; }
+    fi
+    STATE_TARGET="${target}"
+    STATE_INSPECTION_KIND=rollback-ambiguous
     snapshot_exists "${target}" && snapshot_is_rw "${target}" ||
         { STATE_TARGET="${target}"; STATE_LAST_ERROR='rollback TARGET invalid'; persist_state_or_die; return 1; }
     ensure_snapshot_bootable "${target}" ||
@@ -1599,18 +1638,24 @@ rollback() {
     local requested="${1:-}"
     local source
     local answer
+    local recovery=0
     preflight recovery >/dev/null
     load_state
+    source="${requested:-${STATE_SOURCE}}"; [[ "${source}" =~ ^[0-9]+$ ]] || die 'specificare una snapshot numerica.'
 
     # Consistency gate: refuse to overwrite an active or unresolved transaction
     case "${STATE_STATUS}" in
         ''|confirmed|aborted|rolled-back|planned|revalidated) ;;
+        needs-inspection)
+            rollback_recovery_allowed "${source}" ||
+                die 'rollback di recovery ammesso solo verso SOURCE per boot-mismatch/target-active-or-default, con active/default appartenenti alla transazione.'
+            recovery=1
+            ;;
         *)
             die "Impossibile eseguire rollback: transazione ${STATE_TXID:-?} attiva in stato '${STATE_STATUS}'. Eseguire prima '${PROG} recover'."
             ;;
     esac
 
-    source="${requested:-${STATE_SOURCE}}"; [[ "${source}" =~ ^[0-9]+$ ]] || die 'specificare una snapshot numerica.'
     if [[ "${STATE_STATUS}" == planned || "${STATE_STATUS}" == revalidated ]]; then
         warn "Esiste un piano pendente (${STATE_TXID}); confermando il rollback verra invalidato."
     fi
@@ -1618,6 +1663,16 @@ rollback() {
     printf 'Rollback verso snapshot %s. Scrivi esattamente: ROLLBACK %s E RIAVVIA\n> ' "${source}" "${source}"
     IFS= read -r answer || die 'rollback annullato.'
     [[ "${answer}" == "ROLLBACK ${source} E RIAVVIA" ]] || die 'rollback annullato.'
+
+    if (( recovery )); then
+        rollback_recovery_allowed "${source}" || die 'contesto recovery cambiato durante la conferma.'
+        # Do not persist "aborted" first: interruption in that gap would lose
+        # the typed recovery route while the failed TARGET may still be default.
+        history_or_warn rollback-resolves-update "source=${source} failed-target=${STATE_TARGET}"
+        prepare_rollback "${source}" 1 || die 'rollback non verificabile; non riavvio.'
+        reboot_or_finish rollback
+        return 0
+    fi
 
     # State mutation happens strictly after user confirmation
     if [[ "${STATE_STATUS}" == planned || "${STATE_STATUS}" == revalidated ]]; then
@@ -1726,6 +1781,39 @@ recover() {
             ;;
         needs-inspection)
             case "${STATE_INSPECTION_KIND}" in
+                rollback-recovery)
+                    # SOURCE/TARGET still identify the failed update, not the
+                    # new rollback snapshot. Never adopt either as its result.
+                    if [[ "${boot}" == "${STATE_BOOT_ID_BEFORE}" ]] \
+                        && [[ "${a}" == "${STATE_SOURCE}" || "${a}" == "${STATE_TARGET}" ]] \
+                        && ! pgrep -af '[s]napper.*rollback' >/dev/null 2>&1; then
+                        if [[ "${d}" == "${STATE_SOURCE}" || "${d}" == "${STATE_TARGET}" ]]; then
+                            if [[ "${a}" == "${STATE_SOURCE}" ]]; then
+                                STATE_INSPECTION_KIND=boot-mismatch
+                            else
+                                STATE_INSPECTION_KIND=target-active-or-default
+                            fi
+                            STATE_LAST_ERROR='rollback non staged; ripetere rollback con conferma esplicita'
+                            persist_state_or_die
+                            log 'Rollback non staged; ripristinato il percorso di recovery con conferma.'
+                            return 0
+                        fi
+                        if [[ "${d}" =~ ^[0-9]+$ ]] \
+                            && rollback_target_owned "${d}" \
+                            && snapshot_exists "${d}" && snapshot_is_rw "${d}" \
+                            && [[ "$(snapshot_os_id "${d}")" == "${REQUIRED_OS_ID}" ]] \
+                            && ensure_snapshot_bootable "${d}"; then
+                            STATE_TARGET="${d}"
+                            STATE_STATUS=rollback-pending
+                            STATE_INSPECTION_KIND=
+                            STATE_LAST_ERROR=
+                            persist_state_or_die
+                            history_or_warn rollback-pending "source=${STATE_SOURCE} target=${d} recovered=1"
+                            log "Rollback classificato: TARGET ${d}; reboot ancora da fare."
+                            return 0
+                        fi
+                    fi
+                    ;;
                 close-ambiguous|close-postcondition|pre-close-sync-failed)
                     [[ "${STATE_TARGET}" =~ ^[0-9]+$ ]] ||
                         die 'close ambiguo senza TARGET registrata.'
@@ -1854,7 +1942,11 @@ recover_inspect() {
     printf 'Last error: %s\n' "${STATE_LAST_ERROR:-none}"
     printf 'Owned TARGETs by description:'
     local owned
-    owned="$(find_owned_targets | tr '\n' ' ' || true)"
+    if ! owned="$(find_owned_targets | tr '\n' ' ')"; then
+        printf ' unknown (Snapper enumeration failed)\n'
+        warn 'Elenco Snapper non verificabile: impossibile determinare le TARGET della transazione.'
+        return 1
+    fi
     printf ' %s\n' "${owned:-none}"
     if [[ "${STATE_TARGET}" =~ ^[0-9]+$ ]]; then
         if target_quiescent "${STATE_TARGET}"; then
@@ -1866,6 +1958,7 @@ recover_inspect() {
     [[ -n "${TUKIT_OPEN_LOG}" ]] && printf 'Open log: %s\n' "${TUKIT_OPEN_LOG}"
     [[ -n "${DUP_LOG}" ]] && printf 'Dup log: %s\n' "${DUP_LOG}"
     [[ -n "${SDBOOT_LOG}" ]] && printf 'Boot log: %s\n' "${SDBOOT_LOG}"
+    return 0
 }
 
 recover_typed_abort() {

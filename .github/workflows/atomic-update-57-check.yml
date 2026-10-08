@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - work/atomic-update-5.7
+      - fix/atomic-update-recovery-review
     paths:
       - 'atomic-update/**'
       - 'agama/**'
@@ -46,7 +47,9 @@ jobs:
           grep -Fq '"extraKernelParams": "security=apparmor systemd.show_status=1"' agama/profile-policy.json
           ! grep -Eq '^Requires:[[:space:]]+xauth([[:space:]]|$)' myslowroll-workstation/myslowroll-workstation.spec obs/criscore1/criscore1.spec
       - name: Mocked recovery regression tests
-        run: bash atomic-update/tests/ci-regression.sh
+        run: |
+          bash atomic-update/tests/ci-regression.sh
+          bash atomic-update/tests/recovery-review.sh
       - name: Single-version source and paths
         shell: bash
         run: |
