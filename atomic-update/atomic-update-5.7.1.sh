@@ -1737,7 +1737,8 @@ recover() {
                         return 0
                     fi
 
-                    if [[ "${d}" == "${STATE_TARGET}" ]] \
+                    if [[ "${STATE_INSPECTION_KIND}" != pre-close-sync-failed ]] \
+                        && [[ "${d}" == "${STATE_TARGET}" ]] \
                         && snapshot_exists "${STATE_TARGET}" \
                         && snapshot_is_rw "${STATE_TARGET}" \
                         && snapshot_is_bootable "${STATE_SOURCE}" \
@@ -1810,7 +1811,7 @@ prune() {
     [[ -d "${LOG_ROOT}" ]] && while IFS= read -r p; do files+=("${p}"); done < <(find "${LOG_ROOT}" -mindepth 1 -maxdepth 1 -type f -mtime "+${days}" -print)
     printf 'Artefatti candidati: %s. Snapshot Btrfs: mai eliminate da prune.\n' "${#files[@]}"
     (( ${#files[@]} )) || return 0
-    printf 'Scrivi esattamente: PRUNE V5 %s\n> ' "${days}"; local ans; IFS= read -r ans || die 'prune annullato.'; [[ "${ans}" == "PRUNE V5 ${days}" ]] || die 'prune annullato.'
+    printf 'Scrivi esattamente: PRUNE ATOMIC-UPDATE %s\n> ' "${days}"; local ans; IFS= read -r ans || die 'prune annullato.'; [[ "${ans}" == "PRUNE ATOMIC-UPDATE ${days}" ]] || die 'prune annullato.'
     for p in "${files[@]}"; do [[ -d "${p}" ]] && rm -rf -- "${p}" || rm -f -- "${p}"; done
     history_or_warn prune "days=${days} files=${#files[@]}"
 }
