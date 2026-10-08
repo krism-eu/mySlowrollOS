@@ -60,10 +60,6 @@ def generate(revision):
     profile = json.loads((ROOT / "agama/profile-policy.json").read_text())
     if any(key in profile for key in ("storage", "user", "root")):
         raise ValueError("storage and authentication must remain interactive")
-    # Firmware boot order/entries belong to the user, never to the profile.
-    # The storage/EFI selection remains interactive in Agama.
-    if profile.get("bootloader", {}).get("updateNvram") is not False:
-        raise ValueError("bootloader.updateNvram must be false (manual firmware management)")
     profile["software"]["packages"] = sorted(persistent + install_only)
     entries = list(profile["files"])
     for scripts in profile["scripts"].values():

@@ -6,9 +6,10 @@ Stock Agama 24, product Slowroll, remains the interactive installer.
 The active entry point is `agama/profile-final.jsonnet`.
 Storage and authentication are omitted: disks, partitions, formatting, username
 and credentials are chosen in the UI. No unattended hardware installation.
-The profile also sets bootloader.updateNvram=false: Agama must not create or
-reorder UEFI NVRAM boot entries. The user selects EFI storage and manages the
-firmware/other boot managers. Manual boot entry selection may be needed.
+The profile sets bootloader.updateNvram=true: after interactive partitioning
+and selection of a valid EFI System Partition, Agama may register the installed
+system's UEFI boot entry. The installer must not preselect a disk, partition,
+or ESP; firmware boot-order changes may result from registering the entry.
 
 Package selection uses three deliberately separate source lists:
 - Protected core: `criscore1/2` direct requirements in
