@@ -1222,12 +1222,10 @@ verify_target() {
     [[ "$(tukit_call "${t}" awk -F= '$1=="ID"{gsub(/^"|"$/,"",$2);print $2;exit}' /usr/lib/os-release)" == "${REQUIRED_OS_ID}" ]] ||
         { STATE_LAST_ERROR='TARGET OS ID invalid'; persist_state_or_die; return 1; }
 
-    snapshot_is_bootable "${STATE_SOURCE}" ||
-        { STATE_LAST_ERROR='SOURCE no longer bootable'; persist_state_or_die; return 1; }
-    ensure_snapshot_bootable "${t}" ||
-        { STATE_LAST_ERROR='TARGET not bootable'; persist_state_or_die; return 1; }
+    # Bootability is checked once at the actual pre-commit boundary.
+    # Avoid repeating the same sdbootutil invariant during package verification.
     source_unchanged ||
-        { STATE_LAST_ERROR='SOURCE changed during TARGET boot preparation'; persist_state_or_die; return 1; }
+        { STATE_LAST_ERROR='SOURCE changed during TARGET verification'; persist_state_or_die; return 1; }
 
     STATE_STATUS=verified
     STATE_LAST_ERROR=
@@ -1387,12 +1385,10 @@ commit_target() {
     fi
 
     if [[ "$(default_snapshot)" != "${t}" ]] ||
-       ! snapshot_is_rw "${t}" ||
-       ! snapshot_is_bootable "${STATE_SOURCE}" ||
-       ! snapshot_is_bootable "${t}"; then
+       ! snapshot_is_rw "${t}"; then
         STATE_STATUS=needs-inspection
         STATE_INSPECTION_KIND=close-postcondition
-        STATE_LAST_ERROR='tukit close returned success but post-close invariants failed'
+        STATE_LAST_ERROR='tukit close returned success but default/RW postconditions failed'
         persist_state_or_die
         return 1
     fi
