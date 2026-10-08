@@ -1247,30 +1247,43 @@ target_quiescent() {
 
 abort_target_safe() {
     local t="$1"
-    local a d a_after d_after rc
+    local a d a_after d_after rc cleanup_detail=ok
     [[ "${t}" =~ ^[0-9]+$ ]] || return 1
     a="$(active_snapshot)"; d="$(default_snapshot)"
     [[ -n "${a}" && -n "${d}" ]] || return 1
     [[ "${t}" != "${a}" && "${t}" != "${d}" ]] || return 1
 
-    if ! target_quiescent "${t}"; then
-        STATE_STATUS=needs-inspection
-        STATE_INSPECTION_KIND=target-not-quiescent
-        STATE_LAST_ERROR="TARGET ${t} non dimostrabilmente quiescente; abort automatico vietato"
-        persist_state_or_die
-        return 1
-    fi
+    if snapshot_exists "${t}"; then
+        if ! target_quiescent "${t}"; then
+            STATE_STATUS=needs-inspection
+            STATE_INSPECTION_KIND=target-not-quiescent
+            STATE_LAST_ERROR="TARGET ${t} non dimostrabilmente quiescente; abort vietato"
+            persist_state_or_die
+            return 1
+        fi
 
-    set +e
-    timeout --signal=TERM --kill-after=10 "${OPERATION_TIMEOUT}" tukit abort "${t}"
-    rc=$?
-    set -e
-    if (( rc != 0 )); then
-        STATE_STATUS=needs-inspection
-        STATE_INSPECTION_KIND=abort-ambiguous
-        STATE_LAST_ERROR="tukit abort ${t} fallito/timeout rc=${rc}; non riprovare alla cieca"
-        persist_state_or_die
-        return 1
+        set +e
+        timeout --signal=TERM --kill-after=10 "${OPERATION_TIMEOUT}" tukit abort "${t}"
+        rc=$?
+        set -e
+        if (( rc != 0 )); then
+            STATE_STATUS=needs-inspection
+            STATE_INSPECTION_KIND=abort-ambiguous
+            STATE_LAST_ERROR="tukit abort ${t} fallito/timeout rc=${rc}; non riprovare alla cieca"
+            persist_state_or_die
+            return 1
+        fi
+    else
+        # Crash after a successful abort but before state persistence:
+        # do not repeat tukit abort. Accept only when SOURCE is still active/default.
+        if [[ "${a}" != "${STATE_SOURCE}" || "${d}" != "${STATE_SOURCE}" ]]; then
+            STATE_STATUS=needs-inspection
+            STATE_INSPECTION_KIND=abort-ambiguous
+            STATE_LAST_ERROR="TARGET ${t} assente, ma active/default non coincidono con SOURCE"
+            persist_state_or_die
+            return 1
+        fi
+        history_or_warn target-already-absent "target=${t}"
     fi
 
     a_after="$(active_snapshot)"; d_after="$(default_snapshot)"
@@ -1282,19 +1295,15 @@ abort_target_safe() {
         return 1
     fi
 
-    # Cleanup boot entries only AFTER the TARGET is proven gone.  Data recovery
-    # is already complete here, so stale boot-entry cleanup is best-effort and
-    # must not create a recovery dead-end.
-    local cleanup_detail=ok
+    # Boot cleanup is permitted only after TARGET absence is proved.
     if ! remove_target_boot_entries "${t}"; then
         cleanup_detail=failed
-        warn "TARGET ${t} abortita correttamente; cleanup boot incompleto (best-effort)."
+        warn "TARGET ${t} assente; cleanup boot incompleto (best-effort)."
     fi
-
     STATE_STATUS=aborted
     STATE_INSPECTION_KIND=
     if [[ "${cleanup_detail}" == failed ]]; then
-        STATE_LAST_ERROR="TARGET ${t} abortita; cleanup boot incompleto, SOURCE intatta"
+        STATE_LAST_ERROR="TARGET ${t} assente; cleanup boot incompleto, SOURCE intatta"
     else
         STATE_LAST_ERROR=
     fi
