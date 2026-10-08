@@ -102,7 +102,6 @@
       "libz1-x86-64-v3",
       "libzstd1-x86-64-v3",
       "myrlyn",
-      "myslowroll-workstation",
       "nano",
       "nss-mdns",
       "ntfs-3g",

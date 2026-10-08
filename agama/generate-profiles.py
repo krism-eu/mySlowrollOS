@@ -51,16 +51,16 @@ def generate(revision):
     if missing := set(core_requires[:halfway]) - set(persistent):
         raise ValueError("protected packages missing from persistent manifest: "
                          + ", ".join(sorted(missing)))
-    # Agama must install the metapackage for persistent requirements to matter
-    # on later RPM upgrades, not merely install individual packages today.
-    workstation = "myslowroll-workstation"
-    if workstation in persistent or workstation in install_only:
-        raise ValueError("workstation metapackage must be specified only here")
+    # Install the workstation package list directly. The optional
+    # myslowroll-workstation RPM is not published in the OBS repository.
+    # Do not introduce an unresolvable dependency during Agama installation.
+    if "myslowroll-workstation" in persistent or "myslowroll-workstation" in install_only:
+        raise ValueError("workstation metapackage is not part of the installer")
 
     profile = json.loads((ROOT / "agama/profile-policy.json").read_text())
     if any(key in profile for key in ("storage", "user", "root")):
         raise ValueError("storage and authentication must remain interactive")
-    profile["software"]["packages"] = sorted(persistent + install_only + [workstation])
+    profile["software"]["packages"] = sorted(persistent + install_only)
     entries = list(profile["files"])
     for scripts in profile["scripts"].values():
         entries.extend(scripts)

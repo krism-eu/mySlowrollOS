@@ -3,19 +3,33 @@ name: atomic-update 5.7 checks
 on:
   push:
     branches:
+      - main
       - work/atomic-update-5.7
     paths:
       - 'atomic-update/**'
+      - 'agama/**'
+      - 'core/**'
+      - 'obs/criscore1/**'
+      - 'myslowroll-workstation/**'
       - '.github/workflows/atomic-update-57-check.yml'
   pull_request:
     paths:
       - 'atomic-update/**'
+      - 'agama/**'
+      - 'core/**'
+      - 'obs/criscore1/**'
+      - 'myslowroll-workstation/**'
+      - '.github/workflows/atomic-update-57-check.yml'
 
 jobs:
   syntax:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check generated core and Agama profiles
+        run: |
+          python3 core/generate-criscore-spec.py --check
+          python3 agama/generate-profiles.py --check
       - name: Bash syntax
         run: bash -n atomic-update/atomic-update-5.7.1.sh
       - name: Mocked recovery regression tests
