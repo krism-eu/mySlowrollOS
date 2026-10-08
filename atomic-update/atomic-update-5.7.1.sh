@@ -1316,6 +1316,36 @@ precommit_target_valid() {
     return 0
 }
 
+verified_target_evidence() {
+    # A staged/default TARGET is adoptable only if the prior verified
+    # manifest is intact and the TARGET still matches it exactly.
+    local t="$1" owned observed p rc
+    [[ "${t}" =~ ^[0-9]+$ && "${STATE_PLAN_HASH}" =~ ^[0-9a-f]{64}$ ]] || return 1
+    [[ "${STATE_RPMDB_POST_HASH}" =~ ^[0-9a-f]{64}$ ]] || return 1
+    [[ -s "${RPMDB_POST_MANIFEST}" && -s "${RPMDB_EXPECTED_MANIFEST}" ]] || return 1
+    [[ "$(sha256sum "${RPMDB_POST_MANIFEST}" | awk '{print $1}')" == "${STATE_RPMDB_POST_HASH}" ]] || return 1
+    cmp -s -- "${RPMDB_EXPECTED_MANIFEST}" "${RPMDB_POST_MANIFEST}" || return 1
+    snapshot_exists "${t}" && snapshot_is_rw "${t}" || return 1
+    [[ "$(snapshot_os_id "${t}")" == "${REQUIRED_OS_ID}" ]] || return 1
+    owned="$(resolve_owned_target)" || return 1
+    [[ "${owned}" == "${t}" ]] || return 1
+
+    observed="$(mktemp "${TX_CACHE_DIR}/.recover-rpm.XXXXXX")" || return 1
+    if [[ "$(active_snapshot)" == "${t}" ]]; then
+        for p in "${CRITICAL_PKGS[@]}"; do
+            rpm --quiet -q "${p}" || { rm -f -- "${observed}"; return 1; }
+        done
+        write_rpm_manifest_host "${observed}" || { rm -f -- "${observed}"; return 1; }
+    else
+        verify_target_packages "${t}" || { rm -f -- "${observed}"; return 1; }
+        write_target_manifest "${t}" "${observed}" || { rm -f -- "${observed}"; return 1; }
+    fi
+    rc=0
+    cmp -s -- "${RPMDB_POST_MANIFEST}" "${observed}" || rc=1
+    rm -f -- "${observed}"
+    (( rc == 0 ))
+}
+
 commit_target() {
     local t="$1"
     local rc
@@ -1638,7 +1668,10 @@ recover() {
             if [[ "${d}" == "${STATE_SOURCE}" && "${a}" != "${STATE_TARGET}" ]]; then
                 abort_target_safe "${STATE_TARGET}" || die 'commit non avvenuto ma abort TARGET non riuscito.'
                 log 'Commit non avvenuto; TARGET abortita.'
-            elif [[ "${d}" == "${STATE_TARGET}" ]]                 && snapshot_is_rw "${STATE_TARGET}"                 && snapshot_is_bootable "${STATE_SOURCE}"                 && snapshot_is_bootable "${STATE_TARGET}"; then
+            elif [[ "${d}" == "${STATE_TARGET}" ]] \
+                && snapshot_is_bootable "${STATE_SOURCE}" \
+                && snapshot_is_bootable "${STATE_TARGET}" \
+                && verified_target_evidence "${STATE_TARGET}"; then
                 STATE_STATUS=pending-reboot
                 STATE_LAST_ERROR=
                 persist_state_or_die
@@ -1699,7 +1732,8 @@ recover() {
                         && snapshot_exists "${STATE_TARGET}" \
                         && snapshot_is_rw "${STATE_TARGET}" \
                         && snapshot_is_bootable "${STATE_SOURCE}" \
-                        && snapshot_is_bootable "${STATE_TARGET}"; then
+                        && snapshot_is_bootable "${STATE_TARGET}" \
+                        && verified_target_evidence "${STATE_TARGET}"; then
                         STATE_STATUS=pending-reboot
                         STATE_INSPECTION_KIND=
                         STATE_LAST_ERROR=
@@ -1710,7 +1744,7 @@ recover() {
                     fi
                     ;;
 
-                rollback-ambiguous|legacy-rollback-ambiguous)
+                rollback-ambiguous)
                     # Same boot + active==default + no TARGET means snapper did
                     # not stage a rollback. Archive the interrupted intent.
                     if [[ "${boot}" == "${STATE_BOOT_ID_BEFORE}" \
@@ -1853,17 +1887,22 @@ recover_adopt_target() {
     preflight recovery >/dev/null
     load_state
     [[ "${STATE_STATUS}" == needs-inspection ]] || die 'adopt-target ammesso solo da needs-inspection.'
+    case "${STATE_INSPECTION_KIND}" in
+        close-ambiguous|close-postcondition) ;;
+        *) die 'adopt-target richiede una TARGET gia verificata e una close ambigua.' ;;
+    esac
     [[ "${STATE_TARGET}" == "${t}" ]] || die 'snapshot richiesta diversa dalla TARGET registrata.'
     [[ "$(default_snapshot)" == "${t}" ]] || die 'TARGET non e la snapshot default.'
-    snapshot_exists "${t}" && snapshot_is_rw "${t}" || die 'TARGET assente o non RW.'
     snapshot_is_bootable "${STATE_SOURCE}" && snapshot_is_bootable "${t}" ||
         die 'SOURCE/TARGET non entrambe bootable.'
+    verified_target_evidence "${t}" ||
+        die 'non verificabili proprieta, provenienza o manifest RPM della TARGET: adozione vietata.'
     STATE_STATUS=pending-reboot
     STATE_INSPECTION_KIND=
     STATE_LAST_ERROR=
     persist_state_or_die
     history_or_warn adopted-target "target=${t}"
-    log 'TARGET adottata come risultato staged; completare reboot/confirm secondo boot_id.'
+    log 'TARGET verificata e adottata; completare reboot/confirm.'
 }
 
 recover_clear_opening() {
