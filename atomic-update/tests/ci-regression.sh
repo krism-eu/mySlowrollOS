@@ -36,10 +36,10 @@ snapper() {
     printf '20,"mySlowrollOS atomic-update %s"\n' "${STATE_TXID}"
     printf '21,"not ours"\n'
 }
-out="$(recover_clear_opening 2>&1 || true)"
+out="$(recover_clear_opening 2>&1)" || true
 [[ "${out}" != *UNSAFE_PERSIST* ]] || { echo "FAIL: clear-opening ignored owned TARGET" >&2; exit 1; }
 snapper() { return 9; }
-out="$(recover_clear_opening 2>&1 || true)"
+out="$(recover_clear_opening 2>&1)" || true
 [[ "${out}" != *UNSAFE_PERSIST* ]] || { echo "FAIL: clear-opening ignored Snapper failure" >&2; exit 1; }
 
 df() { return 9; }
@@ -94,4 +94,13 @@ if abort_target_safe 30; then
     echo 'FAIL: missing TARGET accepted with changed default' >&2; exit 1
 fi
 
+# An adoption after failed sync before tukit close must never be accepted.
+STATE_STATUS=needs-inspection
+STATE_INSPECTION_KIND=pre-close-sync-failed
+STATE_TARGET=20
+out="$(recover_adopt_target 20 2>&1)" || true
+[[ "${out}" == *'close ambigua'* ]] || {
+    echo 'FAIL: pre-close sync failure was eligible for typed TARGET adoption' >&2
+    exit 1
+}
 printf 'atomic-update mocked recovery regressions: PASS\n'
