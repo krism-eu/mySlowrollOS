@@ -15,9 +15,11 @@ An existing UI storage proposal can still exist: inspect it before installation.
 Select only the disposable VM disk manually, choose the intended EFI/Btrfs/home
 layout without disk swap, and create the user/credentials in the UI.
 Complete installation in the UI and reboot into the installed VM.
-The profile sets bootloader.updateNvram=false to preserve firmware entries and
-boot order. Select the installed system with the existing boot manager or UEFI
-firmware menu when necessary; do not assume Agama adds a firmware entry.
+The profile sets bootloader.updateNvram=true to let Agama register the
+installed system's UEFI boot entry after manual storage selection. In the VM,
+check that the chosen EFI partition has the GPT ESP type and that the entry is
+created; firmware boot order may change. Do not assume the profile selects or
+corrects the EFI partition automatically.
 
 ## Installed-system acceptance
 
