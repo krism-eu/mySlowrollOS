@@ -61,3 +61,21 @@ mount before treating it as safe. Inspect first-boot errors with
 `journalctl -b -u agama-scripts.service` and repeat key runtime checks after another
 reboot. Record outputs and installed RPM versions. A clean profile probe alone
 does not satisfy this acceptance test.
+
+## Bootloader parameter regression
+
+Boot the Agama ISO using its **normal** entry. On x86_64, YaST may copy
+failsafe parameters from the live ISO after Agama's post/chroot scripts.
+The installer profile adds `security=apparmor` in the normal case.
+The firstboot script sanitizes `/etc/kernel/cmdline` and invokes the
+installed system's `sdbootutil update-all-entries` only when necessary.
+It does not edit the EFI filesystem directly or select/change partitions.
+
+After the first normal boot check `/proc/cmdline`, `/etc/kernel/cmdline`,
+`systemctl is-active sddm` and `sudo aa-status`. No standalone `3`,
+`nomodeset`, or empty `security=` may remain in the saved configuration.
+Booting the installer ISO in failsafe may leave the **first** installed boot
+in text mode; the firstboot script repairs subsequent boot entries, and
+the next boot is graphical. It does not force Wayland under `nomodeset`.
+
+Confirm YaST launches from the Plasma menu with `xauth` installed.

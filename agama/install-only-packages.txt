@@ -12,3 +12,4 @@ yast2-services-manager
 yast2-snapper
 yast2-storage-ng
 yast2-sysconfig
+xauth

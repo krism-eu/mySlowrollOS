@@ -166,6 +166,7 @@
       "wget",
       "wireplumber",
       "wpa_supplicant",
+      "xauth",
       "xdg-desktop-portal",
       "xdg-desktop-portal-kde6",
       "xdg-user-dirs",
