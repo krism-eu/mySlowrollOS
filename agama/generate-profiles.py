@@ -2,10 +2,9 @@
 """Generate self-contained Agama profiles from the RPM manifest and policy.
 
 JSON output is valid Jsonnet and needs no remote imports.
-The test profile is byte-identical to production.
+Only the final installation profile is generated.
 """
 import argparse
-import copy
 import json
 import pathlib
 import re
@@ -71,12 +70,7 @@ def generate(revision):
         if not (ROOT / source).is_file():
             raise ValueError(f"missing asset: {source}")
         entry["url"] = BASE + revision + "/" + source
-    software = {"product": profile["product"], "software": profile["software"]}
-    return {
-        "agama/profile-final.jsonnet": profile,
-        "agama/tests/02-full-vm-validation.jsonnet": copy.deepcopy(profile),
-        "agama/profile-software-final.json": software,
-    }
+    return {"agama/profile-final.jsonnet": profile}
 
 
 def main():
@@ -100,7 +94,7 @@ def main():
         if stale:
             print("Out-of-date generated files: " + ", ".join(stale), file=sys.stderr)
             return 1
-        print("PASS: profiles match manifest/policy; final and test02 are identical")
+        print("PASS: final profile matches manifest/policy and pinned revision")
     else:
         PIN.write_text(revision + "\n")
         print(f"Generated profiles pinned to {revision}")

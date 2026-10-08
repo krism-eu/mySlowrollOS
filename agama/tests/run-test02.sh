@@ -18,19 +18,26 @@ agama config validate "$OUT"
 echo 'VALIDATE=PASS'
 
 echo '=== FETCH AND CHECK THE EXACT PINNED SCRIPTS ==='
-python3 - "$OUT" "$REPORT_DIR" <<'PY'
+python3 - "$OUT" "$REPORT_DIR" "$ROOT" <<'PY'
 import json, pathlib, re, subprocess, sys, urllib.request
 profile = json.load(open(sys.argv[1]))
 directory = pathlib.Path(sys.argv[2])
+root = pathlib.Path(sys.argv[3])
 for group, scripts in profile.get('scripts', {}).items():
     for index, script in enumerate(scripts):
         url = script['url']
-        if not re.fullmatch(r'https://raw\.githubusercontent\.com/krism-eu/mySlowrollOS/[0-9a-f]{40}/agama/[\w-]+\.sh', url):
+        match = re.fullmatch(
+            r'https://raw\.githubusercontent\.com/krism-eu/mySlowrollOS/[0-9a-f]{40}/(agama/[\w-]+\.sh)',
+            url)
+        if not match:
             raise SystemExit('Script URL is not pinned: ' + url)
         with urllib.request.urlopen(url, timeout=30) as response:
             content = response.read()
         path = directory / f'{group}-{index}.sh'
         path.write_bytes(content)
+        local = root / match.group(1)
+        subprocess.run(['cmp', str(path), str(local)], check=True)
+        print('PINNED_MATCH=PASS', url)
         subprocess.run(['bash', '-n', str(path)], check=True)
         print('BASH_N=PASS', url)
 PY

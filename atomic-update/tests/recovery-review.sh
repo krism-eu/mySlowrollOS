@@ -168,6 +168,15 @@ separate_pools() {
 
 epoch_normalization() {
     fixture="$(mktemp -d "${test_root}/manifest.XXXXXX")"
+    # The real updater runs as root and uses /run. Redirect only this test's
+    # temporary hash file to the writable fixture, without bypassing hashing.
+    mktemp() {
+        if [[ "${1:-}" == /run/myslowroll-rpmdb.XXXXXX ]]; then
+            command mktemp "${test_root}/rpmdb.XXXXXX"
+        else
+            command mktemp "$@"
+        fi
+    }
     rpm() { printf '%s\n' 'zero|0:1-1|x86_64' 'absent|1-1|noarch' 'nonzero|2:1-1|x86_64' 'gpg-pubkey|1-1|noarch'; }
     tukit_call() { shift; "$@"; }
     write_rpm_manifest_host "${fixture}/host" || fail 'host manifest failed'

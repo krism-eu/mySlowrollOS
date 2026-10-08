@@ -167,9 +167,9 @@ Requires:       zstd
 Requires:       zypper
 
 %description
-Meta package representing the explicit mySlowrollOS workstation package set.
-KIWI and Agama consume this package so the workstation manifest has a single
-RPM-level source of truth.
+Optional metapackage describing the normal mySlowrollOS workstation
+requirements. Agama installs these requirements individually from the
+manifest; the metapackage itself is not published or installed by Agama.
 
 %prep
 
