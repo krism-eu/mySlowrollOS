@@ -42,6 +42,7 @@ jobs:
           grep -Fxq 'rw quiet systemd.show_status=1 security=apparmor' myslowroll-policy/kernel-cmdline
           grep -Fxq 'xauth' agama/install-only-packages.txt
           grep -Fq '"extraKernelParams": "security=apparmor systemd.show_status=1"' agama/profile-policy.json
+          grep -Fq '"updateNvram": false' agama/profile-policy.json
           ! grep -Eq '^Requires:[[:space:]]+xauth([[:space:]]|$)' myslowroll-workstation/myslowroll-workstation.spec obs/criscore1/criscore1.spec
       - name: Mocked recovery regression tests
         run: bash atomic-update/tests/ci-regression.sh
