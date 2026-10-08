@@ -272,7 +272,7 @@
   },
   "bootloader": {
     "timeout": 3,
-    "updateNvram": true,
+    "updateNvram": false,
     "extraKernelParams": "security=apparmor systemd.show_status=1"
   },
   "l10n": {
