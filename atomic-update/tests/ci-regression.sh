@@ -74,4 +74,24 @@ write_rpm_manifest_host() { printf 'different|2-1|x86_64\n' >"$1"; }
 if verified_target_evidence 20; then
     echo "FAIL: differing TARGET RPM manifest accepted" >&2; exit 1
 fi
+# An already-absent TARGET can be archived without a second destructive abort,
+# but only while SOURCE remains the active and default snapshot.
+snapshot_exists() { return 1; }
+active_snapshot() { printf '10\n'; }
+default_snapshot() { printf '10\n'; }
+remove_target_boot_entries() { :; }
+persist_state_or_die() { :; }
+history_or_warn() { :; }
+STATE_STATUS=needs-inspection
+STATE_SOURCE=10
+STATE_TARGET=30
+abort_target_safe 30 || { echo 'FAIL: safe post-abort recovery rejected' >&2; exit 1; }
+[[ "${STATE_STATUS}" == aborted ]] || { echo 'FAIL: missing TARGET not archived' >&2; exit 1; }
+
+STATE_STATUS=needs-inspection
+default_snapshot() { printf '11\n'; }
+if abort_target_safe 30; then
+    echo 'FAIL: missing TARGET accepted with changed default' >&2; exit 1
+fi
+
 printf 'atomic-update mocked recovery regressions: PASS\n'
