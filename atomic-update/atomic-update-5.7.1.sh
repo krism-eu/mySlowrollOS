@@ -107,8 +107,8 @@ Comandi:
   status                      stato corrente
   prune [GIORNI]              elimina vecchi cache/log v5, mai snapshot
 
-Stati bloccanti come target-open-ambiguous, aborting e rollback-unverified
-richiedono recover/ispezione; non rilanciare upgrade alla cieca.
+Gli esiti ambigui convergono in needs-inspection: recover applica solo
+classificazioni dimostrabili; altrimenti richiede una recovery tipizzata.
 EOF_USAGE
 }
 
@@ -802,7 +802,9 @@ make_plan() {
 
     a="$(active_snapshot)"; d="$(default_snapshot)"
     [[ "${a}" == "${d}" ]] || die 'active/default cambiati durante preflight.'
-    if [[ "${STATE_STATUS}" == planned ]]; then mark_aborted 'piano precedente sostituito'; fi
+    if [[ "${STATE_STATUS}" == planned || "${STATE_STATUS}" == revalidated ]]; then
+        mark_aborted 'piano precedente sostituito'
+    fi
 
     reset_state
     STATE_TXID="$(new_txid)"
@@ -936,20 +938,24 @@ revalidate_plan() {
 
 
 prepare_plan_for_upgrade() {
+    local source_now
     preflight update
     check_state_for_new
     if [[ "${STATE_STATUS}" == revalidated ]]; then
-        # Crash between the durable REVALIDATED barrier and tukit open: no
-        # TARGET exists yet.  Force a fresh revalidation before continuing.
+        # Crash between REVALIDATED and tukit open: no TARGET exists yet.
+        # Return to PREPARED. The single full revalidation is performed only
+        # after the user explicitly confirms the upgrade.
         STATE_STATUS=planned
+        STATE_LAST_ERROR='REVALIDATED interrotto prima di tukit open; richiesta nuova revalidation'
         persist_state_or_die
     fi
     if [[ "${STATE_STATUS}" == planned ]]; then
-        revalidate_plan && {
-            log "Riutilizzo piano PREPARED ${STATE_TXID}."
+        source_now="$(source_fingerprint || true)"
+        if planned_is_fresh             && [[ "${source_now}" =~ ^[0-9a-f]{64}$ ]]             && [[ "${source_now}" == "${STATE_SOURCE_FINGERPRINT}" ]]; then
+            log "Riutilizzo piano PREPARED ${STATE_TXID}; REVALIDATED verra eseguito dopo la conferma."
             return 0
-        }
-        mark_aborted 'piano esistente non piu riutilizzabile'
+        fi
+        mark_aborted 'piano PREPARED non piu riutilizzabile'
     fi
     make_plan 1
     load_state
@@ -1316,22 +1322,25 @@ abort_target_safe() {
         return 1
     fi
 
-    # Cleanup boot entries only AFTER the TARGET is proven gone.  A cleanup
-    # failure cannot destroy the SOURCE; it leaves a typed inspection state.
+    # Cleanup boot entries only AFTER the TARGET is proven gone.  Data recovery
+    # is already complete here, so stale boot-entry cleanup is best-effort and
+    # must not create a recovery dead-end.
+    local cleanup_detail=ok
     if ! remove_target_boot_entries "${t}"; then
-        STATE_STATUS=needs-inspection
-        STATE_INSPECTION_KIND=boot-cleanup-failed
-        STATE_LAST_ERROR="TARGET ${t} abortita ma cleanup boot incompleto"
-        persist_state_or_die
-        return 1
+        cleanup_detail=failed
+        warn "TARGET ${t} abortita correttamente; cleanup boot incompleto (best-effort)."
     fi
 
     STATE_STATUS=aborted
     STATE_INSPECTION_KIND=
     STATE_FINISHED="$(date -u +%FT%TZ)"
-    STATE_LAST_ERROR=
+    if [[ "${cleanup_detail}" == failed ]]; then
+        STATE_LAST_ERROR="TARGET ${t} abortita; cleanup boot incompleto, SOURCE intatta"
+    else
+        STATE_LAST_ERROR=
+    fi
     persist_state_or_die
-    history_or_warn target-aborted "target=${t}"
+    history_or_warn target-aborted "target=${t} boot-cleanup=${cleanup_detail}"
 }
 
 precommit_target_valid() {
@@ -1600,14 +1609,14 @@ rollback() {
 
     # Consistency gate: refuse to overwrite an active or unresolved transaction
     case "${STATE_STATUS}" in
-        ''|confirmed|aborted|rolled-back|planned) ;;
+        ''|confirmed|aborted|rolled-back|planned|revalidated) ;;
         *)
             die "Impossibile eseguire rollback: transazione ${STATE_TXID:-?} attiva in stato '${STATE_STATUS}'. Eseguire prima '${PROG} recover'."
             ;;
     esac
 
     source="${requested:-${STATE_SOURCE}}"; [[ "${source}" =~ ^[0-9]+$ ]] || die 'specificare una snapshot numerica.'
-    if [[ "${STATE_STATUS}" == planned ]]; then
+    if [[ "${STATE_STATUS}" == planned || "${STATE_STATUS}" == revalidated ]]; then
         warn "Esiste un piano pendente (${STATE_TXID}); confermando il rollback verra invalidato."
     fi
 
@@ -1616,7 +1625,7 @@ rollback() {
     [[ "${answer}" == "ROLLBACK ${source} E RIAVVIA" ]] || die 'rollback annullato.'
 
     # State mutation happens strictly after user confirmation
-    if [[ "${STATE_STATUS}" == planned ]]; then
+    if [[ "${STATE_STATUS}" == planned || "${STATE_STATUS}" == revalidated ]]; then
         mark_aborted 'piano invalidato da rollback manuale'
     fi
 
@@ -1718,24 +1727,69 @@ recover() {
             fi
             ;;
         needs-inspection)
-            if [[ "${STATE_INSPECTION_KIND}" == rollback-ambiguous || "${STATE_INSPECTION_KIND}" == legacy-rollback-ambiguous ]]; then
-                if [[ "${boot}" == "${STATE_BOOT_ID_BEFORE}" \
-                    && "${d}" =~ ^[0-9]+$ \
-                    && "${d}" != "${a}" ]] \
-                    && snapshot_exists "${d}" \
-                    && snapshot_is_rw "${d}" \
-                    && [[ "$(snapshot_os_id "${d}")" == "${REQUIRED_OS_ID}" ]] \
-                    && ensure_snapshot_bootable "${d}"; then
-                    STATE_TARGET="${d}"
-                    STATE_STATUS=rollback-pending
-                    STATE_INSPECTION_KIND=
-                    STATE_LAST_ERROR=
-                    persist_state_or_die
-                    history_or_warn rollback-pending "source=${STATE_SOURCE} target=${STATE_TARGET} recovered=1"
-                    log "Rollback classificato: TARGET ${STATE_TARGET}; reboot ancora da fare."
-                    return 0
-                fi
-            fi
+            case "${STATE_INSPECTION_KIND}" in
+                close-ambiguous|close-postcondition|pre-close-sync-failed)
+                    [[ "${STATE_TARGET}" =~ ^[0-9]+$ ]] ||
+                        die 'close ambiguo senza TARGET registrata.'
+
+                    if [[ "${d}" == "${STATE_SOURCE}" && "${a}" != "${STATE_TARGET}" ]]; then
+                        abort_target_safe "${STATE_TARGET}" ||
+                            die 'close non committed, ma abort TARGET non riuscito in modo verificabile.'
+                        log 'Close non committed: TARGET abortita, SOURCE invariata.'
+                        return 0
+                    fi
+
+                    if [[ "${d}" == "${STATE_TARGET}" ]] \
+                        && snapshot_exists "${STATE_TARGET}" \
+                        && snapshot_is_rw "${STATE_TARGET}" \
+                        && snapshot_is_bootable "${STATE_SOURCE}" \
+                        && snapshot_is_bootable "${STATE_TARGET}"; then
+                        STATE_STATUS=pending-reboot
+                        STATE_INSPECTION_KIND=
+                        STATE_LAST_ERROR=
+                        persist_state_or_die
+                        history_or_warn close-recovered "target=${STATE_TARGET}"
+                        log 'Close classificato automaticamente: TARGET staged/default; pending-reboot.'
+                        return 0
+                    fi
+                    ;;
+
+                rollback-ambiguous|legacy-rollback-ambiguous)
+                    # Same boot + active==default + no TARGET means snapper did
+                    # not stage a rollback. Archive the interrupted intent.
+                    if [[ "${boot}" == "${STATE_BOOT_ID_BEFORE}" \
+                        && "${d}" == "${a}" \
+                        && -z "${STATE_TARGET}" ]] \
+                        && ! pgrep -af '[s]napper.*rollback' >/dev/null 2>&1; then
+                        STATE_STATUS=aborted
+                        STATE_INSPECTION_KIND=
+                        STATE_FINISHED="$(date -u +%FT%TZ)"
+                        STATE_LAST_ERROR='rollback interrotto prima di creare/stagiare una TARGET; active/default invariati'
+                        persist_state_or_die
+                        history_or_warn rollback-aborted-no-default "source=${STATE_SOURCE}"
+                        log 'Rollback non staged: active/default invariati; intento archiviato come aborted.'
+                        return 0
+                    fi
+
+                    if [[ "${boot}" == "${STATE_BOOT_ID_BEFORE}" \
+                        && "${d}" =~ ^[0-9]+$ \
+                        && "${d}" != "${a}" ]] \
+                        && snapshot_exists "${d}" \
+                        && snapshot_is_rw "${d}" \
+                        && [[ "$(snapshot_os_id "${d}")" == "${REQUIRED_OS_ID}" ]] \
+                        && ensure_snapshot_bootable "${d}"; then
+                        STATE_TARGET="${d}"
+                        STATE_STATUS=rollback-pending
+                        STATE_INSPECTION_KIND=
+                        STATE_LAST_ERROR=
+                        persist_state_or_die
+                        history_or_warn rollback-pending "source=${STATE_SOURCE} target=${STATE_TARGET} recovered=1"
+                        log "Rollback classificato: TARGET ${STATE_TARGET}; reboot ancora da fare."
+                        return 0
+                    fi
+                    ;;
+            esac
+
             die "stato needs-inspection (${STATE_INSPECTION_KIND:-unknown}); usare '${PROG} recover inspect'."
             ;;
         confirmed|aborted|rolled-back)
