@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          source_file="$(find atomic-update -maxdepth 1 -type f -name 'atomic-update-*.sh' -printf '%f\\n')"
+          source_file="$(find atomic-update -maxdepth 1 -type f -name 'atomic-update-*.sh' -printf '%f\n')"
           test "$source_file" = 'atomic-update-5.7.1.sh'
           grep -Fq "readonly STATE_VERSION=1" atomic-update/atomic-update-5.7.1.sh
           grep -Fq "readonly STATE_DIR=/var/lib/myslowroll/atomic-update" atomic-update/atomic-update-5.7.1.sh
