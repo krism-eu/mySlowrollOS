@@ -58,19 +58,10 @@ grep -Fxq 'solver.dupAllowVendorChange = false' %{SOURCE6}
 grep -Fxq 'gpgcheck=1' %{SOURCE7}
 grep -Fxq 'repo_gpgcheck=1' %{SOURCE7}
 
-%post
-# These operations are idempotent and affect only service policy.
-if command -v systemctl >/dev/null 2>&1; then
-    systemctl set-default graphical.target >/dev/null 2>&1 || :
-    systemctl enable NetworkManager.service firewalld.service >/dev/null 2>&1 || :
-    systemctl disable NetworkManager-wait-online.service >/dev/null 2>&1 || :
-    systemctl disable smartd.service smartd_generate_opts.path >/dev/null 2>&1 || :
-    systemctl disable snapper-timeline.timer >/dev/null 2>&1 || :
-    systemctl disable sshd.service sshd.socket >/dev/null 2>&1 || :
-    systemctl disable display-manager-legacy.service >/dev/null 2>&1 || :
-    systemctl mask ModemManager.service >/dev/null 2>&1 || :
-fi
-ln -sfn /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service || :
+# No %post service actions: package upgrades must not reset administrators'
+# service choices or replace display-manager symlinks. The active Agama path
+# applies the initial systemd policy through the shipped preset and its
+# one-time post-chroot/first-boot scripts.
 
 %files
 %license %{_licensedir}/%{name}/LICENSE

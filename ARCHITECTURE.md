@@ -62,6 +62,10 @@ Disk swap remains a manual storage choice; the intended layout uses none.
 
 The post-chroot script selects native SDDM and graphical.target before reboot.
 The init script imports the OBS key and applies runtime service policy.
+The RPM policy spec deliberately contains no %post service actions, so later
+updates cannot re-enable disabled services or reset SDDM aliases. The preset
+records initial defaults; the Agama one-time scripts handle bootstrapping.
+A full first-boot VM check must validate the resulting service state.
 
 ## Historical material
 
