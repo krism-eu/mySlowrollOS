@@ -8,7 +8,9 @@ Thu Oct 08 2026 - krism
   - Normalize zero RPM epochs, require tukit --description and batch RPM queries.
   - Remove optional unfiltered payload verification; rename history helper.
   - Propagate XML canonicalization and Snapper inspection errors.
-  - Add 16 mocked regressions; real VM interruption/boot matrix remains pending.
+  - Fix unstaged rollback recovery across changed boot IDs without relaxing
+    same-boot validation for staged rollback adoption.
+  - Add 20 mocked regressions; real VM interruption/boot matrix remains pending.
 
 - 5.7.1: sole supported offline atomic-update engine (development candidate).
 - New independent state schema 1, with unversioned persistent state, cache,

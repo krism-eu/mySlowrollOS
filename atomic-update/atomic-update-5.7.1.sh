@@ -1784,8 +1784,9 @@ recover() {
                 rollback-recovery)
                     # SOURCE/TARGET still identify the failed update, not the
                     # new rollback snapshot. Never adopt either as its result.
-                    if [[ "${boot}" == "${STATE_BOOT_ID_BEFORE}" ]] \
-                        && [[ "${a}" == "${STATE_SOURCE}" || "${a}" == "${STATE_TARGET}" ]] \
+                    # Unstaged rollback can be reclassified across boot IDs;
+                    # SOURCE/TARGET observations and idle Snapper are decisive.
+                    if [[ "${a}" == "${STATE_SOURCE}" || "${a}" == "${STATE_TARGET}" ]] \
                         && ! pgrep -af '[s]napper.*rollback' >/dev/null 2>&1; then
                         if [[ "${d}" == "${STATE_SOURCE}" || "${d}" == "${STATE_TARGET}" ]]; then
                             if [[ "${a}" == "${STATE_SOURCE}" ]]; then
@@ -1798,7 +1799,9 @@ recover() {
                             log 'Rollback non staged; ripristinato il percorso di recovery con conferma.'
                             return 0
                         fi
-                        if [[ "${d}" =~ ^[0-9]+$ ]] \
+                        # Staged rollback adoption still requires the same boot.
+                        if [[ "${boot}" == "${STATE_BOOT_ID_BEFORE}" ]] \
+                            && [[ "${d}" =~ ^[0-9]+$ ]] \
                             && rollback_target_owned "${d}" \
                             && snapshot_exists "${d}" && snapshot_is_rw "${d}" \
                             && [[ "$(snapshot_os_id "${d}")" == "${REQUIRED_OS_ID}" ]] \

@@ -115,6 +115,60 @@ rollback_before_stage() {
     rollback 10 <<< 'ROLLBACK 10 E RIAVVIA' >/dev/null || fail 'retry with confirmation failed'
     assert_eq "$STATE_TARGET" 30
 }
+rollback_before_stage_reboot_source() {
+    rollback_fixture
+    mode=before-error
+    if ( rollback 10 <<< 'ROLLBACK 10 E RIAVVIA' ) >/dev/null 2>&1; then fail 'failed snapper accepted'; fi
+    load_state
+    assert_eq "$STATE_INSPECTION_KIND" rollback-recovery
+    # Simulate power loss and manual reboot on SOURCE.
+    current_boot_id() { printf '33333333-3333-4333-8333-333333333333\n'; }
+    recover >/dev/null || fail 'unstaged SOURCE rollback stranded across boot IDs'
+    assert_eq "$STATE_STATUS" needs-inspection
+    assert_eq "$STATE_INSPECTION_KIND" boot-mismatch
+    assert_eq "$STATE_TARGET" 20
+    mode=success
+    rollback 10 <<< 'ROLLBACK 10 E RIAVVIA' >/dev/null || fail 'cross-boot SOURCE retry rejected'
+    assert_eq "$STATE_STATUS" rollback-pending
+    assert_eq "$STATE_TARGET" 30
+}
+rollback_before_stage_reboot_target() {
+    rollback_fixture
+    STATE_INSPECTION_KIND=target-active-or-default
+    printf '20\n' >"${fixture}/active"
+    mode=before-error
+    if ( rollback 10 <<< 'ROLLBACK 10 E RIAVVIA' ) >/dev/null 2>&1; then fail 'failed snapper accepted'; fi
+    current_boot_id() { printf '33333333-3333-4333-8333-333333333333\n'; }
+    recover >/dev/null || fail 'unstaged active-TARGET rollback stranded across boot IDs'
+    assert_eq "$STATE_STATUS" needs-inspection
+    assert_eq "$STATE_INSPECTION_KIND" target-active-or-default
+    assert_eq "$STATE_TARGET" 20
+    mode=success
+    rollback 10 <<< 'ROLLBACK 10 E RIAVVIA' >/dev/null || fail 'cross-boot active-TARGET retry rejected'
+    assert_eq "$STATE_STATUS" rollback-pending
+    assert_eq "$STATE_TARGET" 30
+}
+rollback_unstaged_snapper_running() {
+    rollback_fixture
+    mode=before-error
+    if ( rollback 10 <<< 'ROLLBACK 10 E RIAVVIA' ) >/dev/null 2>&1; then fail 'failed snapper accepted'; fi
+    current_boot_id() { printf '33333333-3333-4333-8333-333333333333\n'; }
+    pgrep() { return 0; }
+    if ( recover ) >/dev/null 2>&1; then fail 'running Snapper rollback ignored'; fi
+    load_state
+    assert_eq "$STATE_INSPECTION_KIND" rollback-recovery
+    assert_eq "$STATE_TARGET" 20
+}
+rollback_staged_reboot_guard() {
+    rollback_fixture
+    mode=after-error
+    if ( rollback 10 <<< 'ROLLBACK 10 E RIAVVIA' ) >/dev/null 2>&1; then fail 'ambiguous snapper accepted'; fi
+    current_boot_id() { printf '33333333-3333-4333-8333-333333333333\n'; }
+    if ( recover ) >/dev/null 2>&1; then fail 'staged rollback adopted after different boot'; fi
+    load_state
+    assert_eq "$STATE_INSPECTION_KIND" rollback-recovery
+    assert_eq "$STATE_TARGET" 20
+}
 rollback_after_stage() {
     rollback_fixture
     mode=after-error
@@ -236,6 +290,10 @@ run 'explicit rollback from active TARGET' rollback_active_target
 run 'cancel leaves state/default unchanged' rollback_cancel
 run 'unrelated recovery kinds and snapshots refused' rollback_guards
 run 'interruption before default change permits confirmed retry' rollback_before_stage
+run 'new boot on SOURCE restores typed rollback and retry' rollback_before_stage_reboot_source
+run 'new boot on active TARGET restores typed rollback and retry' rollback_before_stage_reboot_target
+run 'running Snapper blocks cross-boot reclassification' rollback_unstaged_snapper_running
+run 'new boot does not adopt staged rollback' rollback_staged_reboot_guard
 run 'interruption after default change recovers staged rollback' rollback_after_stage
 run 'foreign default not adopted after interrupted rollback' rollback_foreign_default
 run 'ordinary rollback retains active/default equality' ordinary_rollback_stays_strict
