@@ -1,4 +1,12 @@
 -------------------------------------------------------------------
+Thu Oct 08 2026 - mySlowrollOS
+
+- Add nano, less, rsync, openssh-clients, wget, kscreen6, backintime-qt.
+- Include standard AppArmor profiles and abstractions.
+- Remove gutenprint as an explicit persistent requirement.
+- Keep YaST modules Agama-install-only, not hard RPM requirements.
+
+-------------------------------------------------------------------
 Mon Sep 28 2026 - krism
 
 - Initial package.

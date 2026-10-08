@@ -10,6 +10,7 @@ import json
 import pathlib
 import re
 import sys
+import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BASE = "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/"
@@ -19,6 +20,9 @@ PIN = ROOT / "agama/assets-revision"
 def generate(revision):
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("assets revision must be a full 40-character commit SHA")
+    # Reject stale or manually edited protected anchor specs.
+    subprocess.run([sys.executable, str(ROOT / "core/generate-criscore-spec.py"),
+                    "--check"], check=True)
     manifest = (ROOT / "myslowroll-workstation/myslowroll-workstation.spec").read_text()
     persistent = re.findall(r"^Requires:\s+(\S+)\s*$", manifest, re.MULTILINE)
     if not persistent or len(persistent) != len(set(persistent)):
@@ -47,11 +51,16 @@ def generate(revision):
     if missing := set(core_requires[:halfway]) - set(persistent):
         raise ValueError("protected packages missing from persistent manifest: "
                          + ", ".join(sorted(missing)))
+    # Agama must install the metapackage for persistent requirements to matter
+    # on later RPM upgrades, not merely install individual packages today.
+    workstation = "myslowroll-workstation"
+    if workstation in persistent or workstation in install_only:
+        raise ValueError("workstation metapackage must be specified only here")
 
     profile = json.loads((ROOT / "agama/profile-policy.json").read_text())
     if any(key in profile for key in ("storage", "user", "root")):
         raise ValueError("storage and authentication must remain interactive")
-    profile["software"]["packages"] = sorted(persistent + install_only)
+    profile["software"]["packages"] = sorted(persistent + install_only + [workstation])
     entries = list(profile["files"])
     for scripts in profile["scripts"].values():
         entries.extend(scripts)

@@ -13,11 +13,14 @@ Requires:       NetworkManager
 Requires:       aaa_base
 Requires:       alsa-ucm-conf
 Requires:       alsa-utils
+Requires:       apparmor-abstractions
 Requires:       apparmor-parser
+Requires:       apparmor-profiles
 Requires:       apparmor-utils
-Requires:       atomic-update
 Requires:       ark
+Requires:       atomic-update
 Requires:       avahi
+Requires:       backintime-qt
 Requires:       bash
 Requires:       bash-completion
 Requires:       bluedevil6
@@ -54,7 +57,6 @@ Requires:       glibc
 Requires:       glibc-locale
 Requires:       google-noto-coloremoji-fonts
 Requires:       google-noto-sans-fonts
-Requires:       gutenprint
 Requires:       iproute2
 Requires:       iputils
 Requires:       kate
@@ -71,9 +73,11 @@ Requires:       kio-admin
 Requires:       kio-extras
 Requires:       kio-fuse
 Requires:       konsole
+Requires:       kscreen6
 Requires:       kscreenlocker6
 Requires:       kwalletmanager
 Requires:       kwin6
+Requires:       less
 Requires:       liberation-fonts
 Requires:       libgcrypt20-x86-64-v3
 Requires:       libhogweed6-x86-64-v3
@@ -87,6 +91,7 @@ Requires:       libxml2-tools
 Requires:       libz1-x86-64-v3
 Requires:       libzstd1-x86-64-v3
 Requires:       myrlyn
+Requires:       nano
 Requires:       nss-mdns
 Requires:       ntfs-3g
 Requires:       ntfsprogs
@@ -95,6 +100,7 @@ Requires:       okular
 Requires:       openSUSE-build-key
 Requires:       openSUSE-release
 Requires:       openSUSE-repos-Slowroll
+Requires:       openssh-clients
 Requires:       pam
 Requires:       pam-config
 Requires:       pam_kwallet6
@@ -119,6 +125,7 @@ Requires:       power-profiles-daemon
 Requires:       powerdevil6
 Requires:       procps
 Requires:       rpm
+Requires:       rsync
 Requires:       sdbootutil
 Requires:       sdbootutil-kernel-install
 Requires:       sdbootutil-snapper
@@ -145,6 +152,7 @@ Requires:       unzip
 Requires:       upower
 Requires:       usbutils
 Requires:       util-linux
+Requires:       wget
 Requires:       wireplumber
 Requires:       wpa_supplicant
 Requires:       xdg-desktop-portal

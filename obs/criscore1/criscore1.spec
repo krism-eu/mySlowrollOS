@@ -1,7 +1,6 @@
-# Protected RPM dependency anchors (both Requires blocks must stay identical).
-# The historical generator/seed named in previous versions are not in this
-# repository; do not claim this spec is currently reproducibly generated.
-# Keep the YaST GUI modules in the Agama install-only list, never in the anchors.
+# GENERATED FILE - DO NOT EDIT BY HAND.
+# Source: core/protected.seed + obs/criscore1/criscore1.spec.in
+# Regenerate: python3 core/generate-criscore-spec.py
 
 Name:           criscore1
 Version:        0.2
@@ -19,7 +18,9 @@ Requires:       NetworkManager
 Requires:       aaa_base
 Requires:       alsa-ucm-conf
 Requires:       alsa-utils
+Requires:       apparmor-abstractions
 Requires:       apparmor-parser
+Requires:       apparmor-profiles
 Requires:       apparmor-utils
 Requires:       bash
 Requires:       bash-completion
@@ -30,7 +31,6 @@ Requires:       breeze6
 Requires:       breeze6-cursors
 Requires:       breeze6-decoration
 Requires:       breeze6-style
-Requires:       btrfsmaintenance
 Requires:       btrfsprogs
 Requires:       ca-certificates-mozilla
 Requires:       cifs-utils
@@ -54,7 +54,6 @@ Requires:       kernel-default
 Requires:       kernel-firmware-amdgpu
 Requires:       kernel-firmware-mediatek
 Requires:       kernel-firmware-realtek
-Requires:       kf6-baloo-file
 Requires:       kglobalacceld6
 Requires:       kio-admin
 Requires:       kio-extras
@@ -64,6 +63,7 @@ Requires:       kwin6
 Requires:       libvulkan_radeon
 Requires:       libxml2-tools
 Requires:       myrlyn
+Requires:       nano
 Requires:       ntfs-3g
 Requires:       nvme-cli
 Requires:       openSUSE-build-key
@@ -78,7 +78,6 @@ Requires:       pipewire
 Requires:       pipewire-alsa
 Requires:       pipewire-pulseaudio
 Requires:       plasma6-desktop
-Requires:       plasma6-firewall
 Requires:       plasma6-integration-plugin
 Requires:       plasma6-nm
 Requires:       plasma6-pa
@@ -138,7 +137,9 @@ Requires:       NetworkManager
 Requires:       aaa_base
 Requires:       alsa-ucm-conf
 Requires:       alsa-utils
+Requires:       apparmor-abstractions
 Requires:       apparmor-parser
+Requires:       apparmor-profiles
 Requires:       apparmor-utils
 Requires:       bash
 Requires:       bash-completion
@@ -149,7 +150,6 @@ Requires:       breeze6
 Requires:       breeze6-cursors
 Requires:       breeze6-decoration
 Requires:       breeze6-style
-Requires:       btrfsmaintenance
 Requires:       btrfsprogs
 Requires:       ca-certificates-mozilla
 Requires:       cifs-utils
@@ -173,7 +173,6 @@ Requires:       kernel-default
 Requires:       kernel-firmware-amdgpu
 Requires:       kernel-firmware-mediatek
 Requires:       kernel-firmware-realtek
-Requires:       kf6-baloo-file
 Requires:       kglobalacceld6
 Requires:       kio-admin
 Requires:       kio-extras
@@ -183,6 +182,7 @@ Requires:       kwin6
 Requires:       libvulkan_radeon
 Requires:       libxml2-tools
 Requires:       myrlyn
+Requires:       nano
 Requires:       ntfs-3g
 Requires:       nvme-cli
 Requires:       openSUSE-build-key
@@ -197,7 +197,6 @@ Requires:       pipewire
 Requires:       pipewire-alsa
 Requires:       pipewire-pulseaudio
 Requires:       plasma6-desktop
-Requires:       plasma6-firewall
 Requires:       plasma6-integration-plugin
 Requires:       plasma6-nm
 Requires:       plasma6-pa
