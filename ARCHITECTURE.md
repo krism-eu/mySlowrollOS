@@ -26,8 +26,7 @@ Package selection uses three deliberately separate source lists:
 
 `agama/profile-policy.json` defines the profile structure.
 `agama/generate-profiles.py` merges the persistent and install-only lists
-without duplicate packages and generates the final profile, an identical VM
-test profile, and a software-only diagnostic subset. It rejects overlap,
+without duplicate packages and generates only the final installation profile. It rejects overlap,
 core drift between anchors and protected requirements missing from the
 persistent workstation manifest. This does not require OBS at generation time.
 
@@ -81,8 +80,9 @@ A full first-boot VM check must validate the resulting service state.
 
 `legacy/agama/post-install.sh.txt` is unsafe historical text, never an installer
 hook. The old partial profile is also isolated in legacy.
-The recovered custom Agama product and RPM policy spec remain reference material;
-the active path uses the stock product and deploys policy via files/scripts.
+The unused custom Agama product and RPM policy packaging files were removed;
+their history remains in Git. The active path uses the stock Agama product
+and deploys policy via files/scripts.
 
 ## Validation boundaries
 

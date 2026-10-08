@@ -6,10 +6,10 @@ Run from a checkout/archive of the reviewed commit in an Agama 24 live VM:
 bash agama/tests/run-test02.sh
 ```
 
-The runner uses profile-final.jsonnet directly. The retained
-02-full-vm-validation.jsonnet is generated identically, including the repository
-key, post-chroot SDDM selector, init script and zram configuration.
-The audit loads/probes configuration but never calls agama install.
+The runner uses the single generated profile-final.jsonnet directly,
+checks downloaded pinned scripts against local files byte-for-byte, and
+validates their syntax. The audit loads/probes configuration but never
+calls agama install.
 An existing UI storage proposal can still exist: inspect it before installation.
 
 Select only the disposable VM disk manually, choose the intended EFI/Btrfs/home
