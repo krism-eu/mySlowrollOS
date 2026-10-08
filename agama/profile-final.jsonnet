@@ -130,6 +130,7 @@
       "plasma6-session",
       "plasma6-systemmonitor",
       "plasma6-workspace",
+      "plymouth",
       "polkit",
       "polkit-kde-agent-6",
       "power-profiles-daemon",
