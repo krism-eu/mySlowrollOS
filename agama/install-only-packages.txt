@@ -1,0 +1,14 @@
+# Packages installed during Agama installation, without any permanent
+# RPM Requires from myslowroll-workstation or criscore1/2.
+# Keep the list small: optional/dismissible desktop tools only.
+# YaST is intentionally not pinned against future Slowroll package transitions.
+yast2
+yast2-apparmor
+yast2-bootloader
+yast2-control-center-qt
+yast2-packager
+yast2-security
+yast2-services-manager
+yast2-snapper
+yast2-storage-ng
+yast2-sysconfig

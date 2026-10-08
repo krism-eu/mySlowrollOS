@@ -7,15 +7,29 @@ The active entry point is `agama/profile-final.jsonnet`.
 Storage and authentication are omitted: disks, partitions, formatting, username
 and credentials are chosen in the UI. No unattended hardware installation.
 
-The sole workstation package manifest is
-`myslowroll-workstation/myslowroll-workstation.spec`.
-`agama/profile-policy.json` defines the profile structure.
-`agama/generate-profiles.py` generates the final profile, an identical VM test
-profile, and a software-only diagnostic subset. It does not require an OBS
-workstation or policy RPM.
+Package management uses three deliberately separate layers:
+- Protected core: `criscore1/2` direct requirements in
+  `obs/criscore1/criscore1.spec`. These must also appear in the persistent layer.
+- Persistent workstation: `Requires` in
+  `myslowroll-workstation/myslowroll-workstation.spec`; package changes here
+  affect RPM dependency resolution on future updates.
+- Agama install-only: `agama/install-only-packages.txt`; these packages are
+  requested at installation but are NOT `Requires` of the workstation or the
+  protected core. All YaST modules including `yast2-snapper` live here so they
+  cannot block a future dup through our RPM anchors.
 
-Current OBS criscore1/criscore2 0.2 are the protected core anchors.
-Their core-only dependencies intentionally differ from the workstation manifest.
+`agama/profile-policy.json` defines the profile structure.
+`agama/generate-profiles.py` merges the persistent and install-only lists
+without duplicate packages and generates the final profile, an identical VM
+test profile, and a software-only diagnostic subset. It rejects overlap,
+core drift between anchors and protected requirements missing from the
+persistent workstation manifest. This does not require OBS at generation time.
+
+Current OBS criscore1/criscore2 0.2 are still the published-package concern:
+changing the GitHub spec does not update existing OBS RPM binaries.
+The historical source/generator mentioned by the old core spec are absent
+from this repository; restore that workflow separately before future
+regeneration or publication.
 atomic-update remains the existing OBS updater package; this change does not
 redesign or upgrade it.
 

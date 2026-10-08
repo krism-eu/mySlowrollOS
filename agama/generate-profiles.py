@@ -20,13 +20,38 @@ def generate(revision):
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("assets revision must be a full 40-character commit SHA")
     manifest = (ROOT / "myslowroll-workstation/myslowroll-workstation.spec").read_text()
-    packages = re.findall(r"^Requires:\s+(\S+)\s*$", manifest, re.MULTILINE)
-    if not packages or len(packages) != len(set(packages)):
-        raise ValueError("empty or duplicate package manifest")
+    persistent = re.findall(r"^Requires:\s+(\S+)\s*$", manifest, re.MULTILINE)
+    if not persistent or len(persistent) != len(set(persistent)):
+        raise ValueError("empty or duplicate persistent package manifest")
+
+    # Installation-only packages are chosen by Agama but must NEVER become
+    # hard dependencies of the workstation RPM or either protected anchor.
+    lines = (ROOT / "agama/install-only-packages.txt").read_text().splitlines()
+    install_only = [line.strip() for line in lines
+                    if line.strip() and not line.lstrip().startswith("#")]
+    if not install_only or len(install_only) != len(set(install_only)):
+        raise ValueError("empty or duplicate install-only package list")
+    if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]*", pkg)
+           for pkg in install_only):
+        raise ValueError("invalid install-only package name")
+    if overlap := set(persistent) & set(install_only):
+        raise ValueError("install-only packages are RPM requirements: "
+                         + ", ".join(sorted(overlap)))
+
+    core_spec = (ROOT / "obs/criscore1/criscore1.spec").read_text()
+    core_requires = re.findall(r"^Requires:\s+(\S+)\s*$", core_spec, re.MULTILINE)
+    halfway = len(core_requires) // 2
+    if not core_requires or len(core_requires) % 2 or (
+            core_requires[:halfway] != core_requires[halfway:]):
+        raise ValueError("criscore1 and criscore2 Requires must match")
+    if missing := set(core_requires[:halfway]) - set(persistent):
+        raise ValueError("protected packages missing from persistent manifest: "
+                         + ", ".join(sorted(missing)))
+
     profile = json.loads((ROOT / "agama/profile-policy.json").read_text())
     if any(key in profile for key in ("storage", "user", "root")):
         raise ValueError("storage and authentication must remain interactive")
-    profile["software"]["packages"] = sorted(packages)
+    profile["software"]["packages"] = sorted(persistent + install_only)
     entries = list(profile["files"])
     for scripts in profile["scripts"].values():
         entries.extend(scripts)

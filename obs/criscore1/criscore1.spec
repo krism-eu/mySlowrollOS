@@ -1,6 +1,7 @@
-# GENERATED FILE - DO NOT EDIT BY HAND.
-# Source of common Requires: experiments/rootfs/protected.seed
-# Regenerate with: bash core/generate-criscore-spec
+# Protected RPM dependency anchors (both Requires blocks must stay identical).
+# The historical generator/seed named in previous versions are not in this
+# repository; do not claim this spec is currently reproducibly generated.
+# Keep the YaST GUI modules in the Agama install-only list, never in the anchors.
 
 Name:           criscore1
 Version:        0.2
@@ -118,16 +119,6 @@ Requires:       xdg-desktop-portal-kde6
 Requires:       xdg-user-dirs
 Requires:       xdg-utils
 Requires:       xwayland
-Requires:       yast2
-Requires:       yast2-apparmor
-Requires:       yast2-bootloader
-Requires:       yast2-control-center-qt
-Requires:       yast2-packager
-Requires:       yast2-security
-Requires:       yast2-services-manager
-Requires:       yast2-snapper
-Requires:       yast2-storage-ng
-Requires:       yast2-sysconfig
 Requires:       zram-generator
 Requires:       zypper
 
@@ -247,16 +238,6 @@ Requires:       xdg-desktop-portal-kde6
 Requires:       xdg-user-dirs
 Requires:       xdg-utils
 Requires:       xwayland
-Requires:       yast2
-Requires:       yast2-apparmor
-Requires:       yast2-bootloader
-Requires:       yast2-control-center-qt
-Requires:       yast2-packager
-Requires:       yast2-security
-Requires:       yast2-services-manager
-Requires:       yast2-snapper
-Requires:       yast2-storage-ng
-Requires:       yast2-sysconfig
 Requires:       zram-generator
 Requires:       zypper
 

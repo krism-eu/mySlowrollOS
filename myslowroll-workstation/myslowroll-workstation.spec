@@ -152,16 +152,6 @@ Requires:       xdg-desktop-portal-kde6
 Requires:       xdg-user-dirs
 Requires:       xdg-utils
 Requires:       xwayland
-Requires:       yast2
-Requires:       yast2-apparmor
-Requires:       yast2-bootloader
-Requires:       yast2-control-center-qt
-Requires:       yast2-packager
-Requires:       yast2-security
-Requires:       yast2-services-manager
-Requires:       yast2-snapper
-Requires:       yast2-storage-ng
-Requires:       yast2-sysconfig
 Requires:       zip
 Requires:       zram-generator
 Requires:       zstd
