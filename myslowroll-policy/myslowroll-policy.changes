@@ -1,6 +1,0 @@
--------------------------------------------------------------------
-Mon Sep 28 2026 - krism
-
-- Initial package.
-- Move stable mySlowrollOS policy out of KIWI config.sh.
-- Keep account creation and passwords outside the package.

@@ -5,10 +5,11 @@ Thu Oct 08 2026 - mySlowrollOS
 - Include standard AppArmor profiles and abstractions.
 - Remove gutenprint as an explicit persistent requirement.
 - Keep YaST modules Agama-install-only, not hard RPM requirements.
+- Current manifest: 159 persistent dependencies, plus 11 Agama-only packages.
 
 -------------------------------------------------------------------
 Mon Sep 28 2026 - krism
 
 - Initial package.
-- Represent the frozen 161-package mySlowrollOS workstation manifest.
-- Use the same RPM dependency set from KIWI and Agama.
+- Introduce the workstation dependency manifest (subsequently revised).
+- Agama expands the requirements into individual installation requests.

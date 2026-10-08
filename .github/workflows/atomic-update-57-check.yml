@@ -27,6 +27,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify pinned installer assets match working tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="$(cat agama/assets-revision)"
+          git cat-file -e "${revision}^{commit}"
+          git diff --exit-code "$revision" HEAD -- myslowroll-policy ':(glob)agama/*.sh' agama/keys
       - name: Check generated core and Agama profiles
         run: |
           python3 core/generate-criscore-spec.py --check
@@ -40,7 +49,7 @@ jobs:
           bash -n agama/init-firstboot.sh
           bash -n agama/post-chroot-boot-policy.sh
           bash agama/init-firstboot.sh --self-test
-          grep -Fxq 'rw quiet systemd.show_status=1 security=apparmor' myslowroll-policy/kernel-cmdline
+          grep -Fxq 'rw security=apparmor systemd.show_status=1 quiet' myslowroll-policy/kernel-cmdline
           grep -Fxq 'xauth' agama/install-only-packages.txt
           grep -Fxq 'Requires:       plymouth' myslowroll-workstation/myslowroll-workstation.spec
           ! grep -Eq '^Requires:[[:space:]]+plymouth([[:space:]]|$)' obs/criscore1/criscore1.spec
