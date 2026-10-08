@@ -1,39 +1,15 @@
 -------------------------------------------------------------------
 Thu Oct 08 2026 - krism
 
-- Update to 5.7.1.
-- Fix capability token persistence: keep toolchain_hash a 64-hex SHA256 value.
-- Fix malformed make_plan branch around the empty RPM-cache guard.
-- Allow revalidated through the state gate so interrupted PREPARED -> REVALIDATED
-  transactions can safely return to PREPARED and revalidate again.
-- Refresh repository metadata during REVALIDATED and reject stale plans before
-  opening any TARGET.
-- Permit typed abort of an unrecorded TARGET only when exact description/TXID
-  ownership resolves uniquely to the requested snapshot.
-- Align the design contract with the intentionally hybrid 5.6.1 + 5.7.1
-  implementation.
-- Preserve the v5 state/cache namespace so a 5.6.1 pending-reboot transaction
-  remains confirmable after the updater package itself is upgraded.
-- Add durable PREPARED -> REVALIDATED barrier before tukit open.
-- Replace exact help/version hashing with semantic capability checks.
-- Add typed needs-inspection outcomes for ambiguous open/close/abort states.
-- Require TARGET quiescence before automatic abort.
-- Treat tukit close timeout/failure as ambiguous; never blind-abort afterwards.
-- Move TARGET boot cleanup behind a verified abort.
-- Add typed recovery inspect/abort-target/adopt-target/clear-opening commands.
-- Remove persistent toolchain hashing; re-check only consumed capabilities.
-- Collapse native transaction states; legacy 5.6 intermediate states are mapped on read.
-- Replace split RPMDB/ZYpp/cache/whole-/etc drift hashes with one source fingerprint
-  plus plan and post-TARGET manifest hashes.
-- Remove whole-/etc hashing to avoid unrelated configuration false positives.
-- Keep strict manifest, critical-package, bootability and purge-kernels checks.
-- Add procps runtime dependency for quiescence inspection and keep diffutils
-  for cmp.
+- 5.7.1: sole supported offline atomic-update engine (development candidate).
+- New independent state schema 1, with unversioned persistent state, cache,
+  log and lock paths. No legacy state migration or multi-version support.
+- Manual PREPARED -> REVALIDATED -> tukit TARGET -> verification -> reboot flow.
+- Preserve manifest, protected core packages, bootability and explicit rollback.
+- Add semantic capability checks and typed needs-inspection recovery.
+- Fix find_owned_targets status propagation and fail-closed clear-opening when
+  Snapper listing fails or any owned TARGET is present.
+- Make df output validity explicit; remove unused preflight probes and helpers.
+- Remove unused transaction state timestamps; history remains persistent.
 - No timer, daemon or unattended scheduler.
-
--------------------------------------------------------------------
-Tue Sep 29 2026 - krism
-
-- Keep guarded updater at 5.6.1.
-- Add missing diffutils runtime dependency for cmp.
-- Keep updater manual: no timer, daemon or unattended scheduling.
+- Candidate is not production-stable until VM failure/recovery matrix passes.
