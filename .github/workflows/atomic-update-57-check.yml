@@ -78,6 +78,11 @@ jobs:
           done
           grep -Fxq 'enable btrfs-scrub.timer' myslowroll-policy/10-myslowroll.preset
           grep -Fxq 'enable fstrim.timer' myslowroll-policy/10-myslowroll.preset
+          # Number cleanup is bounded, but never invoked by firstboot.
+          grep -Fq "snapper_number_limit='4-8'" agama/init-firstboot.sh
+          grep -Fq "snapper_important_limit='1-3'" agama/init-firstboot.sh
+          grep -Fq "NUMBER_MIN_AGE=3600 EMPTY_PRE_POST_CLEANUP=yes" agama/init-firstboot.sh
+          ! grep -Eq 'snapper .*cleanup (number|all)' agama/init-firstboot.sh
           grep -Fxq 'Hidden=true' myslowroll-policy/backintime-autostart-disabled.desktop
           grep -Fxq 'WirelessEnabled=false' myslowroll-policy/NetworkManager.state
           grep -Fxq 'AutoEnable=false' myslowroll-policy/90-myslowroll-bluez.conf
