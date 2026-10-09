@@ -35,11 +35,8 @@ configure_btrfsmaintenance() {
     -e 's/^BTRFS_TRIM_PERIOD=.*/BTRFS_TRIM_PERIOD="none"/' \
     -e 's/^BTRFS_SCRUB_PERIOD=.*/BTRFS_SCRUB_PERIOD="monthly"/' \
     -e 's/^BTRFS_SCRUB_PRIORITY=.*/BTRFS_SCRUB_PRIORITY="idle"/' \
-    -e 's@^BTRFS_SCRUB_MOUNTPOINTS=.*@BTRFS_SCRUB_MOUNTPOINTS="/ "@' \
-    "$config" || return 1
-  # The scrub target must not be empty or an unintended second device.
-  sed -i 's@^BTRFS_SCRUB_MOUNTPOINTS=.*@BTRFS_SCRUB_MOUNTPOINTS="/ "@' "$config"
-  sed -i 's@^BTRFS_SCRUB_MOUNTPOINTS=.*@BTRFS_SCRUB_MOUNTPOINTS="/"@' "$config"
+    -e 's@^BTRFS_SCRUB_MOUNTPOINTS=.*@BTRFS_SCRUB_MOUNTPOINTS="/"@' \
+    "$config"
 }
 
 # Disable startup only, without masking: another dependency may still request
@@ -165,8 +162,8 @@ if [[ -f /etc/zypp/repos.d/home_krism.key ]]; then
 fi
 
 # Apply intended runtime service policy.
-if ! systemctl enable NetworkManager.service firewalld.service; then
-  echo "myslowroll-firstboot: cannot enable NetworkManager or firewalld" >&2
+if ! systemctl enable NetworkManager.service firewalld.service bluetooth.service; then
+  echo "myslowroll-firstboot: cannot enable NetworkManager, firewalld or Bluetooth" >&2
   firstboot_rc=1
 fi
 systemctl disable NetworkManager-wait-online.service || true
@@ -243,16 +240,40 @@ else
   firstboot_rc=1
 fi
 
-# No RAID, LVM, or NVMe-over-Fabrics devices exist in the 2026-10-09 audit.
-# Disable only boot-time activation. Do NOT mask/remove storage components:
-# such a change would belong to the later package/dependency audit.
-for unit in \
-    mdcheck_start.timer mdcheck_continue.timer mdmonitor-oneshot.timer \
-    lvm2-monitor.service blk-availability.service \
-    nvmefc-boot-connections.service nvmf-autoconnect.service; do
-  disable_optional_unit "$unit"
-done
-
+# Only disable optional storage units after confirming the installed layout.
+# Agama storage/partitioning remains entirely interactive. On RAID/LVM or
+# remote NVMe systems, keep their own boot services. Never mask/remove them.
+if ! command -v lsblk >/dev/null 2>&1; then
+  echo 'myslowroll-firstboot: lsblk missing, retaining optional storage boot units' >&2
+elif ! storage_types="$(lsblk -nr -o TYPE 2>/dev/null)"; then
+  echo 'myslowroll-firstboot: cannot inspect disk layout, retaining storage units' >&2
+else
+  if grep -Eq '^(raid[0-9]*|md)$' <<<"$storage_types"; then
+    echo 'myslowroll-firstboot: md RAID detected, retaining md boot units'
+  else
+    for unit in mdcheck_start.timer mdcheck_continue.timer mdmonitor-oneshot.timer; do
+      disable_optional_unit "$unit"
+    done
+  fi
+  if grep -Eq '^(lvm|mpath)$' <<<"$storage_types"; then
+    echo 'myslowroll-firstboot: device-mapper volumes detected, retaining LVM units'
+  else
+    disable_optional_unit lvm2-monitor.service
+    disable_optional_unit blk-availability.service
+  fi
+fi
+# NVMe-over-Fabrics detection must fail closed: if the probe is unavailable,
+# do not deactivate auto-connections used by a different installation.
+if command -v nvme >/dev/null 2>&1; then
+  if fabrics="$(LC_ALL=C nvme list-subsys 2>/dev/null)"; then
+    if grep -Eq 'trtype=(tcp|rdma|fc)' <<<"$fabrics"; then
+      echo 'myslowroll-firstboot: NVMe fabrics detected, retaining autoconnect'
+    else
+      disable_optional_unit nvmefc-boot-connections.service
+      disable_optional_unit nvmf-autoconnect.service
+    fi
+  fi
+fi
 # Back In Time is manual-only. XDG Hidden=true override is delivered by Agama;
 # keep the Qt application in the menu; never install a backup autostart daemon.
 if ! grep -Fxq 'Hidden=true' /etc/xdg/autostart/backintime.desktop; then

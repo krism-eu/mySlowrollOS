@@ -109,3 +109,7 @@ and `systemctl --user --failed` has no new backintime autostart failure.
 When reusing an existing home, an old user autostart file can override
 system policy: verify it explicitly. Do not claim this acceptance passed
 until tested on the actual installation/VM.
+
+The RAID/LVM and NVMe-oF service-disable decisions are applied only on
+first boot after successful detection of the installed disk layout; presets
+must NOT unconditionally override an Agama user-selected storage scheme.
