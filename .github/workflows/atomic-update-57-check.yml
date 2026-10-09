@@ -28,6 +28,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # Run these before the revision-pin check: intermediate work-branch
+      # commits intentionally defer asset/profile regeneration until final review.
+      - name: Early shell syntax and firstboot self-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in atomic-update/atomic-update-5.7.1.sh agama/*.sh agama/tests/*.sh; do
+            bash -n "$script"
+          done
+          test "$(grep -Fc 'exit "$firstboot_rc"' agama/init-firstboot.sh)" -eq 1
+          bash agama/init-firstboot.sh --self-test
       - name: Verify pinned installer assets match working tree
         shell: bash
         run: |
@@ -49,12 +60,21 @@ jobs:
           bash -n agama/post-chroot-boot-policy.sh
           bash agama/init-firstboot.sh --self-test
           # Expected next-installation policies (not a runtime VM test).
+          for unit in btrfs-balance.timer btrfs-defrag.timer btrfs-trim.timer; do
+            grep -Fxq "disable $unit" myslowroll-policy/10-myslowroll.preset
+          done
+          # Storage/RAID/LVM/NVMe-oF units must be managed after checking
+          # actual target layout, not disabled unconditionally in presets.
           for unit in \
-              btrfs-balance.timer btrfs-defrag.timer btrfs-trim.timer \
               mdcheck_start.timer mdcheck_continue.timer mdmonitor-oneshot.timer \
               lvm2-monitor.service blk-availability.service \
               nvmefc-boot-connections.service nvmf-autoconnect.service; do
-            grep -Fxq "disable $unit" myslowroll-policy/10-myslowroll.preset
+            ! grep -Fxq "disable $unit" myslowroll-policy/10-myslowroll.preset
+          done
+          grep -Fq 'for unit in mdcheck_start.timer mdcheck_continue.timer mdmonitor-oneshot.timer; do' agama/init-firstboot.sh
+          for unit in lvm2-monitor.service blk-availability.service \
+                      nvmefc-boot-connections.service nvmf-autoconnect.service; do
+            grep -Fq "disable_optional_unit $unit" agama/init-firstboot.sh
           done
           grep -Fxq 'enable btrfs-scrub.timer' myslowroll-policy/10-myslowroll.preset
           grep -Fxq 'enable fstrim.timer' myslowroll-policy/10-myslowroll.preset
