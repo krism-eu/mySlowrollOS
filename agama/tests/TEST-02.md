@@ -84,3 +84,28 @@ in text mode; the firstboot script repairs subsequent boot entries, and
 the next boot is graphical. It does not force Wayland under `nomodeset`.
 
 Confirm YaST launches from the Plasma menu with `xauth` installed.
+
+## Service policy acceptance (2026-10-09)
+
+The next fresh installation must retain `NetworkManager.service`,
+`bluetooth.service`, `cups.service`, `chronyd.service`,
+`firewalld.service`, and `snapper-cleanup.timer`. Both wireless
+radios start off; the user can turn them on from Plasma later without
+a recurrent script turning them back off. Read:
+`nmcli radio wifi`, `bluetoothctl show`, and
+`systemctl is-enabled bluetooth.service NetworkManager.service`.
+
+Check the three disabled btrfsmaintenance timers plus monthly scrub and
+weekly `fstrim.timer` using `systemctl list-timers --all` and
+`/etc/sysconfig/btrfsmaintenance`. Check mdcheck and NVMe-oF units with
+`systemctl is-enabled`; they are disabled, NOT masked or uninstalled.
+Never run mdadm/LVM removal in the service phase.
+
+Back In Time remains available via the application menu and starts only
+manually. On a fresh user home verify both
+`/etc/xdg/autostart/backintime.desktop` and
+`~/.config/autostart/backintime.desktop` have `Hidden=true`,
+and `systemctl --user --failed` has no new backintime autostart failure.
+When reusing an existing home, an old user autostart file can override
+system policy: verify it explicitly. Do not claim this acceptance passed
+until tested on the actual installation/VM.

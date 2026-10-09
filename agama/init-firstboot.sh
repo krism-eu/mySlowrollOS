@@ -20,8 +20,46 @@ sanitize_kernel_cmdline() {
   printf '%s\n' "${cleaned:+$cleaned }security=apparmor systemd.show_status=1 quiet"
 }
 
-# Functional regression test of exactly the same normalization code, with no
-# privileged actions or calls to systemctl/sdbootutil.
+# Edit only verified stock btrfsmaintenance keys, keeping distro defaults intact.
+# The distro's refresh service will own the timer schedule; no custom daemon.
+configure_btrfsmaintenance() {
+  local config="$1" key
+  [[ -f "$config" ]] || return 1
+  for key in BTRFS_BALANCE_PERIOD BTRFS_DEFRAG_PERIOD BTRFS_TRIM_PERIOD \
+             BTRFS_SCRUB_PERIOD BTRFS_SCRUB_PRIORITY BTRFS_SCRUB_MOUNTPOINTS; do
+    [[ "$(grep -Ec "^$key=" "$config")" == 1 ]] || return 1
+  done
+  sed -i \
+    -e 's/^BTRFS_BALANCE_PERIOD=.*/BTRFS_BALANCE_PERIOD="none"/' \
+    -e 's/^BTRFS_DEFRAG_PERIOD=.*/BTRFS_DEFRAG_PERIOD="none"/' \
+    -e 's/^BTRFS_TRIM_PERIOD=.*/BTRFS_TRIM_PERIOD="none"/' \
+    -e 's/^BTRFS_SCRUB_PERIOD=.*/BTRFS_SCRUB_PERIOD="monthly"/' \
+    -e 's/^BTRFS_SCRUB_PRIORITY=.*/BTRFS_SCRUB_PRIORITY="idle"/' \
+    -e 's@^BTRFS_SCRUB_MOUNTPOINTS=.*@BTRFS_SCRUB_MOUNTPOINTS="/ "@' \
+    "$config" || return 1
+  # The scrub target must not be empty or an unintended second device.
+  sed -i 's@^BTRFS_SCRUB_MOUNTPOINTS=.*@BTRFS_SCRUB_MOUNTPOINTS="/ "@' "$config"
+  sed -i 's@^BTRFS_SCRUB_MOUNTPOINTS=.*@BTRFS_SCRUB_MOUNTPOINTS="/"@' "$config"
+}
+
+# Disable startup only, without masking: another dependency may still request
+# a unit, and package removal is postponed until the separate RPM audit.
+disable_optional_unit() {
+  local unit="$1" state
+  state="$(systemctl is-enabled "$unit" 2>/dev/null || true)"
+  case "$state" in
+    enabled|enabled-runtime|linked|linked-runtime)
+      if ! systemctl disable "$unit"; then
+        echo "myslowroll-firstboot: cannot disable optional unit $unit" >&2
+        firstboot_rc=1
+      fi
+      ;;
+    disabled|masked|static|indirect|generated|alias|not-found|'') ;;
+    *) echo "myslowroll-firstboot: unknown state for $unit ($state)" >&2; firstboot_rc=1 ;;
+  esac
+}
+
+# Functional regression tests without privileged actions or running services.
 if [[ "${1:-}" == "--self-test" ]]; then
   sample='root=/dev/vda1 rw ide=nodma apm=off noresume edd=off nomodeset 3 mitigations=auto security= rootflags=subvol=0/.snapshots/1/snapshot'
   expected='root=/dev/vda1 rw mitigations=auto rootflags=subvol=0/.snapshots/1/snapshot security=apparmor systemd.show_status=1 quiet'
@@ -34,6 +72,33 @@ if [[ "${1:-}" == "--self-test" ]]; then
     echo 'FAIL: shipped cmdline would trigger a needless firstboot rewrite' >&2
     exit 1
   }
+  maintenance_test="$(mktemp)" || exit 1
+  trap 'rm -f -- "$maintenance_test"' EXIT
+  cat >"$maintenance_test" <<'TEST_BTRFS'
+BTRFS_BALANCE_PERIOD="weekly"
+BTRFS_DEFRAG_PERIOD="monthly"
+BTRFS_TRIM_PERIOD="monthly"
+BTRFS_SCRUB_PERIOD="weekly"
+BTRFS_SCRUB_PRIORITY="normal"
+BTRFS_SCRUB_MOUNTPOINTS="auto"
+BTRFS_ALLOW_CONCURRENCY="false"
+TEST_BTRFS
+  configure_btrfsmaintenance "$maintenance_test" || exit 1
+  grep -Fxq 'BTRFS_BALANCE_PERIOD="none"' "$maintenance_test" || exit 1
+  grep -Fxq 'BTRFS_DEFRAG_PERIOD="none"' "$maintenance_test" || exit 1
+  grep -Fxq 'BTRFS_TRIM_PERIOD="none"' "$maintenance_test" || exit 1
+  grep -Fxq 'BTRFS_SCRUB_PERIOD="monthly"' "$maintenance_test" || exit 1
+  grep -Fxq 'BTRFS_SCRUB_PRIORITY="idle"' "$maintenance_test" || exit 1
+  grep -Fxq 'BTRFS_SCRUB_MOUNTPOINTS="/"' "$maintenance_test" || exit 1
+  grep -Fxq 'BTRFS_ALLOW_CONCURRENCY="false"' "$maintenance_test" || exit 1
+  configure_btrfsmaintenance "$maintenance_test" || exit 1
+  [[ "$(grep -c '^BTRFS_BALANCE_PERIOD=' "$maintenance_test")" == 1 ]] || exit 1
+  printf '%s\n' 'BTRFS_BALANCE_PERIOD="daily"' >>"$maintenance_test"
+  if configure_btrfsmaintenance "$maintenance_test"; then
+    echo 'FAIL: duplicate config key accepted' >&2
+    exit 1
+  fi
+  echo 'PASS: Btrfs timer policy, one root scrub, preservation, idempotence'
   echo 'PASS: failsafe removed, root/subvolume preserved, shipped cmdline idempotent'
   exit 0
 fi
@@ -115,20 +180,84 @@ if ! systemctl mask ModemManager.service; then
   firstboot_rc=1
 fi
 
-# The preinstalled NetworkManager.state disables Wi-Fi from its first start.
-# A one-time runtime call also covers a live installer handover. Subsequent
-# boots honor the state changed by the user from Plasma: no persistent job.
-if command -v nmcli >/dev/null 2>&1 && systemctl is-active --quiet NetworkManager.service; then
-  if ! nmcli radio wifi off; then
-    echo 'myslowroll-firstboot: unable to persist Wi-Fi off state' >&2
+# Initial radio policy: services stay available and radio switches remain usable.
+# Unlike boot timers, this firstboot script runs only once. Changes made in
+# Plasma after installation are NOT forcibly reverted at every later boot.
+if command -v nmcli >/dev/null 2>&1; then
+  if ! systemctl is-active --quiet NetworkManager.service; then
+    systemctl start NetworkManager.service || firstboot_rc=1
+  fi
+  if systemctl is-active --quiet NetworkManager.service; then
+    if ! LC_ALL=C nmcli radio wifi off ||
+       [[ "$(LC_ALL=C nmcli radio wifi)" != disabled ]]; then
+      echo 'myslowroll-firstboot: initial Wi-Fi OFF state not confirmed' >&2
+      firstboot_rc=1
+    fi
+  else
+    echo 'myslowroll-firstboot: NetworkManager inactive; Wi-Fi state unverified' >&2
     firstboot_rc=1
+  fi
+else
+  echo 'myslowroll-firstboot: nmcli missing' >&2
+  firstboot_rc=1
+fi
+
+# BlueZ keeps bluetooth.service enabled for manual operation. AutoEnable=false
+# covers newly detected adapters; explicitly power off the initial controller.
+if systemctl is-active --quiet bluetooth.service; then
+  if ! grep -Eq '^AutoEnable=false$' /etc/bluetooth/main.conf; then
+    echo 'myslowroll-firstboot: BlueZ AutoEnable=false missing' >&2
+    firstboot_rc=1
+  fi
+  if command -v bluetoothctl >/dev/null 2>&1; then
+    bt_controllers="$(LC_ALL=C bluetoothctl --timeout 5 list 2>/dev/null || true)"
+    if grep -q '^Controller ' <<<"$bt_controllers"; then
+      if ! LC_ALL=C bluetoothctl --timeout 5 power off >/dev/null 2>&1; then
+        echo 'myslowroll-firstboot: Bluetooth controller could not be powered off' >&2
+        firstboot_rc=1
+      elif LC_ALL=C bluetoothctl --timeout 5 show | grep -Eq '^[[:space:]]*Powered: yes'; then
+        echo 'myslowroll-firstboot: Bluetooth controller remains powered on' >&2
+        firstboot_rc=1
+      fi
+    fi
   fi
 fi
 
-# BlueZ /etc/bluetooth/main.conf contains [Policy] AutoEnable=false, so
-# controllers remain off at discovery/reboot but may be turned on manually.
-if command -v bluetoothctl >/dev/null 2>&1 && systemctl is-active --quiet bluetooth.service; then
-  bluetoothctl --timeout 5 power off >/dev/null 2>&1 || true
+# Native Btrfs timer policy approved for this single-disk Btrfs+ext4 PC.
+# No periodic balance/defrag/Btrfs TRIM; monthly low-priority root scrub;
+# weekly fstrim.timer covers ext4 /home as well.
+if configure_btrfsmaintenance /etc/sysconfig/btrfsmaintenance; then
+  if ! systemctl start btrfsmaintenance-refresh.service; then
+    echo 'myslowroll-firstboot: stock Btrfs timer refresh failed' >&2
+    firstboot_rc=1
+  fi
+  for unit in btrfs-balance.timer btrfs-defrag.timer btrfs-trim.timer; do
+    disable_optional_unit "$unit"
+  done
+  if ! systemctl enable --now btrfs-scrub.timer fstrim.timer; then
+    echo 'myslowroll-firstboot: cannot enable scrub/fstrim timers' >&2
+    firstboot_rc=1
+  fi
+else
+  echo 'myslowroll-firstboot: unexpected/missing stock Btrfs config' >&2
+  firstboot_rc=1
+fi
+
+# No RAID, LVM, or NVMe-over-Fabrics devices exist in the 2026-10-09 audit.
+# Disable only boot-time activation. Do NOT mask/remove storage components:
+# such a change would belong to the later package/dependency audit.
+for unit in \
+    mdcheck_start.timer mdcheck_continue.timer mdmonitor-oneshot.timer \
+    lvm2-monitor.service blk-availability.service \
+    nvmefc-boot-connections.service nvmf-autoconnect.service; do
+  disable_optional_unit "$unit"
+done
+
+# Back In Time is manual-only. XDG Hidden=true override is delivered by Agama;
+# keep the Qt application in the menu; never install a backup autostart daemon.
+if ! grep -Fxq 'Hidden=true' /etc/xdg/autostart/backintime.desktop; then
+  echo 'myslowroll-firstboot: Back In Time autostart suppression missing' >&2
+  firstboot_rc=1
 fi
 
 # Keep root Snapper but disable timeline snapshots. Cleanup remains available.

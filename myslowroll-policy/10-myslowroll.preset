@@ -8,3 +8,16 @@ disable snapper-timeline.timer
 disable sshd.service
 disable sshd.socket
 disable display-manager-legacy.service
+# Optional timers and boot services, disabled only (never masked).
+disable btrfs-balance.timer
+disable btrfs-defrag.timer
+disable btrfs-trim.timer
+enable btrfs-scrub.timer
+enable fstrim.timer
+disable mdcheck_start.timer
+disable mdcheck_continue.timer
+disable mdmonitor-oneshot.timer
+disable lvm2-monitor.service
+disable blk-availability.service
+disable nvmefc-boot-connections.service
+disable nvmf-autoconnect.service

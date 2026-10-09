@@ -102,6 +102,16 @@
       "source": "myslowroll-policy/90-myslowroll-sddm-theme.conf",
       "destination": "/usr/share/sddm/themes/breeze/theme.conf.user",
       "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/backintime-autostart-disabled.desktop",
+      "destination": "/etc/xdg/autostart/backintime.desktop",
+      "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/backintime-autostart-disabled.desktop",
+      "destination": "/etc/skel/.config/autostart/backintime.desktop",
+      "permissions": "0644"
     }
   ],
   "scripts": {

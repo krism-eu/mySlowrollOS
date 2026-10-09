@@ -4,8 +4,7 @@ on:
   push:
     branches:
       - main
-      - work/atomic-update-5.7
-      - fix/atomic-update-recovery-review
+      - work/myslowroll-rifiniture-20261009
     paths:
       - 'atomic-update/**'
       - 'agama/**'
@@ -49,6 +48,32 @@ jobs:
           bash -n agama/init-firstboot.sh
           bash -n agama/post-chroot-boot-policy.sh
           bash agama/init-firstboot.sh --self-test
+          # Expected next-installation policies (not a runtime VM test).
+          for unit in \
+              btrfs-balance.timer btrfs-defrag.timer btrfs-trim.timer \
+              mdcheck_start.timer mdcheck_continue.timer mdmonitor-oneshot.timer \
+              lvm2-monitor.service blk-availability.service \
+              nvmefc-boot-connections.service nvmf-autoconnect.service; do
+            grep -Fxq "disable $unit" myslowroll-policy/10-myslowroll.preset
+          done
+          grep -Fxq 'enable btrfs-scrub.timer' myslowroll-policy/10-myslowroll.preset
+          grep -Fxq 'enable fstrim.timer' myslowroll-policy/10-myslowroll.preset
+          grep -Fxq 'Hidden=true' myslowroll-policy/backintime-autostart-disabled.desktop
+          grep -Fxq 'WirelessEnabled=false' myslowroll-policy/NetworkManager.state
+          grep -Fxq 'AutoEnable=false' myslowroll-policy/90-myslowroll-bluez.conf
+          grep -Fq 'bluetoothctl --timeout 5 power off' agama/init-firstboot.sh
+          grep -Fq 'nmcli radio wifi off' agama/init-firstboot.sh
+          python3 - <<'PY'
+          import json
+          p = json.load(open('agama/profile-policy.json'))
+          f = {x['destination']: x['source'] for x in p['files']}
+          assert f['/etc/xdg/autostart/backintime.desktop'] == \
+              'myslowroll-policy/backintime-autostart-disabled.desktop'
+          assert f['/etc/skel/.config/autostart/backintime.desktop'] == \
+              'myslowroll-policy/backintime-autostart-disabled.desktop'
+          assert not any(k in p for k in ('storage', 'user', 'root'))
+          print('PASS: no new background services and package-independent XDG autostart suppression')
+          PY
           bash agama/post-chroot-boot-policy.sh --self-test
           python3 - <<'PY'
           import json
