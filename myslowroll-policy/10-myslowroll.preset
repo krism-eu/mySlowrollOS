@@ -15,3 +15,6 @@ disable btrfs-defrag.timer
 disable btrfs-trim.timer
 enable btrfs-scrub.timer
 enable fstrim.timer
+enable chronyd.service
+enable apparmor.service
+enable snapper-cleanup.timer

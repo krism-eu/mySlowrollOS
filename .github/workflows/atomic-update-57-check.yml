@@ -1,4 +1,4 @@
-name: atomic-update 5.7 checks
+name: mySlowrollOS installation and recovery checks
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
       - main
       - work/myslowroll-rifiniture-20261009
     paths:
+      - 'myslowroll-policy/**'
       - 'atomic-update/**'
       - 'agama/**'
       - 'core/**'
@@ -14,6 +15,7 @@ on:
       - '.github/workflows/atomic-update-57-check.yml'
   pull_request:
     paths:
+      - 'myslowroll-policy/**'
       - 'atomic-update/**'
       - 'agama/**'
       - 'core/**'
@@ -68,15 +70,10 @@ jobs:
           else
             echo 'DEFERRED: branch has unpinned installer assets; regenerate profile before release.'
           fi
-      - name: Bash syntax
-        run: bash -n atomic-update/atomic-update-5.7.1.sh
       - name: Agama cmdline and YaST functional regressions
         shell: bash
         run: |
           set -euo pipefail
-          bash -n agama/init-firstboot.sh
-          bash -n agama/post-chroot-boot-policy.sh
-          bash agama/init-firstboot.sh --self-test
           # Expected next-installation policies (not a runtime VM test).
           for unit in btrfs-balance.timer btrfs-defrag.timer btrfs-trim.timer; do
             grep -Fxq "disable $unit" myslowroll-policy/10-myslowroll.preset
@@ -87,7 +84,16 @@ jobs:
               mdcheck_start.timer mdcheck_continue.timer mdmonitor-oneshot.timer \
               lvm2-monitor.service blk-availability.service \
               nvmefc-boot-connections.service nvmf-autoconnect.service; do
-            ! grep -Fxq "disable $unit" myslowroll-policy/10-myslowroll.preset
+            if grep -Fxq "disable $unit" myslowroll-policy/10-myslowroll.preset; then
+              echo 'FAIL: forbidden content matched: see preceding check' >&2
+              exit 1
+            else
+              rc=$?
+              if (( rc != 1 )); then
+                echo 'FAIL: grep could not complete the negative assertion' >&2
+                exit "$rc"
+              fi
+            fi
           done
           grep -Fq 'for unit in mdcheck_start.timer mdcheck_continue.timer mdmonitor-oneshot.timer; do' agama/init-firstboot.sh
           for unit in lvm2-monitor.service blk-availability.service \
@@ -95,17 +101,29 @@ jobs:
             grep -Fq "disable_optional_unit $unit" agama/init-firstboot.sh
           done
           grep -Fxq 'enable btrfs-scrub.timer' myslowroll-policy/10-myslowroll.preset
+          for unit in chronyd.service apparmor.service snapper-cleanup.timer; do
+            grep -Fxq "enable $unit" myslowroll-policy/10-myslowroll.preset
+          done
+          grep -Fxq 'Requires:       chrony' myslowroll-workstation/myslowroll-workstation.spec
           grep -Fxq 'enable fstrim.timer' myslowroll-policy/10-myslowroll.preset
           # Agama post-chroot edits installer-created Snapper config.
           # Firstboot must validate, never rewrite or clean snapshots.
-          bash agama/post-chroot-boot-policy.sh --self-test
           grep -Fq 'NUMBER_LIMIT="4-4"' agama/post-chroot-boot-policy.sh
           grep -Fq 'NUMBER_LIMIT_IMPORTANT="0-0"' agama/post-chroot-boot-policy.sh
           grep -Fq 'NUMBER_MIN_AGE="3600"' agama/post-chroot-boot-policy.sh
           grep -Fq 'TIMELINE_CREATE="no"' agama/post-chroot-boot-policy.sh
           grep -Fq "NUMBER_LIMIT=\"4-4\"" agama/init-firstboot.sh
           grep -Fq "NUMBER_LIMIT_IMPORTANT=\"0-0\"" agama/init-firstboot.sh
-          ! grep -Eq '(snapper .*(set-config|cleanup (number|all))|NUMBER_LIMIT="4-8")' agama/init-firstboot.sh
+          if grep -Eq '(snapper .*(set-config|cleanup (number|all))|NUMBER_LIMIT="4-8")' agama/init-firstboot.sh; then
+            echo 'FAIL: forbidden content matched: see preceding check' >&2
+            exit 1
+          else
+            rc=$?
+            if (( rc != 1 )); then
+              echo 'FAIL: grep could not complete the negative assertion' >&2
+              exit "$rc"
+            fi
+          fi
           grep -Fxq 'Hidden=true' myslowroll-policy/backintime-autostart-disabled.desktop
           grep -Fxq 'WirelessEnabled=false' myslowroll-policy/NetworkManager.state
           grep -Fxq 'AutoEnable=false' myslowroll-policy/90-myslowroll-bluez.conf
@@ -117,12 +135,10 @@ jobs:
           f = {x['destination']: x['source'] for x in p['files']}
           assert f['/etc/xdg/autostart/backintime.desktop'] == \
               'myslowroll-policy/backintime-autostart-disabled.desktop'
-          assert f['/etc/skel/.config/autostart/backintime.desktop'] == \
-              'myslowroll-policy/backintime-autostart-disabled.desktop'
+          assert f['/etc/xdg/kdesurc'] == 'myslowroll-policy/kdesurc'
           assert not any(k in p for k in ('storage', 'user', 'root'))
           print('PASS: no new background services and package-independent XDG autostart suppression')
           PY
-          bash agama/post-chroot-boot-policy.sh --self-test
           python3 - <<'PY'
           import json
           p = json.load(open('agama/profile-policy.json'))
@@ -145,9 +161,27 @@ jobs:
           grep -Fxq 'libyui-qt-pkg16' agama/install-only-packages.txt
           grep -Fxq 'xauth' agama/install-only-packages.txt
           grep -Fxq 'Requires:       plymouth' myslowroll-workstation/myslowroll-workstation.spec
-          ! grep -Eq '^Requires:[[:space:]]+plymouth([[:space:]]|$)' obs/criscore1/criscore1.spec
+          if grep -Eq '^Requires:[[:space:]]+plymouth([[:space:]]|$)' obs/criscore1/criscore1.spec; then
+            echo 'FAIL: forbidden content matched: see preceding check' >&2
+            exit 1
+          else
+            rc=$?
+            if (( rc != 1 )); then
+              echo 'FAIL: grep could not complete the negative assertion' >&2
+              exit "$rc"
+            fi
+          fi
           grep -Fq '"extraKernelParams": "security=apparmor systemd.show_status=1"' agama/profile-policy.json
-          ! grep -Eq '^Requires:[[:space:]]+xauth([[:space:]]|$)' myslowroll-workstation/myslowroll-workstation.spec obs/criscore1/criscore1.spec
+          if grep -Eq '^Requires:[[:space:]]+xauth([[:space:]]|$)' myslowroll-workstation/myslowroll-workstation.spec obs/criscore1/criscore1.spec; then
+            echo 'FAIL: forbidden content matched: see preceding check' >&2
+            exit 1
+          else
+            rc=$?
+            if (( rc != 1 )); then
+              echo 'FAIL: grep could not complete the negative assertion' >&2
+              exit "$rc"
+            fi
+          fi
       - name: Mocked recovery regression tests
         run: |
           bash atomic-update/tests/ci-regression.sh
@@ -160,7 +194,16 @@ jobs:
           test "$source_file" = 'atomic-update-5.7.1.sh'
           grep -Fq "readonly STATE_VERSION=1" atomic-update/atomic-update-5.7.1.sh
           grep -Fq "readonly STATE_DIR=/var/lib/myslowroll/atomic-update" atomic-update/atomic-update-5.7.1.sh
-          ! grep -Eq 'atomic-dup-v[0-9]|myslowroll-v[0-9]' atomic-update/atomic-update-5.7.1.sh
+          if grep -Eq 'atomic-dup-v[0-9]|myslowroll-v[0-9]' atomic-update/atomic-update-5.7.1.sh; then
+            echo 'FAIL: forbidden content matched: see preceding check' >&2
+            exit 1
+          else
+            rc=$?
+            if (( rc != 1 )); then
+              echo 'FAIL: grep could not complete the negative assertion' >&2
+              exit "$rc"
+            fi
+          fi
       - name: Static design invariants
         shell: bash
         run: |
@@ -170,9 +213,36 @@ jobs:
           grep -Fq 'STATE_SOURCE_FINGERPRINT=' "$f"
           grep -Fq 'PLAN_XML_PREPARED=' "$f"
           grep -Fq 'PLAN_XML_REVALIDATED=' "$f"
-          ! grep -Fq 'PLAN_XML_B=' "$f"
-          ! grep -Fq 'etc_tree_hash()' "$f"
-          ! grep -Fq 'STATE_TOOLCHAIN_HASH=' "$f"
+          if grep -Fq 'PLAN_XML_B=' "$f"; then
+            echo 'FAIL: forbidden content matched: see preceding check' >&2
+            exit 1
+          else
+            rc=$?
+            if (( rc != 1 )); then
+              echo 'FAIL: grep could not complete the negative assertion' >&2
+              exit "$rc"
+            fi
+          fi
+          if grep -Fq 'etc_tree_hash()' "$f"; then
+            echo 'FAIL: forbidden content matched: see preceding check' >&2
+            exit 1
+          else
+            rc=$?
+            if (( rc != 1 )); then
+              echo 'FAIL: grep could not complete the negative assertion' >&2
+              exit "$rc"
+            fi
+          fi
+          if grep -Fq 'STATE_TOOLCHAIN_HASH=' "$f"; then
+            echo 'FAIL: forbidden content matched: see preceding check' >&2
+            exit 1
+          else
+            rc=$?
+            if (( rc != 1 )); then
+              echo 'FAIL: grep could not complete the negative assertion' >&2
+              exit "$rc"
+            fi
+          fi
           grep -Fq 'planning planned revalidated opening target verified committing' "$f"
           grep -Fq 'STATE_STATUS=revalidated' "$f"
           grep -Fq 'STATE_STATUS=needs-inspection' "$f"

@@ -8,7 +8,9 @@ set -euo pipefail
 # yast2-bootloader writes /etc/kernel/cmdline AFTER Agama's post/chroot scripts,
 # and can inherit failsafe options from the live installer ISO on x86_64.
 # Keep only the installed system's ordinary options and enforce AppArmor.
-sanitize_kernel_cmdline() {
+sanitize_kernel_cmdline() (
+  # Scope noglob to this subshell: preserve caller options and literal tokens.
+  set -f
   local token cleaned=""
   for token in $1; do
     case "$token" in
@@ -18,7 +20,7 @@ sanitize_kernel_cmdline() {
     cleaned="${cleaned:+$cleaned }$token"
   done
   printf '%s\n' "${cleaned:+$cleaned }security=apparmor systemd.show_status=1 quiet"
-}
+)
 
 # Edit only verified stock btrfsmaintenance keys, keeping distro defaults intact.
 # The distro's refresh service will own the timer schedule; no custom daemon.
@@ -62,6 +64,14 @@ if [[ "${1:-}" == "--self-test" ]]; then
   expected='root=/dev/vda1 rw mitigations=auto rootflags=subvol=0/.snapshots/1/snapshot security=apparmor systemd.show_status=1 quiet'
   [[ "$(sanitize_kernel_cmdline "$sample")" == "$expected" ]] || exit 1
   [[ "$(sanitize_kernel_cmdline "$expected")" == "$expected" ]] || exit 1
+  glob_dir="$(mktemp -d)" || exit 1
+  touch "$glob_dir/match-one" "$glob_dir/match-two"
+  glob_sample="$glob_dir/* $glob_dir/match-? [abc]"
+  glob_actual="$(sanitize_kernel_cmdline "$glob_sample")"
+  rm -rf -- "$glob_dir"
+  [[ "$glob_actual" == "$glob_sample security=apparmor systemd.show_status=1 quiet" ]] || {
+    echo 'FAIL: cmdline glob token was expanded' >&2; exit 1;
+  }
   # Test the shipped file, not only a hand-picked canonical string.
   shipped_file="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/myslowroll-policy/kernel-cmdline"
   shipped="$(<"$shipped_file")"
@@ -144,28 +154,47 @@ else
   fi
 fi
 
-systemctl set-default graphical.target
+if ! systemctl set-default graphical.target; then
+  echo 'myslowroll-firstboot: cannot set graphical default target' >&2
+  firstboot_rc=1
+fi
 
 # Defensive check: keep the native SDDM selector authoritative.
 if [[ "$(readlink -f /etc/systemd/system/display-manager.service 2>/dev/null || true)" != "/usr/lib/systemd/system/sddm.service" ]]; then
   systemctl disable --now display-manager-legacy.service >/dev/null 2>&1 || true
-  rm -f /etc/systemd/system/display-manager.service
-  ln -s /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service
-  systemctl daemon-reload
+  if ! ln -sfn /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service; then
+    echo 'myslowroll-firstboot: cannot select native SDDM' >&2
+    firstboot_rc=1
+  fi
+  if ! systemctl daemon-reload; then
+    echo 'myslowroll-firstboot: systemd daemon-reload failed' >&2
+    firstboot_rc=1
+  fi
 fi
 
 # Persist trust for the OBS repository used by criscore/atomic-update.
 # Agama's gpgFingerprints authenticates the installation repository but does
 # not globally import that key for future package verification.
 if [[ -f /etc/zypp/repos.d/home_krism.key ]]; then
-  rpm --import /etc/zypp/repos.d/home_krism.key
+  if ! rpm --import /etc/zypp/repos.d/home_krism.key; then
+    echo 'myslowroll-firstboot: OBS key import failed' >&2
+    firstboot_rc=1
+  fi
+else
+  echo 'myslowroll-firstboot: OBS key missing' >&2
+  firstboot_rc=1
 fi
 
 # Apply intended runtime service policy.
-if ! systemctl enable NetworkManager.service firewalld.service bluetooth.service; then
-  echo "myslowroll-firstboot: cannot enable NetworkManager, firewalld or Bluetooth" >&2
-  firstboot_rc=1
-fi
+# Enable independently so one missing unit cannot hide the others.
+# Do not force-restart AppArmor or replace an active NTP daemon here.
+for unit in NetworkManager.service firewalld.service bluetooth.service \
+            chronyd.service apparmor.service snapper-cleanup.timer; do
+  if ! systemctl enable "$unit"; then
+    echo "myslowroll-firstboot: cannot enable $unit" >&2
+    firstboot_rc=1
+  fi
+done
 systemctl disable NetworkManager-wait-online.service || true
 systemctl disable smartd.service smartd_generate_opts.path || true
 systemctl disable snapper-timeline.timer || true

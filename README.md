@@ -14,7 +14,7 @@ From a checkout/archive of a reviewed commit, run in the Agama live environment:
 bash agama/tests/run-test02.sh
 ```
 
-This validates and loads the **actual final profile**, downloads the pinned
+This validates and loads the **actual final profile**, downloads all pinned policy files, keys and
 scripts and compares them byte-for-byte with local tested copies before
 checking syntax, then probes the installation proposal. It does not
 start installation or prove that the installed system boots.
@@ -48,9 +48,8 @@ Generate profiles with `python3 agama/generate-profiles.py`; check for drift wit
 The check rejects overlap between install-only and persistent RPM requirements,
 checks that the two criscore anchors agree, that the spec matches seed and
 template, and that protected requirements are a subset of the workstation.
-Agama requests the manifest's individual packages directly (159, including
-Plymouth for the boot splash) plus eleven
-install-only packages (ten YaST tools and xauth); it does NOT request an unpublished
+Agama requests the manifest's individual packages directly (161, including chrony and Plymouth) plus twelve
+install-only packages (ten YaST tools, libyui-qt-pkg16 and xauth); it does NOT request an unpublished
 `myslowroll-workstation` metapackage. The two criscore anchors continue to
 protect the approved core; workstation extras are selected at installation
 but not yet held by a workstation RPM on later updates.
@@ -67,7 +66,7 @@ When changing policy contents/scripts, commit those assets first. Then run
 `python3 agama/generate-profiles.py --assets-revision FULL_ASSET_COMMIT_SHA`
 and commit the generated profile and revision file. Publish both commits
 together. CI compares deployed policy/scripts/keys with the pinned commit,
-and Test 02 compares the downloaded scripts byte-for-byte with local copies.
+and Test 02 compares the downloaded scripts, keys and policy files byte-for-byte with local copies.
 Changing local assets without updating the pin fails CI.
 
 See `ARCHITECTURE.md` and `agama/tests/TEST-02.md`.

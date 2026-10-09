@@ -17,27 +17,36 @@ agama config generate "$ROOT/agama/profile-final.jsonnet" > "$OUT"
 agama config validate "$OUT"
 echo 'VALIDATE=PASS'
 
-echo '=== FETCH AND CHECK THE EXACT PINNED SCRIPTS ==='
+echo '=== FETCH AND CHECK ALL EXACT PINNED ASSETS ==='
 python3 - "$OUT" "$REPORT_DIR" "$ROOT" <<'PY'
 import json, pathlib, re, subprocess, sys, urllib.request
 profile = json.load(open(sys.argv[1]))
 directory = pathlib.Path(sys.argv[2])
 root = pathlib.Path(sys.argv[3])
-for group, scripts in profile.get('scripts', {}).items():
-    for index, script in enumerate(scripts):
-        url = script['url']
-        match = re.fullmatch(
-            r'https://raw\.githubusercontent\.com/krism-eu/mySlowrollOS/[0-9a-f]{40}/(agama/[\w-]+\.sh)',
-            url)
-        if not match:
-            raise SystemExit('Script URL is not pinned: ' + url)
-        with urllib.request.urlopen(url, timeout=30) as response:
-            content = response.read()
-        path = directory / f'{group}-{index}.sh'
-        path.write_bytes(content)
-        local = root / match.group(1)
-        subprocess.run(['cmp', str(path), str(local)], check=True)
-        print('PINNED_MATCH=PASS', url)
+entries = [(f'{group}-{index}.sh', script, True)
+           for group, scripts in profile.get('scripts', {}).items()
+           for index, script in enumerate(scripts)]
+entries += [(f'policy-{index}', entry, False)
+            for index, entry in enumerate(profile.get('files', []))]
+revision = (root / 'agama/assets-revision').read_text().strip()
+prefix = f'https://raw.githubusercontent.com/krism-eu/mySlowrollOS/{revision}/'
+for name, entry, is_script in entries:
+    url = entry['url']
+    if not url.startswith(prefix):
+        raise SystemExit('Asset URL does not use the reviewed pin: ' + url)
+    relative = pathlib.PurePosixPath(url[len(prefix):])
+    if relative.is_absolute() or '..' in relative.parts or not relative.parts:
+        raise SystemExit('Invalid asset path: ' + url)
+    local = (root / relative).resolve()
+    if not local.is_relative_to(root.resolve()) or not local.is_file():
+        raise SystemExit('Missing or escaping local asset: ' + url)
+    with urllib.request.urlopen(url, timeout=30) as response:
+        content = response.read()
+    path = directory / name
+    path.write_bytes(content)
+    subprocess.run(['cmp', str(path), str(local)], check=True)
+    print('PINNED_MATCH=PASS', url)
+    if is_script:
         subprocess.run(['bash', '-n', str(path)], check=True)
         print('BASH_N=PASS', url)
 PY

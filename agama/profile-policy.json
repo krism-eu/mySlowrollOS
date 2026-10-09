@@ -70,7 +70,7 @@
     },
     {
       "source": "myslowroll-policy/kdesurc",
-      "destination": "/etc/skel/.config/kdesurc",
+      "destination": "/etc/xdg/kdesurc",
       "permissions": "0644"
     },
     {
@@ -106,11 +106,6 @@
     {
       "source": "myslowroll-policy/backintime-autostart-disabled.desktop",
       "destination": "/etc/xdg/autostart/backintime.desktop",
-      "permissions": "0644"
-    },
-    {
-      "source": "myslowroll-policy/backintime-autostart-disabled.desktop",
-      "destination": "/etc/skel/.config/autostart/backintime.desktop",
       "permissions": "0644"
     }
   ],

@@ -7,7 +7,7 @@ bash agama/tests/run-test02.sh
 ```
 
 The runner uses the single generated profile-final.jsonnet directly,
-checks downloaded pinned scripts against local files byte-for-byte, and
+checks all downloaded pinned scripts, keys and policy files against local files byte-for-byte, and
 validates their syntax. The audit loads/probes configuration but never
 calls agama install.
 An existing UI storage proposal can still exist: inspect it before installation.
@@ -115,7 +115,9 @@ Confirm YaST launches from the Plasma menu with `xauth` installed.
 
 The next fresh installation must retain `NetworkManager.service`,
 `bluetooth.service`, `cups.service`, `chronyd.service`,
-`firewalld.service`, and `snapper-cleanup.timer`. Both wireless
+`firewalld.service`, `apparmor.service`, and `snapper-cleanup.timer`.
+Firstboot explicitly enables chronyd, AppArmor and Snapper cleanup; check their
+runtime activation after the next reboot as well. Both wireless
 radios start off; the user can turn them on from Plasma later without
 a recurrent script turning them back off. Read:
 `nmcli radio wifi`, `bluetoothctl show`, and
@@ -128,9 +130,7 @@ weekly `fstrim.timer` using `systemctl list-timers --all` and
 Never run mdadm/LVM removal in the service phase.
 
 Back In Time remains available via the application menu and starts only
-manually. On a fresh user home verify both
-`/etc/xdg/autostart/backintime.desktop` and
-`~/.config/autostart/backintime.desktop` have `Hidden=true`,
+manually. Verify `/etc/xdg/autostart/backintime.desktop` has `Hidden=true`,
 and `systemctl --user --failed` has no new backintime autostart failure.
 When reusing an existing home, an old user autostart file can override
 system policy: verify it explicitly. Do not claim this acceptance passed

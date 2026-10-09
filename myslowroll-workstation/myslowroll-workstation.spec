@@ -33,6 +33,7 @@ Requires:       breeze6-style
 Requires:       btrfsmaintenance
 Requires:       btrfsprogs
 Requires:       ca-certificates-mozilla
+Requires:       chrony
 Requires:       cifs-utils
 Requires:       coreutils
 Requires:       criscore1
