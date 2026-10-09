@@ -160,6 +160,7 @@ Requires:       upower
 Requires:       usbutils
 Requires:       util-linux
 Requires:       wget
+Requires:       which
 Requires:       wireplumber
 Requires:       wpa_supplicant
 Requires:       xdg-desktop-portal
