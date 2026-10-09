@@ -19,7 +19,9 @@ run systemctl --user --failed --no-pager
 run sudo -n journalctl -b -u agama-scripts.service --no-pager -n 250
 run sudo -n journalctl -b -1 -u agama-scripts.service --no-pager -n 100
 run cat /proc/cmdline /etc/kernel/cmdline
-run findmnt -o TARGET,SOURCE,FSTYPE,OPTIONS / /boot/efi /home /var
+for target in / /boot/efi /home /var; do
+  run findmnt --target "$target" -o TARGET,SOURCE,FSTYPE,OPTIONS
+done
 run lsblk -o NAME,TYPE,FSTYPE,MOUNTPOINTS
 run sudo -n btrfs subvolume list /
 run sudo -n btrfs subvolume get-default /
