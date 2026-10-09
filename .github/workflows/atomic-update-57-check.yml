@@ -49,6 +49,25 @@ jobs:
           bash -n agama/init-firstboot.sh
           bash -n agama/post-chroot-boot-policy.sh
           bash agama/init-firstboot.sh --self-test
+          bash agama/post-chroot-boot-policy.sh --self-test
+          python3 - <<'PY'
+          import json
+          p = json.load(open('agama/profile-policy.json'))
+          files = {f['destination']: f['source'] for f in p['files']}
+          expected = {
+              '/etc/bluetooth/main.conf': 'myslowroll-policy/90-myslowroll-bluez.conf',
+              '/etc/xdg/kcminputrc': 'myslowroll-policy/kcminputrc',
+              '/usr/share/sddm/themes/breeze/theme.conf.user': 'myslowroll-policy/90-myslowroll-sddm-theme.conf',
+              '/var/lib/NetworkManager/NetworkManager.state': 'myslowroll-policy/NetworkManager.state'
+          }
+          assert all(files.get(k) == v for k, v in expected.items()), files
+          assert 'AutoEnable=false' in open(expected['/etc/bluetooth/main.conf']).read()
+          assert 'WirelessEnabled=false' in open(expected['/var/lib/NetworkManager/NetworkManager.state']).read()
+          assert 'NumLock=0' in open(expected['/etc/xdg/kcminputrc']).read()
+          assert 'type=color' in open(expected['/usr/share/sddm/themes/breeze/theme.conf.user']).read()
+          assert not any(k in p for k in ('storage','user','root'))
+          print('PASS: first-boot radio/greeter policies and interactive storage')
+          PY
           grep -Fxq 'rw security=apparmor systemd.show_status=1 quiet' myslowroll-policy/kernel-cmdline
           grep -Fxq 'xauth' agama/install-only-packages.txt
           grep -Fxq 'Requires:       plymouth' myslowroll-workstation/myslowroll-workstation.spec
