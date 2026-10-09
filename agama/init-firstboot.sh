@@ -199,8 +199,14 @@ else
   firstboot_rc=1
 fi
 
-# BlueZ keeps bluetooth.service enabled for manual operation. AutoEnable=false
-# covers newly detected adapters; explicitly power off the initial controller.
+# BlueZ stays enabled for manual operation. AutoEnable=false covers newly
+# detected adapters; start the service now to verify the initial OFF state.
+if ! systemctl is-active --quiet bluetooth.service; then
+  if ! systemctl start bluetooth.service; then
+    echo 'myslowroll-firstboot: cannot start Bluetooth for initial radio check' >&2
+    firstboot_rc=1
+  fi
+fi
 if systemctl is-active --quiet bluetooth.service; then
   if ! grep -Eq '^AutoEnable=false$' /etc/bluetooth/main.conf; then
     echo 'myslowroll-firstboot: BlueZ AutoEnable=false missing' >&2
@@ -221,6 +227,9 @@ if systemctl is-active --quiet bluetooth.service; then
       fi
     fi
   fi
+else
+  echo 'myslowroll-firstboot: Bluetooth inactive; initial radio state unverified' >&2
+  firstboot_rc=1
 fi
 
 # Native Btrfs timer policy approved for this single-disk Btrfs+ext4 PC.
