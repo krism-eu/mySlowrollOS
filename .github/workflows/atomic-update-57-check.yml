@@ -39,6 +39,7 @@ jobs:
           done
           test "$(grep -Fc 'exit "$firstboot_rc"' agama/init-firstboot.sh)" -eq 1
           bash agama/init-firstboot.sh --self-test
+          bash agama/post-chroot-boot-policy.sh --self-test
       - name: Verify pinned installer assets match working tree
         shell: bash
         run: |
