@@ -64,6 +64,12 @@ Requires:       kde-cli-tools6
 Requires:       kde-gtk-config6
 Requires:       kdeconnect-kde
 Requires:       kernel-default
+# The firmware below is specifically requested for this workstation.
+# sof-firmware is not requested (removed from current system; audio works).
+# kernel-firmware-platform is the only additional exclusion candidate:
+# verify its removal on the real hardware before treating it as safe.
+# Product/kernel dependencies can still select either package in Agama;
+# comments are NOT a package ban and no post-install removal is authorized.
 Requires:       kernel-firmware-amdgpu
 Requires:       kernel-firmware-mediatek
 Requires:       kernel-firmware-realtek
