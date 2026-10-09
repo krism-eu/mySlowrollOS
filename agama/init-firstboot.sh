@@ -293,13 +293,29 @@ if ! grep -Fxq 'Hidden=true' /etc/xdg/autostart/backintime.desktop; then
   firstboot_rc=1
 fi
 
-# Keep root Snapper but disable timeline snapshots. Cleanup remains available.
-if [[ -f /etc/snapper/configs/root ]]; then
-  if grep -q '^TIMELINE_CREATE=' /etc/snapper/configs/root; then
-    sed -i 's/^TIMELINE_CREATE=.*/TIMELINE_CREATE="no"/' /etc/snapper/configs/root
+# Keep root Snapper and the stock cleanup timer. YaST/Zypper create
+# pre/post snapshots (two per transaction); cap ordinary number-cleanup
+# candidates to roughly four transactions, NOT all snapshots on the disk.
+# Manually protected snapshots have no cleanup algorithm and are untouched.
+# Keep the stock one-hour minimum age so an in-progress pre/post pair is not
+# prematurely pruned. Never run deletion/cleanup during first boot.
+if [[ -f /etc/snapper/configs/root ]] && command -v snapper >/dev/null 2>&1; then
+  snapper_qgroup="$(sed -nE 's/^QGROUP="?([^"]*)"?$/\1/p' /etc/snapper/configs/root | head -n 1)"
+  if [[ -n "$snapper_qgroup" ]]; then
+    snapper_number_limit='4-8'
+    snapper_important_limit='1-3'
   else
-    printf '%s\n' 'TIMELINE_CREATE="no"' >> /etc/snapper/configs/root
+    snapper_number_limit=8
+    snapper_important_limit=3
   fi
+  if ! snapper -c root set-config \
+      "TIMELINE_CREATE=no NUMBER_CLEANUP=yes NUMBER_LIMIT=${snapper_number_limit} NUMBER_LIMIT_IMPORTANT=${snapper_important_limit} NUMBER_MIN_AGE=3600 EMPTY_PRE_POST_CLEANUP=yes"; then
+    echo 'myslowroll-firstboot: Snapper root retention policy was not applied' >&2
+    firstboot_rc=1
+  fi
+else
+  echo 'myslowroll-firstboot: Snapper root config/tool missing; retention unverified' >&2
+  firstboot_rc=1
 fi
 
 exit "$firstboot_rc"
