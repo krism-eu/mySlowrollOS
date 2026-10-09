@@ -2,6 +2,7 @@
 # RPM Requires from myslowroll-workstation or criscore1/2.
 # Keep the list small: optional/dismissible desktop tools only.
 # YaST is intentionally not pinned against future Slowroll package transitions.
+libyui-qt-pkg16
 yast2
 yast2-apparmor
 yast2-bootloader
