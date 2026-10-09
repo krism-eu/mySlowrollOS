@@ -114,6 +114,7 @@ jobs:
           print('PASS: first-boot radio/greeter policies and interactive storage')
           PY
           grep -Fxq 'rw security=apparmor systemd.show_status=1 quiet' myslowroll-policy/kernel-cmdline
+          grep -Fxq 'libyui-qt-pkg16' agama/install-only-packages.txt
           grep -Fxq 'xauth' agama/install-only-packages.txt
           grep -Fxq 'Requires:       plymouth' myslowroll-workstation/myslowroll-workstation.spec
           ! grep -Eq '^Requires:[[:space:]]+plymouth([[:space:]]|$)' obs/criscore1/criscore1.spec
