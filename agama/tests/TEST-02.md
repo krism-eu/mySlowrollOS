@@ -67,6 +67,32 @@ mount before treating it as safe. Inspect first-boot errors with
 reboot. Record outputs and installed RPM versions. A clean profile probe alone
 does not satisfy this acceptance test.
 
+## Snapper root retention (tested locally; Agama VM still required)
+
+The reviewed workstation test kept four ordinary snapshots (two complete
+pre/post pairs) after `snapper -c root cleanup number`, with the active
+snapshot 1 preserved. Confirm the same settings on the fresh Agama VM:
+
+```sh
+sudo snapper -c root get-config | grep -E 'NUMBER_CLEANUP|NUMBER_LIMIT|NUMBER_MIN_AGE|TIMELINE_CREATE|EMPTY_PRE_POST_CLEANUP'
+sudo snapper -c root list
+grep -E '^(SUBVOLUME|FSTYPE|QGROUP|NUMBER_LIMIT|NUMBER_LIMIT_IMPORTANT)=' /etc/snapper/configs/root
+```
+
+Expected: NUMBER_CLEANUP=yes, NUMBER_LIMIT=4-4,
+NUMBER_LIMIT_IMPORTANT=0-0, NUMBER_MIN_AGE=3600,
+TIMELINE_CREATE=no and EMPTY_PRE_POST_CLEANUP=yes.
+Only four ordinary snapshots are subject to `number` retention, with
+a one-hour minimum age; manual snapshots with blank Cleanup remain protected,
+up to three curated manually. No snapshot deletion occurs at installation.
+
+These values must be set in Agama's chrooted **post** script, before the
+first reboot, and only verified (never re-applied) in the one-time **init**
+script. Test a real VM install: a shell self-test does NOT prove that Agama
+has already created /etc/snapper/configs/root at post-script time.
+If that file is missing, installation must report a clear error rather
+than silently claim retention is configured. Agama storage stays interactive.
+
 ## Bootloader parameter regression
 
 Boot the Agama ISO using its **normal** entry. On x86_64, YaST may copy
