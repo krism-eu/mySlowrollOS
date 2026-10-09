@@ -55,11 +55,19 @@ jobs:
       - name: Check final generated Agama profile
         if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
         run: python3 agama/generate-profiles.py --check
-      - name: Work branch - final asset pin deferred
+      - name: Work branch - validate generated profile when assets are pinned
         if: github.event_name == 'push' && github.ref == 'refs/heads/work/myslowroll-rifiniture-20261009'
+        shell: bash
         run: |
-          echo 'Work branch only: installer asset pin/profile tests deferred until final regeneration.'
-          echo 'Main and pull requests still require both checks. This is NOT installer acceptance.'
+          set -euo pipefail
+          revision="$(cat agama/assets-revision)"
+          git cat-file -e "${revision}^{commit}"
+          if git diff --quiet "$revision" HEAD -- myslowroll-policy ':(glob)agama/*.sh' agama/keys; then
+            python3 agama/generate-profiles.py --check
+            echo 'PASS: installer assets and generated profile are synchronized.'
+          else
+            echo 'DEFERRED: branch has unpinned installer assets; regenerate profile before release.'
+          fi
       - name: Bash syntax
         run: bash -n atomic-update/atomic-update-5.7.1.sh
       - name: Agama cmdline and YaST functional regressions
