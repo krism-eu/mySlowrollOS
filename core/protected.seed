@@ -34,6 +34,10 @@ exfatprogs
 filesystem
 firewalld
 glibc
+# NEXT APPROVED criscore rebuild: user prefers glibc-locale-base only,
+# NOT the full glibc-locale, if it_IT.UTF-8 can be provisioned and kept
+# across Slowroll glibc upgrades and atomic rollback WITHOUT fragile hooks.
+# Otherwise keep full glibc-locale: stability takes priority over ~220 MiB.
 glibc-locale
 iproute2
 iputils
