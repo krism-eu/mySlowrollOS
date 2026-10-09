@@ -82,6 +82,26 @@
       "source": "myslowroll-policy/10-myslowroll-zram.conf",
       "destination": "/etc/systemd/zram-generator.conf.d/10-myslowroll.conf",
       "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/NetworkManager.state",
+      "destination": "/var/lib/NetworkManager/NetworkManager.state",
+      "permissions": "0600"
+    },
+    {
+      "source": "myslowroll-policy/90-myslowroll-bluez.conf",
+      "destination": "/etc/bluetooth/main.conf",
+      "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/kcminputrc",
+      "destination": "/etc/xdg/kcminputrc",
+      "permissions": "0644"
+    },
+    {
+      "source": "myslowroll-policy/90-myslowroll-sddm-theme.conf",
+      "destination": "/usr/share/sddm/themes/breeze/theme.conf.user",
+      "permissions": "0644"
     }
   ],
   "scripts": {

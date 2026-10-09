@@ -115,6 +115,22 @@ if ! systemctl mask ModemManager.service; then
   firstboot_rc=1
 fi
 
+# The preinstalled NetworkManager.state disables Wi-Fi from its first start.
+# A one-time runtime call also covers a live installer handover. Subsequent
+# boots honor the state changed by the user from Plasma: no persistent job.
+if command -v nmcli >/dev/null 2>&1 && systemctl is-active --quiet NetworkManager.service; then
+  if ! nmcli radio wifi off; then
+    echo 'myslowroll-firstboot: unable to persist Wi-Fi off state' >&2
+    firstboot_rc=1
+  fi
+fi
+
+# BlueZ /etc/bluetooth/main.conf contains [Policy] AutoEnable=false, so
+# controllers remain off at discovery/reboot but may be turned on manually.
+if command -v bluetoothctl >/dev/null 2>&1 && systemctl is-active --quiet bluetooth.service; then
+  bluetoothctl --timeout 5 power off >/dev/null 2>&1 || true
+fi
+
 # Keep root Snapper but disable timeline snapshots. Cleanup remains available.
 if [[ -f /etc/snapper/configs/root ]]; then
   if grep -q '^TIMELINE_CREATE=' /etc/snapper/configs/root; then
