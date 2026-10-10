@@ -23,7 +23,7 @@ find_esp_mountpoint() {
     info="$(findmnt -n -o TARGET,FSTYPE --target "$candidate" 2>/dev/null || true)"
     read -r target fstype <<< "$info"
     if [[ "$target" == "$candidate" && "$fstype" == vfat ]]; then
-      printf '%s\\n' "$candidate"
+      printf '%s\n' "$candidate"
       return 0
     fi
   done
@@ -72,10 +72,10 @@ EOF
   findmnt() {
     local target="${@: -1}"
     case "${MOCK_ESP_LAYOUT:-none}:$target" in
-      boot:/boot/efi|boot:/boot) printf '/boot vfat\\n' ;;
-      efi:/boot/efi) printf '/boot/efi vfat\\n' ;;
-      efi:/boot) printf '/boot btrfs\\n' ;;
-      none:*) printf '/ btrfs\\n' ;;
+      boot:/boot/efi|boot:/boot) printf '/boot vfat\n' ;;
+      efi:/boot/efi) printf '/boot/efi vfat\n' ;;
+      efi:/boot) printf '/boot btrfs\n' ;;
+      none:*) printf '/ btrfs\n' ;;
       *) return 1 ;;
     esac
   }
