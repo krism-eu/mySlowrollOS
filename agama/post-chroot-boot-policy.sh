@@ -15,6 +15,21 @@ validate_default_entry() {
   grep -Eq '^options[[:space:]]+.*rootflags=subvol=.*\.snapshots/[0-9]+/snapshot' "$entry"
 }
 
+# Agama may mount the EFI System Partition at /boot or /boot/efi.
+# Check the exact mountpoint: --target alone can report the parent mount.
+find_esp_mountpoint() {
+  local candidate info target fstype
+  for candidate in /boot/efi /boot; do
+    info="$(findmnt -n -o TARGET,FSTYPE --target "$candidate" 2>/dev/null || true)"
+    read -r target fstype <<< "$info"
+    if [[ "$target" == "$candidate" && "$fstype" == vfat ]]; then
+      printf '%s\\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 # Agama has installed Snapper, but snapperd/systemd does not run in chroot.
 # Preserve installer-created SUBVOLUME/QGROUP, changing only verified keys.
 configure_snapper_root_file() {
@@ -53,6 +68,22 @@ EOF
   sed -i '/rootflags=/d' "$dir/loader/entries/snapshot-1.conf"
   if validate_default_entry "$dir" snapshot-1; then exit 1; fi
 
+  # Exercise exact ESP detection for both layouts, without touching host mounts.
+  findmnt() {
+    local target="${@: -1}"
+    case "${MOCK_ESP_LAYOUT:-none}:$target" in
+      boot:/boot/efi|boot:/boot) printf '/boot vfat\\n' ;;
+      efi:/boot/efi) printf '/boot/efi vfat\\n' ;;
+      efi:/boot) printf '/boot btrfs\\n' ;;
+      none:*) printf '/ btrfs\\n' ;;
+      *) return 1 ;;
+    esac
+  }
+  [[ "$(MOCK_ESP_LAYOUT=boot find_esp_mountpoint)" == /boot ]] || exit 1
+  [[ "$(MOCK_ESP_LAYOUT=efi find_esp_mountpoint)" == /boot/efi ]] || exit 1
+  if MOCK_ESP_LAYOUT=none find_esp_mountpoint; then exit 1; fi
+  unset -f findmnt
+
   cat > "$dir/snapper-root.conf" <<'SNAPPER_TEST'
 SUBVOLUME="/"
 FSTYPE="btrfs"
@@ -84,6 +115,7 @@ SNAPPER_TEST
     exit 1
   fi
   echo 'PASS: BLS default entry validator refuses missing/foreign/invalid entries'
+  echo 'PASS: ESP detection accepts exact /boot and /boot/efi vfat mounts'
   echo 'PASS: Snapper retention 4/0, preserves Agama root config, idempotent, fail-closed'
   exit 0
 fi
@@ -101,11 +133,16 @@ getent passwd sddm >/dev/null || { echo 'mySlowrollOS: sddm account missing' >&2
 install -d -m 0700 -o sddm -g sddm /var/lib/sddm/.config
 install -m 0600 -o sddm -g sddm /etc/xdg/kcminputrc /var/lib/sddm/.config/kcminputrc
 
-# Agama configures the ESP interactively. Validate that it is mounted and
-# let sdbootutil choose the real Snapper default BLS entry *before first reboot*.
+# Apply Snapper retention independently of boot-entry validation, without
+# deleting snapshots. A later EFI/bootloader error must not skip this policy.
+configure_snapper_root_file /etc/snapper/configs/root || exit 1
+echo 'mySlowrollOS: Snapper root retention configured before first reboot'
+
+# Agama configures the ESP interactively. Detect the actual EFI mountpoint
+# and let sdbootutil choose the real Snapper default BLS entry before reboot.
 # Neither a custom hand-written myslowroll.conf nor a hard-coded partition is used.
-[[ "$(findmnt -n -o FSTYPE --target /boot/efi 2>/dev/null)" == vfat ]] || {
-  echo 'mySlowrollOS: Agama did not mount a vfat ESP at /boot/efi' >&2
+esp_mount="$(find_esp_mountpoint)" || {
+  echo 'mySlowrollOS: no exact vfat ESP mountpoint at /boot or /boot/efi' >&2
   exit 1
 }
 command -v sdbootutil >/dev/null || { echo 'mySlowrollOS: sdbootutil missing' >&2; exit 1; }
@@ -118,13 +155,9 @@ sdbootutil set-default-snapshot || {
   exit 1
 }
 default_entry="$(sdbootutil get-default)" || exit 1
-validate_default_entry /boot/efi "$default_entry" || {
-  echo "mySlowrollOS: invalid or missing default BLS entry: $default_entry" >&2
+validate_default_entry "$esp_mount" "$default_entry" || {
+  echo "mySlowrollOS: invalid or missing default BLS entry in $esp_mount: $default_entry" >&2
   exit 1
 }
-echo "mySlowrollOS: installed BLS default verified: $default_entry"
-
-# Apply tested retention before first boot, without deleting any snapshots.
-configure_snapper_root_file /etc/snapper/configs/root
-echo 'mySlowrollOS: Snapper root retention configured before first reboot'
+echo "mySlowrollOS: installed BLS default verified on $esp_mount: $default_entry"
 exit 0
