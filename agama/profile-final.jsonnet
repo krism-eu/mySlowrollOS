@@ -279,7 +279,7 @@
       "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/0b6379cfd4d0900f6d2e38fa22bcaf52f293a81f/myslowroll-policy/90-myslowroll-sddm-theme.conf"
     },
     {
-      "destination": "/etc/xdg/autostart/backintime.desktop",
+      "destination": "/var/lib/myslowroll/backintime-autostart-disabled.desktop",
       "permissions": "0644",
       "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/0b6379cfd4d0900f6d2e38fa22bcaf52f293a81f/myslowroll-policy/backintime-autostart-disabled.desktop"
     }

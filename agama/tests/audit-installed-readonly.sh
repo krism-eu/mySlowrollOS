@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Run as the logged-in desktop user after sudo -v. No configuration changes.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 set -u
 umask 077
 report=$(mktemp "${TMPDIR:-/tmp}/myslowroll-review-XXXXXXXX.txt") || exit 1
