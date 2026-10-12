@@ -1,4 +1,12 @@
 -------------------------------------------------------------------
+Mon Oct 12 2026 - kris
+
+- Fix Back In Time autostart deployment path, recovery preflight gating,
+  and valid no-op solver plans; warn before edits to the running SOURCE.
+- Generalize work-branch CI triggers and add ShellCheck (error severity).
+- Bump RPM Release to 1 for the next OBS build; no OBS publication performed.
+
+-------------------------------------------------------------------
 Thu Oct 08 2026 - krism
 
 - Review candidate, no RPM publication/version bump:
