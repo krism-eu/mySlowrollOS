@@ -289,13 +289,13 @@
       {
         "name": "myslowroll-native-sddm-before-first-boot",
         "chroot": true,
-        "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/d30d49cab2fd6b71d53e3d396ea9b8f8561c81e5/agama/post-chroot-boot-policy.sh"
+        "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/d4117f7ad83efee87782156ba2c4f47839857f27/agama/post-chroot-boot-policy.sh"
       }
     ],
     "init": [
       {
         "name": "myslowroll-firstboot-policy",
-        "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/d30d49cab2fd6b71d53e3d396ea9b8f8561c81e5/agama/init-firstboot.sh"
+        "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/d4117f7ad83efee87782156ba2c4f47839857f27/agama/init-firstboot.sh"
       }
     ]
   },
