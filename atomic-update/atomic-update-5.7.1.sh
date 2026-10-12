@@ -582,6 +582,20 @@ validate_plan_operation_count() {
     [[ "${expected}" =~ ^[0-9]+$ && "${expected}" == "${actual}" ]]
 }
 
+# Accept only a well-formed no-op solver stream with no package operations.
+# Some Zypper versions omit install-summary entirely when there is nothing to do.
+hash_noop_plan() {
+    local plan="$1"
+    local ops="$2"
+    local hash
+    LC_ALL=C xmllint --noout "${plan}" 2>/dev/null || return 1
+    extract_plan_operations "${plan}" "${ops}" || return 1
+    [[ ! -s "${ops}" ]] || return 1
+    hash="$(LC_ALL=C xmllint --c14n "${plan}" 2>/dev/null | sha256sum | awk '{print $1}')" || return 1
+    [[ "${hash}" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\\n' "${hash}"
+}
+
 parser_selftest() {
     local xml
     local ops
@@ -606,12 +620,29 @@ EOF_XML_SELFTEST
     validate_plan_operation_count "${xml}" "${ops}" || { rm -f -- "${xml}" "${ops}"; return 1; }
     [[ "$(xml_summary_attribute "${xml}" download-size)" == 123 ]] || { rm -f -- "${xml}" "${ops}"; return 1; }
     [[ "$(xml_summary_attribute "${xml}" space-usage-installed)" == 456 ]] || { rm -f -- "${xml}" "${ops}"; return 1; }
-    awk -F '\t' '
+    awk -F '\\t' '
         NR==1 { ok = ($1=="install" && $2=="pkg-a" && $3=="1-1" && $4=="x86_64") }
         NR==2 { ok = ok && ($1=="upgrade" && $2=="pkg-b" && $3=="2-1" && $4=="x86_64" && $5=="1-1" && $6=="x86_64") }
         NR==3 { ok = ok && ($1=="remove" && $2=="pkg-c" && $3=="3-1" && $4=="noarch") }
         END { exit !(ok && NR==3) }
     ' "${ops}" || { rm -f -- "${xml}" "${ops}"; return 1; }
+
+    cat >"${xml}" <<'EOF_XML_NOOP'
+<stream><message type="info">Nothing to do.</message></stream>
+EOF_XML_NOOP
+    local noop_hash
+    noop_hash="$(hash_noop_plan "${xml}" "${ops}")" ||
+        { rm -f -- "${xml}" "${ops}"; return 1; }
+    [[ "${noop_hash}" =~ ^[0-9a-f]{64}$ && ! -s "${ops}" ]] ||
+        { rm -f -- "${xml}" "${ops}"; return 1; }
+
+    cat >"${xml}" <<'EOF_XML_INVALID_NOOP'
+<stream><to-install><solvable type="package" name="pkg-a" edition="1-1" arch="x86_64"/></to-install></stream>
+EOF_XML_INVALID_NOOP
+    if hash_noop_plan "${xml}" "${ops}" >/dev/null 2>&1; then
+        rm -f -- "${xml}" "${ops}"
+        return 1
+    fi
     rm -f -- "${xml}" "${ops}"
 }
 
@@ -829,16 +860,8 @@ make_plan() {
     summary_count="$(install_summary_count "${PLAN_XML_PREPARED}")" ||
         { mark_aborted 'conteggio install-summary non leggibile'; return 1; }
     if [[ "${summary_count}" == 0 || "${summary_count}" == 0.0 ]]; then
-        LC_ALL=C xmllint --noout "${PLAN_XML_PREPARED}" 2>/dev/null ||
-            { mark_aborted 'XML no-op non valido'; return 1; }
-        extract_plan_operations "${PLAN_XML_PREPARED}" "${PLAN_OPS}" ||
-            { mark_aborted 'estrazione operazioni no-op fallita'; return 1; }
-        [[ ! -s "${PLAN_OPS}" ]] ||
-            { mark_aborted 'piano senza install-summary ma con operazioni'; return 1; }
-        planh="$(LC_ALL=C xmllint --c14n "${PLAN_XML_PREPARED}" 2>/dev/null | sha256sum | awk '{print $1}')" ||
-            { mark_aborted 'hash piano no-op fallito'; return 1; }
-        [[ "${planh}" =~ ^[0-9a-f]{64}$ ]] ||
-            { mark_aborted 'hash piano no-op non valido'; return 1; }
+        planh="$(hash_noop_plan "${PLAN_XML_PREPARED}" "${PLAN_OPS}")" ||
+            { mark_aborted 'XML no-op non valido o contiene operazioni'; return 1; }
     else
         scan_plan_for_critical_removals "${PLAN_XML_PREPARED}" ||
             { mark_aborted 'rimozioni critiche nel piano'; return 1; }
