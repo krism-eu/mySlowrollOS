@@ -34,7 +34,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: Run ShellCheck
         shell: bash
-        run: shellcheck atomic-update/atomic-update-5.7.1.sh atomic-update/tests/*.sh agama/*.sh agama/tests/*.sh
+        run: shellcheck --severity=error atomic-update/atomic-update-5.7.1.sh atomic-update/tests/*.sh agama/*.sh agama/tests/*.sh
       # Run these before the revision-pin check: intermediate work-branch
       # commits intentionally defer asset/profile regeneration until final review.
       - name: Early shell syntax and firstboot self-test
