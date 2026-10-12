@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - work/myslowroll-rifiniture-20261009
+      - 'work/**'
     paths:
       - 'myslowroll-policy/**'
       - 'atomic-update/**'
@@ -30,6 +30,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Run ShellCheck
+        shell: bash
+        run: shellcheck --severity=error atomic-update/atomic-update-5.7.1.sh atomic-update/tests/*.sh agama/*.sh agama/tests/*.sh
       # Run these before the revision-pin check: intermediate work-branch
       # commits intentionally defer asset/profile regeneration until final review.
       - name: Early shell syntax and firstboot self-test
@@ -58,7 +63,7 @@ jobs:
         if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
         run: python3 agama/generate-profiles.py --check
       - name: Work branch - validate generated profile when assets are pinned
-        if: github.event_name == 'push' && github.ref == 'refs/heads/work/myslowroll-rifiniture-20261009'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/work/')
         shell: bash
         run: |
           set -euo pipefail

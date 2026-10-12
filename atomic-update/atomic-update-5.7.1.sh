@@ -582,6 +582,20 @@ validate_plan_operation_count() {
     [[ "${expected}" =~ ^[0-9]+$ && "${expected}" == "${actual}" ]]
 }
 
+# Accept only a well-formed no-op solver stream with no package operations.
+# Some Zypper versions omit install-summary entirely when there is nothing to do.
+hash_noop_plan() {
+    local plan="$1"
+    local ops="$2"
+    local hash
+    LC_ALL=C xmllint --noout "${plan}" 2>/dev/null || return 1
+    extract_plan_operations "${plan}" "${ops}" || return 1
+    [[ ! -s "${ops}" ]] || return 1
+    hash="$(LC_ALL=C xmllint --c14n "${plan}" 2>/dev/null | sha256sum | awk '{print $1}')" || return 1
+    [[ "${hash}" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "${hash}"
+}
+
 parser_selftest() {
     local xml
     local ops
@@ -612,6 +626,23 @@ EOF_XML_SELFTEST
         NR==3 { ok = ok && ($1=="remove" && $2=="pkg-c" && $3=="3-1" && $4=="noarch") }
         END { exit !(ok && NR==3) }
     ' "${ops}" || { rm -f -- "${xml}" "${ops}"; return 1; }
+
+    cat >"${xml}" <<'EOF_XML_NOOP'
+<stream><message type="info">Nothing to do.</message></stream>
+EOF_XML_NOOP
+    local noop_hash
+    noop_hash="$(hash_noop_plan "${xml}" "${ops}")" ||
+        { rm -f -- "${xml}" "${ops}"; return 1; }
+    [[ "${noop_hash}" =~ ^[0-9a-f]{64}$ && ! -s "${ops}" ]] ||
+        { rm -f -- "${xml}" "${ops}"; return 1; }
+
+    cat >"${xml}" <<'EOF_XML_INVALID_NOOP'
+<stream><to-install><solvable type="package" name="pkg-a" edition="1-1" arch="x86_64"/></to-install></stream>
+EOF_XML_INVALID_NOOP
+    if hash_noop_plan "${xml}" "${ops}" >/dev/null 2>&1; then
+        rm -f -- "${xml}" "${ops}"
+        return 1
+    fi
     rm -f -- "${xml}" "${ops}"
 }
 
@@ -712,10 +743,11 @@ preflight() {
     # Confirm separately validates the booted TARGET, OS and RPM manifest.
     if [[ "${mode}" == update ]]; then
         check_boot_space || die 'spazio boot insufficiente/non determinabile.'
+        verify_cli_surface || die 'CLI tukit/sdbootutil incompatibile.'
     fi
 
-    verify_cli_surface || die 'CLI tukit/sdbootutil incompatibile.'
-
+    # Recovery and post-reboot confirm must remain available even if a
+    # monthly package update changes the human-readable --help output.
     [[ "${mode}" == recovery ]] && return 0
     [[ "${mode}" =~ ^(update|confirm)$ ]] || die "modalita preflight sconosciuta: ${mode}"
 
@@ -763,7 +795,7 @@ check_state_for_new() {
 
 make_plan() {
     local already_locked="${1:-0}"
-    local source_before source_after planh rpm_post a d
+    local source_before source_after planh rpm_post a d summary_count
     local cache_avail root_avail has_installs
     local -a rc
 
@@ -819,19 +851,29 @@ make_plan() {
     [[ "${source_before}" == "${source_after}" ]] ||
         { mark_aborted 'SOURCE/ZYpp cambiati durante pre-download'; return 1; }
 
-    # One canonical PREPARED solver result.
+    # One canonical PREPARED solver result. Zypper may emit a valid XML
+    # stream without install-summary when the solver has nothing to do.
+    # Treat that as a no-op only when the XML parses and contains no package
+    # operations; all malformed/unknown forms remain fail-closed.
     generate_xml_plan "${PLAN_XML_PREPARED}" ||
         { mark_aborted 'piano PREPARED fallito'; return 1; }
-    scan_plan_for_critical_removals "${PLAN_XML_PREPARED}" ||
-        { mark_aborted 'rimozioni critiche nel piano'; return 1; }
-    planh="$(plan_hash "${PLAN_XML_PREPARED}")" ||
-        { mark_aborted 'hash piano PREPARED fallito'; return 1; }
-    check_plan_space "${PLAN_XML_PREPARED}" ||
-        { mark_aborted 'spazio insufficiente'; return 1; }
-    extract_plan_operations "${PLAN_XML_PREPARED}" "${PLAN_OPS}" ||
-        { mark_aborted 'estrazione operazioni fallita'; return 1; }
-    validate_plan_operation_count "${PLAN_XML_PREPARED}" "${PLAN_OPS}" ||
-        { mark_aborted 'conteggio operazioni incoerente'; return 1; }
+    summary_count="$(install_summary_count "${PLAN_XML_PREPARED}")" ||
+        { mark_aborted 'conteggio install-summary non leggibile'; return 1; }
+    if [[ "${summary_count}" == 0 || "${summary_count}" == 0.0 ]]; then
+        planh="$(hash_noop_plan "${PLAN_XML_PREPARED}" "${PLAN_OPS}")" ||
+            { mark_aborted 'XML no-op non valido o contiene operazioni'; return 1; }
+    else
+        scan_plan_for_critical_removals "${PLAN_XML_PREPARED}" ||
+            { mark_aborted 'rimozioni critiche nel piano'; return 1; }
+        planh="$(plan_hash "${PLAN_XML_PREPARED}")" ||
+            { mark_aborted 'hash piano PREPARED fallito'; return 1; }
+        check_plan_space "${PLAN_XML_PREPARED}" ||
+            { mark_aborted 'spazio insufficiente'; return 1; }
+        extract_plan_operations "${PLAN_XML_PREPARED}" "${PLAN_OPS}" ||
+            { mark_aborted 'estrazione operazioni fallita'; return 1; }
+        validate_plan_operation_count "${PLAN_XML_PREPARED}" "${PLAN_OPS}" ||
+            { mark_aborted 'conteggio operazioni incoerente'; return 1; }
+    fi
 
     has_installs="$(grep -cvE '^[[:space:]]*remove[[:space:]]' "${PLAN_OPS}" || true)"
     if (( has_installs > 0 )) && ! pkg_cache_has_rpms; then
@@ -1439,6 +1481,7 @@ upgrade() {
     fi
     printf '=======================================================\n'
     printf 'SOURCE: %s | I pacchetti saranno installati solo nella snapshot TARGET.\n' "${STATE_SOURCE}"
+    printf 'ATTENZIONE: non modificare / (incluso /etc) fino al riavvio; le modifiche alla SOURCE possono non sopravvivere al boot sulla TARGET.\n'
     printf 'Scrivi esattamente: AGGIORNA OFFLINE E RIAVVIA\n> '
     IFS= read -r answer || die 'EOF: nessuna TARGET creata.'
     [[ "${answer}" == 'AGGIORNA OFFLINE E RIAVVIA' ]] || die 'upgrade annullato.'
