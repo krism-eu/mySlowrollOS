@@ -593,7 +593,7 @@ hash_noop_plan() {
     [[ ! -s "${ops}" ]] || return 1
     hash="$(LC_ALL=C xmllint --c14n "${plan}" 2>/dev/null | sha256sum | awk '{print $1}')" || return 1
     [[ "${hash}" =~ ^[0-9a-f]{64}$ ]] || return 1
-    printf '%s\\n' "${hash}"
+    printf '%s\n' "${hash}"
 }
 
 parser_selftest() {
@@ -620,7 +620,7 @@ EOF_XML_SELFTEST
     validate_plan_operation_count "${xml}" "${ops}" || { rm -f -- "${xml}" "${ops}"; return 1; }
     [[ "$(xml_summary_attribute "${xml}" download-size)" == 123 ]] || { rm -f -- "${xml}" "${ops}"; return 1; }
     [[ "$(xml_summary_attribute "${xml}" space-usage-installed)" == 456 ]] || { rm -f -- "${xml}" "${ops}"; return 1; }
-    awk -F '\\t' '
+    awk -F '\t' '
         NR==1 { ok = ($1=="install" && $2=="pkg-a" && $3=="1-1" && $4=="x86_64") }
         NR==2 { ok = ok && ($1=="upgrade" && $2=="pkg-b" && $3=="2-1" && $4=="x86_64" && $5=="1-1" && $6=="x86_64") }
         NR==3 { ok = ok && ($1=="remove" && $2=="pkg-c" && $3=="3-1" && $4=="noarch") }
