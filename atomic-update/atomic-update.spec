@@ -1,6 +1,6 @@
 Name:           atomic-update
 Version:        5.7.1
-Release:        0
+Release:        1
 Summary:        Guarded offline distribution upgrade for openSUSE Slowroll
 License:        MIT
 Source0:        %{name}-%{version}.sh
