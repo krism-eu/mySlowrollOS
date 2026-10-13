@@ -4,7 +4,7 @@
 
 Name:           criscore1
 Version:        0.2
-Release:        0
+Release:        1
 Summary:        Protected core anchor 1 for mySlowrollOS
 License:        MIT
 BuildArch:      noarch
@@ -65,3 +65,10 @@ fi
 %{_datadir}/criscore/criscore2
 
 %changelog
+* Tue Oct 13 2026 kris - 0.2-1
+- Protected core 108 -> 107 packages: add coreutils-systemd,
+  libnss_usrfiles2, system-group-wheel, system-user-nobody (essential
+  SUSE base, previously provided only by the base pattern); remove
+  alsa-utils, libxml2-tools, nvme-cli, pciutils, usbutils (leaf
+  diagnostic tools, still installed via myslowroll-workstation.spec,
+  no longer fail-closed).
