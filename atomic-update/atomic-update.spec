@@ -3,6 +3,7 @@ Version:        5.7.1
 Release:        1
 Summary:        Guarded offline distribution upgrade for openSUSE Slowroll
 License:        MIT
+URL:            https://build.opensuse.org/package/show/home:krism/atomic-update
 Source0:        %{name}-%{version}.sh
 
 BuildRequires:  bash
@@ -41,6 +42,7 @@ The package installs no timer or daemon. Execution is manual. It remains
 separate from criscore so the guarded updater can be replaced independently.
 
 %prep
+
 %build
 
 %install

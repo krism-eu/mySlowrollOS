@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 set -Eeuo pipefail
 umask 077
 
@@ -567,7 +567,7 @@ extract_plan_operations() {
     local plan="$1"
     local out="$2"
     LC_ALL=C awk '
-      function attr(s,key, token){token=key "=\"[^\"]*\""; if(match(s,token)){return substr(s,RSTART+length(key)+2,RLENGTH-length(key)-3)} return ""}
+      function attr(s,key, token,rest){token=key "=\""; if(match(s,token)){rest=substr(s,RSTART+length(token)); sub(/".*/,"",rest); return rest} return ""}
       /<to-(install|remove|upgrade|downgrade|upgrade-change-arch|downgrade-change-arch|reinstall|change-arch)>/ {line=$0; sub(/^.*<to-/,"",line); sub(/>.*/,"",line); op=line; next}
       /<\/to-(install|remove|upgrade|downgrade|upgrade-change-arch|downgrade-change-arch|reinstall|change-arch)>/ {op=""; next}
       op!="" && /<solvable[[:space:]]/ {kind=attr($0,"type"); if(kind=="") kind=attr($0,"kind"); if(kind!="package") next; n=attr($0,"name"); e=attr($0,"edition"); a=attr($0,"arch"); oe=attr($0,"edition-old"); oa=attr($0,"arch-old"); if(n==""||e==""||a=="") exit 42; print op "\t" n "\t" e "\t" a "\t" oe "\t" oa}
@@ -637,7 +637,11 @@ EOF_XML_NOOP
         { rm -f -- "${xml}" "${ops}"; return 1; }
 
     cat >"${xml}" <<'EOF_XML_INVALID_NOOP'
-<stream><to-install><solvable type="package" name="pkg-a" edition="1-1" arch="x86_64"/></to-install></stream>
+<stream>
+ <to-install>
+  <solvable type="package" name="pkg-a" edition="1-1" arch="x86_64"/>
+ </to-install>
+</stream>
 EOF_XML_INVALID_NOOP
     if hash_noop_plan "${xml}" "${ops}" >/dev/null 2>&1; then
         rm -f -- "${xml}" "${ops}"
