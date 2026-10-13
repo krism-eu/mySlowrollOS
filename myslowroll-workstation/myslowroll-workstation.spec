@@ -36,6 +36,7 @@ Requires:       ca-certificates-mozilla
 Requires:       chrony
 Requires:       cifs-utils
 Requires:       coreutils
+Requires:       coreutils-systemd
 Requires:       criscore1
 Requires:       criscore2
 Requires:       cups
@@ -91,6 +92,7 @@ Requires:       libhogweed6-x86-64-v3
 Requires:       liblz4-1-x86-64-v3
 Requires:       liblzma5-x86-64-v3
 Requires:       libnettle8-x86-64-v3
+Requires:       libnss_usrfiles2
 Requires:       libopenssl3-x86-64-v3
 Requires:       libsqlite3-0-x86-64-v3
 Requires:       libvulkan_radeon
@@ -147,6 +149,8 @@ Requires:       snapper-zypp-plugin
 Requires:       spectacle
 Requires:       sudo
 Requires:       sudo-policy-wheel-auth-self
+Requires:       system-group-wheel
+Requires:       system-user-nobody
 Requires:       systemd
 Requires:       systemd-boot
 Requires:       systemd-presets-branding-openSUSE

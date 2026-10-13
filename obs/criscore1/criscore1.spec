@@ -17,7 +17,6 @@ Requires:       Mesa-vulkan-device-select
 Requires:       NetworkManager
 Requires:       aaa_base
 Requires:       alsa-ucm-conf
-Requires:       alsa-utils
 Requires:       apparmor-abstractions
 Requires:       apparmor-parser
 Requires:       apparmor-profiles
@@ -35,6 +34,7 @@ Requires:       btrfsprogs
 Requires:       ca-certificates-mozilla
 Requires:       cifs-utils
 Requires:       coreutils
+Requires:       coreutils-systemd
 Requires:       curl
 Requires:       dbus-broker
 Requires:       dolphin
@@ -60,12 +60,11 @@ Requires:       kio-extras
 Requires:       konsole
 Requires:       kscreenlocker6
 Requires:       kwin6
+Requires:       libnss_usrfiles2
 Requires:       libvulkan_radeon
-Requires:       libxml2-tools
 Requires:       myrlyn
 Requires:       nano
 Requires:       ntfs-3g
-Requires:       nvme-cli
 Requires:       openSUSE-build-key
 Requires:       openSUSE-release
 Requires:       openSUSE-repos-Slowroll
@@ -73,7 +72,6 @@ Requires:       pam
 Requires:       pam-config
 Requires:       pam_kwallet6
 Requires:       patterns-glibc-hwcaps-x86_64_v3
-Requires:       pciutils
 Requires:       pipewire
 Requires:       pipewire-alsa
 Requires:       pipewire-pulseaudio
@@ -100,6 +98,8 @@ Requires:       snapper
 Requires:       snapper-zypp-plugin
 Requires:       sudo
 Requires:       sudo-policy-wheel-auth-self
+Requires:       system-group-wheel
+Requires:       system-user-nobody
 Requires:       systemd
 Requires:       systemd-boot
 Requires:       systemd-presets-branding-openSUSE
@@ -109,7 +109,6 @@ Requires:       tukit
 Requires:       ucode-amd
 Requires:       udisks2
 Requires:       upower
-Requires:       usbutils
 Requires:       util-linux
 Requires:       wireplumber
 Requires:       wpa_supplicant
@@ -136,7 +135,6 @@ Requires:       Mesa-vulkan-device-select
 Requires:       NetworkManager
 Requires:       aaa_base
 Requires:       alsa-ucm-conf
-Requires:       alsa-utils
 Requires:       apparmor-abstractions
 Requires:       apparmor-parser
 Requires:       apparmor-profiles
@@ -154,6 +152,7 @@ Requires:       btrfsprogs
 Requires:       ca-certificates-mozilla
 Requires:       cifs-utils
 Requires:       coreutils
+Requires:       coreutils-systemd
 Requires:       curl
 Requires:       dbus-broker
 Requires:       dolphin
@@ -179,12 +178,11 @@ Requires:       kio-extras
 Requires:       konsole
 Requires:       kscreenlocker6
 Requires:       kwin6
+Requires:       libnss_usrfiles2
 Requires:       libvulkan_radeon
-Requires:       libxml2-tools
 Requires:       myrlyn
 Requires:       nano
 Requires:       ntfs-3g
-Requires:       nvme-cli
 Requires:       openSUSE-build-key
 Requires:       openSUSE-release
 Requires:       openSUSE-repos-Slowroll
@@ -192,7 +190,6 @@ Requires:       pam
 Requires:       pam-config
 Requires:       pam_kwallet6
 Requires:       patterns-glibc-hwcaps-x86_64_v3
-Requires:       pciutils
 Requires:       pipewire
 Requires:       pipewire-alsa
 Requires:       pipewire-pulseaudio
@@ -219,6 +216,8 @@ Requires:       snapper
 Requires:       snapper-zypp-plugin
 Requires:       sudo
 Requires:       sudo-policy-wheel-auth-self
+Requires:       system-group-wheel
+Requires:       system-user-nobody
 Requires:       systemd
 Requires:       systemd-boot
 Requires:       systemd-presets-branding-openSUSE
@@ -228,7 +227,6 @@ Requires:       tukit
 Requires:       ucode-amd
 Requires:       udisks2
 Requires:       upower
-Requires:       usbutils
 Requires:       util-linux
 Requires:       wireplumber
 Requires:       wpa_supplicant

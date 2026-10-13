@@ -5,7 +5,6 @@ Mesa-vulkan-device-select
 NetworkManager
 aaa_base
 alsa-ucm-conf
-alsa-utils
 apparmor-abstractions
 apparmor-parser
 apparmor-profiles
@@ -23,6 +22,7 @@ btrfsprogs
 ca-certificates-mozilla
 cifs-utils
 coreutils
+coreutils-systemd
 curl
 dbus-broker
 dolphin
@@ -52,12 +52,11 @@ kio-extras
 konsole
 kscreenlocker6
 kwin6
+libnss_usrfiles2
 libvulkan_radeon
-libxml2-tools
 myrlyn
 nano
 ntfs-3g
-nvme-cli
 openSUSE-build-key
 openSUSE-release
 openSUSE-repos-Slowroll
@@ -65,7 +64,6 @@ pam
 pam-config
 pam_kwallet6
 patterns-glibc-hwcaps-x86_64_v3
-pciutils
 pipewire
 pipewire-alsa
 pipewire-pulseaudio
@@ -92,6 +90,8 @@ snapper
 snapper-zypp-plugin
 sudo
 sudo-policy-wheel-auth-self
+system-group-wheel
+system-user-nobody
 systemd
 systemd-boot
 systemd-presets-branding-openSUSE
@@ -101,7 +101,6 @@ tukit
 ucode-amd
 udisks2
 upower
-usbutils
 util-linux
 wireplumber
 wpa_supplicant
