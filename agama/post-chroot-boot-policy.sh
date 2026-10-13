@@ -52,6 +52,33 @@ configure_snapper_root_file() {
     "$config"
 }
 
+# Back In Time ships an autostart .desktop that starts pw-cache and must never
+# autolaunch on this workstation. The reviewed Hidden=true override is
+# delivered by Agama to a neutral path; the package owns
+# /etc/xdg/autostart/backintime.desktop, so the override is installed here with
+# an atomic replace and verified byte-for-byte before the first reboot.
+install_backintime_override() {
+  local asset="${BACKINTIME_OVERRIDE_ASSET:-/var/lib/myslowroll/backintime-autostart-disabled.desktop}"
+  local dest="${BACKINTIME_OVERRIDE_DEST:-/etc/xdg/autostart/backintime.desktop}"
+  local owner="${BACKINTIME_OVERRIDE_OWNER:-0}"
+  local group="${BACKINTIME_OVERRIDE_GROUP:-0}"
+  local tmp sections
+  [[ -f "$asset" && ! -L "$asset" ]] || { echo "mySlowrollOS: backintime override asset missing or not a regular file: $asset" >&2; return 1; }
+  sections="$(grep -Ec '^[[:space:]]*\[Desktop Entry\][[:space:]]*$' "$asset")"
+  [[ "$sections" -eq 1 ]] || { echo "mySlowrollOS: backintime override must have exactly one [Desktop Entry] section: $asset" >&2; return 1; }
+  grep -Fxq 'Hidden=true' "$asset" || { echo "mySlowrollOS: backintime override missing Hidden=true: $asset" >&2; return 1; }
+  if grep -Fq 'backintime pw-cache start' "$asset"; then
+    echo "mySlowrollOS: backintime override must not contain an autostart pw-cache command: $asset" >&2
+    return 1
+  fi
+  install -d -m 0755 "$(dirname "$dest")"
+  tmp="$(mktemp "${dest}.XXXXXX")" || return 1
+  install -m 0644 -o "$owner" -g "$group" "$asset" "$tmp" || return 1
+  mv -fT "$tmp" "$dest"
+  cmp -s "$asset" "$dest" || { echo "mySlowrollOS: backintime override verification failed: $dest" >&2; return 1; }
+  echo "mySlowrollOS: Back In Time autostart suppressed (Hidden=true) -> $dest"
+}
+
 if [[ "${1:-}" == --self-test ]]; then
   dir="$(mktemp -d)"
   trap 'rm -rf -- "$dir"' EXIT
@@ -114,6 +141,26 @@ SNAPPER_TEST
     echo 'FAIL: missing Snapper root accepted' >&2
     exit 1
   fi
+  # Back In Time: atomically replace an RPM-provided autostart file with the
+  # reviewed Hidden=true override, then verify content, single section, mode 0644
+  # and absence of the original pw-cache command. Idempotent by design.
+  mkdir -p "$dir/xdg/autostart" "$dir/assets"
+  printf '[Desktop Entry]\nType=Application\nName=Back In Time\nExec=/bin/sh -c "backintime pw-cache start 2>&1 >/dev/null"\n' > "$dir/xdg/autostart/backintime.desktop"
+  printf '[Desktop Entry]\nType=Application\nName=Back In Time (manual only)\nHidden=true\n' > "$dir/assets/backintime-autostart-disabled.desktop"
+  BACKINTIME_OVERRIDE_ASSET="$dir/assets/backintime-autostart-disabled.desktop" \
+  BACKINTIME_OVERRIDE_DEST="$dir/xdg/autostart/backintime.desktop" \
+  BACKINTIME_OVERRIDE_OWNER="$(id -u)" BACKINTIME_OVERRIDE_GROUP="$(id -g)" \
+  install_backintime_override || exit 1
+  cmp -s "$dir/assets/backintime-autostart-disabled.desktop" "$dir/xdg/autostart/backintime.desktop" || { echo 'FAIL: backintime override not byte-identical to asset' >&2; exit 1; }
+  grep -Fxq 'Hidden=true' "$dir/xdg/autostart/backintime.desktop" || { echo 'FAIL: backintime override missing Hidden=true' >&2; exit 1; }
+  [[ "$(grep -Ec '^[[:space:]]*\[Desktop Entry\][[:space:]]*$' "$dir/xdg/autostart/backintime.desktop")" -eq 1 ]] || { echo 'FAIL: backintime override has multiple Desktop Entry sections' >&2; exit 1; }
+  [[ "$(stat -c '%a' "$dir/xdg/autostart/backintime.desktop")" == "644" ]] || { echo 'FAIL: backintime override wrong mode' >&2; exit 1; }
+  if grep -Fq 'backintime pw-cache start' "$dir/xdg/autostart/backintime.desktop"; then echo 'FAIL: backintime original Exec retained' >&2; exit 1; fi
+  BACKINTIME_OVERRIDE_ASSET="$dir/assets/backintime-autostart-disabled.desktop" \
+  BACKINTIME_OVERRIDE_DEST="$dir/xdg/autostart/backintime.desktop" \
+  BACKINTIME_OVERRIDE_OWNER="$(id -u)" BACKINTIME_OVERRIDE_GROUP="$(id -g)" \
+  install_backintime_override || exit 1
+  echo 'PASS: Back In Time autostart suppressed atomically and idempotently'
   echo 'PASS: BLS default entry validator refuses missing/foreign/invalid entries'
   echo 'PASS: ESP detection accepts exact /boot and /boot/efi vfat mounts'
   echo 'PASS: Snapper retention 4/0, preserves Agama root config, idempotent, fail-closed'
@@ -137,6 +184,10 @@ install -m 0600 -o sddm -g sddm /etc/xdg/kcminputrc /var/lib/sddm/.config/kcminp
 # deleting snapshots. A later EFI/bootloader error must not skip this policy.
 configure_snapper_root_file /etc/snapper/configs/root || exit 1
 echo 'mySlowrollOS: Snapper root retention configured before first reboot'
+
+# Back In Time: replace any package-provided autostart file with the reviewed
+# Hidden=true override. Runs after packages are installed and before first boot.
+install_backintime_override || exit 1
 
 # Agama configures the ESP interactively. Detect the actual EFI mountpoint
 # and let sdbootutil choose the real Snapper default BLS entry before reboot.

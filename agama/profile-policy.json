@@ -105,7 +105,7 @@
     },
     {
       "source": "myslowroll-policy/backintime-autostart-disabled.desktop",
-      "destination": "/etc/xdg/autostart/backintime.desktop",
+      "destination": "/var/lib/myslowroll/backintime-autostart-disabled.desktop",
       "permissions": "0644"
     }
   ],
