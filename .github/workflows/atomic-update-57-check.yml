@@ -130,6 +130,11 @@ jobs:
             fi
           fi
           grep -Fxq 'Hidden=true' myslowroll-policy/backintime-autostart-disabled.desktop
+          # Agama deploys the reviewed override to a neutral path; the
+          # package-owned autostart destination is written later by the
+          # post-chroot install_backintime_override, after packages.
+          grep -Fq 'install_backintime_override()' agama/post-chroot-boot-policy.sh
+          grep -Fq 'install_backintime_override || exit 1' agama/post-chroot-boot-policy.sh
           grep -Fxq 'WirelessEnabled=false' myslowroll-policy/NetworkManager.state
           grep -Fxq 'AutoEnable=false' myslowroll-policy/90-myslowroll-bluez.conf
           grep -Fq 'bluetoothctl --timeout 5 power off' agama/init-firstboot.sh
@@ -138,8 +143,12 @@ jobs:
           import json
           p = json.load(open('agama/profile-policy.json'))
           f = {x['destination']: x['source'] for x in p['files']}
-          assert f['/etc/xdg/autostart/backintime.desktop'] == \
+          # Agama deploys the reviewed override to a neutral path; the
+          # package-owned autostart destination is written later by the
+          # post-chroot install_backintime_override, never by Agama directly.
+          assert f['/var/lib/myslowroll/backintime-autostart-disabled.desktop'] == \
               'myslowroll-policy/backintime-autostart-disabled.desktop'
+          assert '/etc/xdg/autostart/backintime.desktop' not in f
           assert f['/etc/xdg/kdesurc'] == 'myslowroll-policy/kdesurc'
           assert not any(k in p for k in ('storage', 'user', 'root'))
           print('PASS: no new background services and package-independent XDG autostart suppression')
