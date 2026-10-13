@@ -48,7 +48,7 @@ Generate profiles with `python3 agama/generate-profiles.py`; check for drift wit
 The check rejects overlap between install-only and persistent RPM requirements,
 checks that the two criscore anchors agree, that the spec matches seed and
 template, and that protected requirements are a subset of the workstation.
-Agama requests the manifest's individual packages directly (161, including chrony and Plymouth) plus twelve
+Agama requests the manifest's individual packages directly (165, including chrony and Plymouth) plus twelve
 install-only packages (ten YaST tools, libyui-qt-pkg16 and xauth); it does NOT request an unpublished
 `myslowroll-workstation` metapackage. The two criscore anchors continue to
 protect the approved core; workstation extras are selected at installation
