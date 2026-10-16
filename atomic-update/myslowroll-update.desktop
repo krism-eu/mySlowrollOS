@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Aggiornamento di Sistema
+Name[it]=Aggiornamento di Sistema
+GenericName=Aggiornamento mySlowrollOS
+GenericName[it]=Aggiornamento mySlowrollOS
+Comment=Aggiornamento transazionale offline protetto per openSUSE Slowroll
+Comment[it]=Aggiornamento transazionale offline protetto per openSUSE Slowroll
+Exec=konsole --hold -p tabtitle="mySlowrollOS Update" -e /usr/bin/myslowroll-update
+Icon=system-software-update
+Terminal=false
+Categories=System;Settings;PackageManager;
+StartupNotify=true
+X-KDE-SubstituteUID=false

@@ -5,8 +5,11 @@ Summary:        Guarded offline distribution upgrade for openSUSE Slowroll
 License:        MIT
 URL:            https://build.opensuse.org/package/show/home:krism/atomic-update
 Source0:        %{name}-%{version}.sh
+Source1:        myslowroll-update
+Source2:        myslowroll-update.desktop
 
 BuildRequires:  bash
+BuildRequires:  desktop-file-utils
 
 Requires:       bash
 Requires:       btrfsprogs
@@ -17,6 +20,7 @@ Requires:       gawk
 Requires:       grep
 Requires:       kernel-default
 Requires:       /usr/bin/xmllint
+Requires:       konsole
 Requires:       procps
 Requires:       rpm
 Requires:       sdbootutil
@@ -47,11 +51,18 @@ separate from criscore so the guarded updater can be replaced independently.
 
 %install
 install -Dpm0755 %{SOURCE0} %{buildroot}%{_sbindir}/%{name}
+install -Dpm0755 %{SOURCE1} %{buildroot}%{_bindir}/myslowroll-update
+install -Dpm0644 %{SOURCE2} %{buildroot}%{_datadir}/applications/myslowroll-update.desktop
 
 %check
 bash -n %{SOURCE0}
+bash -n %{SOURCE1}
+desktop-file-validate %{SOURCE2}
 
 %files
 %{_sbindir}/%{name}
+%{_bindir}/myslowroll-update
+%{_datadir}/applications/myslowroll-update.desktop
 
 %changelog
+
