@@ -62,10 +62,8 @@ run_update() {
 
     if [[ "${MYSLOWROLL_AUTO_REBOOT:-1}" == "0" ]]; then
         printf '\n\e[1;33m[mySlowrollOS] Modalita ispezione: riavvio automatico disabilitato.\e[0m\n'
-        printf 'Verifica i log o premi INVIO quando vuoi procedere al riavvio...\n'
-        read -r _ || true
-        sync
-        systemctl reboot
+        printf 'Il sistema e pronto nella nuova snapshot. Riavviare manualmente quando desiderato.\n'
+        return 0
     fi
 }
 
