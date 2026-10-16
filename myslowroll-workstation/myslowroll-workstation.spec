@@ -129,7 +129,6 @@ Requires:       plasma6-print-manager
 Requires:       plasma6-session
 Requires:       plasma6-systemmonitor
 Requires:       plasma6-workspace
-Requires:       plymouth
 Requires:       polkit
 Requires:       polkit-kde-agent-6
 Requires:       power-profiles-daemon
