@@ -6,6 +6,11 @@ Fri Oct 16 2026 - kris
 - Enforce snapshot_is_bootable postcondition in commit_target.
 - Support direct recovery rollback from pending-reboot on active TARGET.
 - Add regression coverage for pending-reboot rollback (22 review tests).
+- Export fixed PATH at script start (/usr/sbin:/usr/bin:/sbin:/bin).
+- Remove redundant intermediate verify_cli_surface calls outside preflight.
+- Clarify in rollback messages to run recover after reboot.
+- Guard directory deletion in prune with explicit conditional.
+- Restore line continuations across commands for improved readability.
 
 -------------------------------------------------------------------
 Mon Oct 12 2026 - kris

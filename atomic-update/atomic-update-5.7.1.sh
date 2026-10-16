@@ -1,6 +1,7 @@
 #!/usr/bin/bash
 set -Eeuo pipefail
 umask 022
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
 # mySlowrollOS guarded offline distribution upgrade v5.7.1
 #
@@ -842,7 +843,10 @@ make_plan() {
 
     log 'Pre-download RPM...'
     set +e
-    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup         "${ZYPPER_LICENSE_ARGS[@]}" --download-only --no-recommends --no-allow-vendor-change 2>&1 | tee "${DOWNLOAD_LOG}"
+    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C \
+        zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup \
+        "${ZYPPER_LICENSE_ARGS[@]}" --download-only --no-recommends --no-allow-vendor-change 2>&1 \
+        | tee "${DOWNLOAD_LOG}"
     rc=("${PIPESTATUS[@]}")
     set -e
     (( rc[0] == 0 && rc[1] == 0 )) ||
@@ -902,7 +906,10 @@ make_plan() {
         return 0
     fi
 
-    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup         "${ZYPPER_LICENSE_ARGS[@]}" --dry-run --no-recommends --no-allow-vendor-change --details >"${PLAN_TXT}" ||
+    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C \
+        zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup \
+        "${ZYPPER_LICENSE_ARGS[@]}" --dry-run --no-recommends --no-allow-vendor-change --details \
+        >"${PLAN_TXT}" ||
         { mark_aborted 'dry-run leggibile fallito'; return 1; }
 
     [[ "$(active_snapshot)" == "${STATE_SOURCE}" && "$(default_snapshot)" == "${STATE_SOURCE}" ]] ||
@@ -922,7 +929,6 @@ revalidate_plan() {
     local h ops source_now
     [[ "${STATE_STATUS}" == planned ]] || return 1
     planned_is_fresh || return 1
-    verify_cli_surface || return 1
     [[ "${STATE_SOURCE_FINGERPRINT}" =~ ^[0-9a-f]{64}$ ]] || return 1
 
     source_now="$(source_fingerprint)" || return 1
@@ -945,8 +951,10 @@ revalidate_plan() {
 
     # The solver result is unchanged; make the package cache complete again
     # before any TARGET exists. This avoids persisting a fragile cache hash.
-    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup         "${ZYPPER_LICENSE_ARGS[@]}" --download-only --no-recommends --no-allow-vendor-change >/dev/null ||
-        return 1
+    DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C \
+        zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive dup \
+        "${ZYPPER_LICENSE_ARGS[@]}" --download-only --no-recommends --no-allow-vendor-change \
+        >/dev/null || return 1
     sync -f "${TX_PKG_CACHE}" || return 1
 
     source_now="$(source_fingerprint)" || return 1
@@ -968,7 +976,9 @@ prepare_plan_for_upgrade() {
     fi
     if [[ "${STATE_STATUS}" == planned ]]; then
         source_now="$(source_fingerprint || true)"
-        if planned_is_fresh             && [[ "${source_now}" =~ ^[0-9a-f]{64}$ ]]             && [[ "${source_now}" == "${STATE_SOURCE_FINGERPRINT}" ]]; then
+        if planned_is_fresh \
+            && [[ "${source_now}" =~ ^[0-9a-f]{64}$ ]] \
+            && [[ "${source_now}" == "${STATE_SOURCE_FINGERPRINT}" ]]; then
             log "Riutilizzo piano PREPARED ${STATE_TXID}; REVALIDATED verra eseguito dopo la conferma."
             return 0
         fi
@@ -1071,7 +1081,9 @@ open_target() {
     : >"${TUKIT_OPEN_LOG}"
     chmod 0600 "${TUKIT_OPEN_LOG}"
 
-    if ! timeout --signal=TERM --kill-after=10 "${OPERATION_TIMEOUT}"         tukit --description "${TUKIT_DESCRIPTION_PREFIX} ${STATE_TXID}" open         >"${TUKIT_OPEN_LOG}" 2>&1; then
+    if ! timeout --signal=TERM --kill-after=10 "${OPERATION_TIMEOUT}" \
+        tukit --description "${TUKIT_DESCRIPTION_PREFIX} ${STATE_TXID}" open \
+        >"${TUKIT_OPEN_LOG}" 2>&1; then
         STATE_STATUS=needs-inspection
         STATE_INSPECTION_KIND=open-ambiguous
         STATE_LAST_ERROR="tukit open failed/timed out; inspect ${TUKIT_OPEN_LOG}"
@@ -1145,11 +1157,6 @@ run_target_dup() {
     local -a rc
 
     [[ "${STATE_STATUS}" == target ]] || return 1
-    if ! verify_cli_surface; then
-        STATE_LAST_ERROR='capability tukit/sdbootutil non disponibile prima del dup'
-        persist_state_or_die
-        return 1
-    fi
     if ! source_unchanged; then
         STATE_LAST_ERROR='SOURCE cambiata o non verificabile prima del dup'
         persist_state_or_die
@@ -1174,7 +1181,11 @@ run_target_dup() {
     sync || { STATE_LAST_ERROR='sync barrier fallita prima del dup TARGET'; persist_state_or_die; return 1; }
 
     set +e
-    systemd-inhibit --what=shutdown:sleep:idle --mode=block --who="${PROG}" --why='mySlowrollOS offline target update'       tukit call "${t}" env DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C       zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive --userdata "myslowroll-atomic-update:${STATE_TXID}" dup         "${ZYPPER_LICENSE_ARGS[@]}" --download-in-advance --no-recommends --no-allow-vendor-change 2>&1 | tee "${DUP_LOG}"
+    systemd-inhibit --what=shutdown:sleep:idle --mode=block --who="${PROG}" --why='mySlowrollOS offline target update' \
+        tukit call "${t}" env DISABLE_SNAPPER_ZYPP_PLUGIN=1 LC_ALL=C \
+        zypper --pkg-cache-dir "${TX_PKG_CACHE}" --no-refresh --non-interactive --userdata "myslowroll-atomic-update:${STATE_TXID}" dup \
+        "${ZYPPER_LICENSE_ARGS[@]}" --download-in-advance --no-recommends --no-allow-vendor-change 2>&1 \
+        | tee "${DUP_LOG}"
     rc=("${PIPESTATUS[@]}")
     set -e
 
@@ -1212,8 +1223,6 @@ verify_target() {
     : >"${POSTCHECK_LOG}" && chmod 0600 "${POSTCHECK_LOG}" ||
         { STATE_LAST_ERROR='impossibile preparare il log verifiche TARGET'; persist_state_or_die; return 1; }
 
-    verify_cli_surface ||
-        { STATE_LAST_ERROR='capability tukit/sdbootutil non disponibile durante verify'; persist_state_or_die; return 1; }
     source_unchanged ||
         { STATE_LAST_ERROR='SOURCE cambiata o non verificabile durante verify'; persist_state_or_die; return 1; }
     target_window_valid ||
@@ -1284,7 +1293,8 @@ target_quiescent() {
 
     # Additional transaction-specific guard.  A match means "not proven quiet".
     if pgrep -af '(zypper|rpm|tukit)' 2>/dev/null |
-       grep -E -- "(${STATE_TXID}|${TUKIT_DESCRIPTION_PREFIX}[[:space:]]+${STATE_TXID}|snapshot[ =:]*${t})"        >/dev/null 2>&1; then
+       grep -E -- "(${STATE_TXID}|${TUKIT_DESCRIPTION_PREFIX}[[:space:]]+${STATE_TXID}|snapshot[ =:]*${t})" \
+       >/dev/null 2>&1; then
         return 1
     fi
     return 0
@@ -1359,7 +1369,6 @@ abort_target_safe() {
 precommit_target_valid() {
     local t="$1"
     [[ "${STATE_STATUS}" == verified ]] || return 1
-    verify_cli_surface || return 1
     source_unchanged || return 1
     target_window_valid || return 1
     [[ "$(active_snapshot)" == "${STATE_SOURCE}" ]] || return 1
@@ -1455,7 +1464,7 @@ reboot_or_finish() {
     local reason="${1:-upgrade}"
     if bool_true "${AUTO_REBOOT}"; then
         case "${reason}" in
-            rollback) log 'Rollback preparato con successo. Avvio del reboot...' ;;
+            rollback) log "Rollback preparato con successo. Al riavvio eseguire '${PROG} recover' per confermare lo stato." ;;
             *)        log 'Upgrade verificato con successo. Avvio del reboot...' ;;
         esac
         sync
@@ -1463,7 +1472,7 @@ reboot_or_finish() {
         while sleep 60; do :; done
     else
         case "${reason}" in
-            rollback) log "Rollback preparato: TARGET ${STATE_TARGET} e default. Riavviare senza fare manutenzione intermedia." ;;
+            rollback) log "Rollback preparato: TARGET ${STATE_TARGET} e default. Riavviare senza fare manutenzione intermedia ed eseguire '${PROG} recover' dopo il reboot." ;;
             *)        log "Upgrade verificato: TARGET ${STATE_TARGET} e default. Riavviare senza fare manutenzione intermedia." ;;
         esac
     fi
@@ -1972,7 +1981,13 @@ prune() {
     printf 'Artefatti candidati: %s. Snapshot Btrfs: mai eliminate da prune.\n' "${#files[@]}"
     (( ${#files[@]} )) || return 0
     printf 'Scrivi esattamente: PRUNE ATOMIC-UPDATE %s\n> ' "${days}"; local ans; IFS= read -r ans || die 'prune annullato.'; [[ "${ans}" == "PRUNE ATOMIC-UPDATE ${days}" ]] || die 'prune annullato.'
-    for p in "${files[@]}"; do [[ -d "${p}" ]] && rm -rf -- "${p}" || rm -f -- "${p}"; done
+    for p in "${files[@]}"; do
+        if [[ -d "${p}" ]]; then
+            rm -rf -- "${p}"
+        else
+            rm -f -- "${p}"
+        fi
+    done
     history_or_warn prune "days=${days} files=${#files[@]}"
 }
 
@@ -2010,7 +2025,8 @@ recover_inspect() {
     printf 'State: %s\n' "${STATE_STATUS:-none}"
     printf 'Inspection kind: %s\n' "${STATE_INSPECTION_KIND:-none}"
     printf 'TXID: %s\n' "${STATE_TXID:-none}"
-    printf 'SOURCE: %s | TARGET: %s | active: %s | default: %s\n'         "${STATE_SOURCE:-none}" "${STATE_TARGET:-none}" "${a:-?}" "${d:-?}"
+    printf 'SOURCE: %s | TARGET: %s | active: %s | default: %s\n' \
+        "${STATE_SOURCE:-none}" "${STATE_TARGET:-none}" "${a:-?}" "${d:-?}"
     printf 'Last error: %s\n' "${STATE_LAST_ERROR:-none}"
     printf 'Owned TARGETs by description:'
     local owned
