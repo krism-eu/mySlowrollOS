@@ -103,4 +103,20 @@ out="$(recover_adopt_target 20 2>&1)" || true
     echo 'FAIL: pre-close sync failure was eligible for typed TARGET adoption' >&2
     exit 1
 }
+# Preflight must accumulate all invariant violations and not abort on the first failure
+bash -c '
+    source atomic-update/atomic-update-5.7.1.sh
+    require_root() { :; }
+    acquire_lock() { :; }
+    validate_policy() { :; }
+    require_commands() { :; }
+    findmnt() { return 1; }
+    os_id() { printf "wrong_os\n"; }
+    rc=0
+    out="$(preflight check 2>&1)" || rc=$?
+    [[ "${rc}" -ne 0 ]] || { echo "FAIL: preflight check should fail with invalid invariants" >&2; exit 1; }
+    [[ "${out}" == *"root non Btrfs"* ]] || { echo "FAIL: missing root non Btrfs in multi-error output" >&2; exit 1; }
+    [[ "${out}" == *"wrong_os"* ]] || { echo "FAIL: missing wrong_os in multi-error output" >&2; exit 1; }
+'
+
 printf 'atomic-update mocked recovery regressions: PASS\n'

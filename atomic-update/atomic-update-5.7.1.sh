@@ -111,19 +111,28 @@ acquire_lock() {
 
 require_recovery_commands() {
     local cmd
+    local -a missing=()
     for cmd in awk bootctl btrfs cat chmod date df findmnt flock grep head install \
                mktemp mv pgrep readlink rm sdbootutil sed sha256sum sleep snapper sort sync \
                systemctl timeout tr tukit; do
-        command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
+        command -v "${cmd}" >/dev/null 2>&1 || missing+=("${cmd}")
     done
+    if (( ${#missing[@]} > 0 )); then
+        die "comandi richiesti per recovery non trovati: ${missing[*]}"
+    fi
 }
 
 require_commands() {
-    require_recovery_commands
     local cmd
-    for cmd in cmp comm cp env find rpm systemd-inhibit tee xmllint zypper; do
-        command -v "${cmd}" >/dev/null 2>&1 || die "comando richiesto non trovato: ${cmd}"
+    local -a missing=()
+    for cmd in awk bootctl btrfs cat chmod date df findmnt flock grep head install \
+               mktemp mv pgrep readlink rm sdbootutil sed sha256sum sleep snapper sort sync \
+               systemctl timeout tr tukit cmp comm cp env find rpm systemd-inhibit tee xmllint zypper; do
+        command -v "${cmd}" >/dev/null 2>&1 || missing+=("${cmd}")
     done
+    if (( ${#missing[@]} > 0 )); then
+        die "comandi richiesti non trovati: ${missing[*]}"
+    fi
 }
 
 is_uuid() {
@@ -730,52 +739,204 @@ scan_plan_for_critical_removals() {
 
 preflight() {
     local mode="${1:-update}"
-    local p a d
+    local is_check=0
+    [[ "${mode}" == check ]] && is_check=1
+
     require_root; acquire_lock
     if [[ "${mode}" == recovery ]]; then require_recovery_commands; else require_commands; fi
     validate_policy
 
-    [[ "$(findmnt -n -o FSTYPE --target / 2>/dev/null || true)" == btrfs ]] || die 'root non Btrfs.'
-    findmnt -n -o OPTIONS --target / | tr ',' '\n' | grep -qx rw || die 'root non RW.'
-    snapper -c "${SNAPPER_CONFIG}" get-config >/dev/null 2>&1 || die 'Snapper root non disponibile.'
-    path_is_outside_root_snapshot "${STATE_DIR}" || die 'STATE_DIR non persistente fuori root snapshot.'
-    path_is_outside_root_snapshot "${CACHE_ROOT}" || die 'CACHE_ROOT non persistente fuori root snapshot.'
-    path_is_outside_root_snapshot "${LOG_ROOT}" || die 'LOG_ROOT non persistente fuori root snapshot.'
-    grep -qi systemd-boot <<<"$(sdbootutil bootloader 2>/dev/null || true)" || die 'systemd-boot non rilevato.'
+    local -a errors=()
+    local total=0 ok_count=0
+    local a d p
+
+    record_check() {
+        local status="$1"
+        local title="$2"
+        local err_msg="$3"
+        (( total++ ))
+        if (( status == 0 )); then
+            (( ok_count++ ))
+            if (( is_check )); then
+                printf '  [OK]   %s\n' "${title}"
+            fi
+        else
+            errors+=("${err_msg}")
+            if (( is_check )); then
+                printf '  [FAIL] %s (%s)\n' "${title}" "${err_msg}" >&2
+            fi
+        fi
+    }
+
+    local fstype
+    fstype="$(findmnt -n -o FSTYPE --target / 2>/dev/null || true)"
+    if [[ "${fstype}" == btrfs ]]; then
+        record_check 0 "Filesystem root e' Btrfs" ""
+    else
+        record_check 1 "Filesystem root" "root non Btrfs (rilevato: '${fstype:-sconosciuto}')"
+    fi
+
+    if findmnt -n -o OPTIONS --target / 2>/dev/null | tr ',' '\n' | grep -qx rw; then
+        record_check 0 "Mount root e' in modalita Read-Write" ""
+    else
+        record_check 1 "Mount root RW" "root non RW"
+    fi
+
+    if snapper -c "${SNAPPER_CONFIG}" get-config >/dev/null 2>&1; then
+        record_check 0 "Configurazione Snapper '${SNAPPER_CONFIG}' attiva" ""
+    else
+        record_check 1 "Configurazione Snapper" "Snapper root non disponibile"
+    fi
+
+    if path_is_outside_root_snapshot "${STATE_DIR}" && \
+       path_is_outside_root_snapshot "${CACHE_ROOT}" && \
+       path_is_outside_root_snapshot "${LOG_ROOT}"; then
+        record_check 0 "Persistenza percorsi STATE_DIR, CACHE_ROOT e LOG_ROOT" ""
+    else
+        record_check 1 "Percorsi persistenti" "STATE_DIR, CACHE_ROOT o LOG_ROOT non persistenti fuori da root snapshot"
+    fi
+
+    if grep -qi systemd-boot <<<"$(sdbootutil bootloader 2>/dev/null || true)"; then
+        record_check 0 "Bootloader gestito da systemd-boot" ""
+    else
+        record_check 1 "Bootloader" "systemd-boot non rilevato"
+    fi
 
     # Recovery uses a reduced structural preflight so diagnosis/cleanup can
     # operate even when update-only policy or boot-space checks fail.
     # Confirm separately validates the booted TARGET, OS and RPM manifest.
-    if [[ "${mode}" == update ]]; then
-        check_boot_space || die 'spazio boot insufficiente/non determinabile.'
-        verify_cli_surface || die 'CLI tukit/sdbootutil incompatibile.'
+    if [[ "${mode}" == update || "${mode}" == check ]]; then
+        if check_boot_space; then
+            record_check 0 "Spazio partizioni di boot ed ESP sufficiente" ""
+        else
+            record_check 1 "Spazio boot" "spazio boot insufficiente o non determinabile"
+        fi
+
+        if verify_cli_surface; then
+            record_check 0 "Compatibilita CLI tukit e sdbootutil" ""
+        else
+            record_check 1 "CLI surface" "CLI tukit/sdbootutil incompatibile"
+        fi
     fi
 
     # Recovery and post-reboot confirm must remain available even if a
     # monthly package update changes the human-readable --help output.
-    [[ "${mode}" == recovery ]] && return 0
-    [[ "${mode}" =~ ^(update|confirm)$ ]] || die "modalita preflight sconosciuta: ${mode}"
-
-    [[ "$(os_id)" == "${REQUIRED_OS_ID}" ]] || die 'questo tool e limitato a openSUSE Slowroll.'
-    path_is_outside_root_snapshot /var || die '/var deve essere fuori dalla root snapshot per questa policy.'
-    path_is_outside_root_snapshot /home || die '/home deve essere fuori dalla root snapshot su questa workstation.'
-    rpmdb_is_in_root_snapshot || die 'RPMDB non inclusa nella root snapshot.'
-    parser_selftest || die 'self-test parser XML/plan fallito.'
-    [[ ! -e /run/criscore.allow-removal ]] || die 'token criscore.allow-removal presente.'
-    for p in "${CRITICAL_PKGS[@]}"; do rpm --quiet -q "${p}" || die "pacchetto critico richiesto mancante: ${p}"; done
-
-    # Transient locking checks are required only before planning or modifying packages
-    if [[ "${mode}" == update ]]; then
-        bool_true "$(zypp_value solver.onlyRequires)" || die 'solver.onlyRequires deve essere true.'
-        bool_false "$(zypp_value solver.dupAllowVendorChange)" || die 'solver.dupAllowVendorChange deve essere false.'
-        check_conflicting_update_units_idle || die 'unita transactional-update opzionali/stale in conflitto con tukit diretto.'
-        check_zypp_lock_hint || die 'ZYpp risulta gia in uso.'
+    if [[ "${mode}" == recovery ]]; then
+        if (( ${#errors[@]} > 0 )); then
+            printf '\n[%s] ERRORI PREFLIGHT RECOVERY:\n' "${PROG}" >&2
+            for err in "${errors[@]}"; do printf '  - %s\n' "${err}" >&2; done
+            die "Preflight recovery fallito: ${#errors[@]} errori rilevati."
+        fi
+        return 0
     fi
 
-    a="$(active_snapshot)"; d="$(default_snapshot)"
-    [[ -n "${a}" && "${a}" == "${d}" ]] || die "active/default non coincidono (${a:-?}/${d:-?})."
-    snapshot_is_rw "${a}" || die "snapshot attiva ${a} non RW."
-    snapshot_is_bootable "${a}" || die "snapshot attiva ${a} non potenzialmente bootable."
+    [[ "${mode}" =~ ^(update|confirm|check)$ ]] || die "modalita preflight sconosciuta: ${mode}"
+
+    local cur_os
+    cur_os="$(os_id)"
+    if [[ "${cur_os}" == "${REQUIRED_OS_ID}" ]]; then
+        record_check 0 "Identita sistema operativo openSUSE Slowroll (${cur_os})" ""
+    else
+        record_check 1 "Sistema operativo" "questo tool e limitato a openSUSE Slowroll (rilevato: '${cur_os}')"
+    fi
+
+    if path_is_outside_root_snapshot /var; then
+        record_check 0 "Subvolume /var fuori da root snapshot" ""
+    else
+        record_check 1 "Subvolume /var" "/var deve essere fuori dalla root snapshot per questa policy"
+    fi
+
+    if path_is_outside_root_snapshot /home; then
+        record_check 0 "Subvolume /home fuori da root snapshot" ""
+    else
+        record_check 1 "Subvolume /home" "/home deve essere fuori dalla root snapshot su questa workstation"
+    fi
+
+    if rpmdb_is_in_root_snapshot; then
+        record_check 0 "RPMDB inclusa nella root snapshot (transazionale)" ""
+    else
+        record_check 1 "RPMDB" "RPMDB non inclusa nella root snapshot"
+    fi
+
+    if parser_selftest; then
+        record_check 0 "Self-test parser XML/plan zypper superato" ""
+    else
+        record_check 1 "Parser self-test" "self-test parser XML/plan fallito"
+    fi
+
+    if [[ ! -e /run/criscore.allow-removal ]]; then
+        record_check 0 "Token /run/criscore.allow-removal assente" ""
+    else
+        record_check 1 "Token criscore" "token criscore.allow-removal presente"
+    fi
+
+    local -a missing_pkgs=()
+    for p in "${CRITICAL_PKGS[@]}"; do
+        rpm --quiet -q "${p}" || missing_pkgs+=("${p}")
+    done
+    if (( ${#missing_pkgs[@]} == 0 )); then
+        record_check 0 "Tutti i pacchetti critici installati (${#CRITICAL_PKGS[@]}/${#CRITICAL_PKGS[@]})" ""
+    else
+        record_check 1 "Pacchetti critici installati" "pacchetti critici richiesti mancanti: ${missing_pkgs[*]}"
+    fi
+
+    # Transient locking checks are required only before planning or modifying packages
+    if [[ "${mode}" == update || "${mode}" == check ]]; then
+        if bool_true "$(zypp_value solver.onlyRequires)"; then
+            record_check 0 "Parametro Zypp solver.onlyRequires=true" ""
+        else
+            record_check 1 "ZYpp solver" "solver.onlyRequires deve essere true"
+        fi
+
+        if bool_false "$(zypp_value solver.dupAllowVendorChange)"; then
+            record_check 0 "Parametro Zypp solver.dupAllowVendorChange=false" ""
+        else
+            record_check 1 "ZYpp solver" "solver.dupAllowVendorChange deve essere false"
+        fi
+
+        if check_conflicting_update_units_idle; then
+            record_check 0 "Nessuna unita transactional-update in conflitto" ""
+        else
+            record_check 1 "Unita di aggiornamento" "unita transactional-update opzionali/stale in conflitto con tukit diretto"
+        fi
+
+        if check_zypp_lock_hint; then
+            record_check 0 "Nessun lock ZYpp attivo (/run/zypp*.pid)" ""
+        else
+            record_check 1 "Lock ZYpp" "ZYpp risulta gia in uso"
+        fi
+    fi
+
+    a="$(active_snapshot 2>/dev/null || true)"; d="$(default_snapshot 2>/dev/null || true)"
+    if [[ -n "${a}" && "${a}" == "${d}" ]]; then
+        record_check 0 "Snapshot attiva e default coincidono (snapshot ${a})" ""
+    else
+        record_check 1 "Snapshot attiva/default" "active/default non coincidono (${a:-?}/${d:-?})"
+    fi
+
+    if [[ -n "${a}" ]] && snapshot_is_rw "${a}"; then
+        record_check 0 "Snapshot attiva ${a} montabile RW" ""
+    else
+        record_check 1 "Snapshot RW" "snapshot attiva ${a:-?} non RW"
+    fi
+
+    if [[ -n "${a}" ]] && snapshot_is_bootable "${a}"; then
+        record_check 0 "Snapshot attiva ${a} potenzialmente bootable" ""
+    else
+        record_check 1 "Snapshot bootable" "snapshot attiva ${a:-?} non potenzialmente bootable"
+    fi
+
+    if (( ${#errors[@]} > 0 )); then
+        printf '\n[%s] ERRORI PREFLIGHT RILEVATI (%d violazioni su %d controlli):\n' "${PROG}" "${#errors[@]}" "${total}" >&2
+        for err in "${errors[@]}"; do
+            printf '  * %s\n' "${err}" >&2
+        done
+        die "Preflight fallito (${#errors[@]} errori rilevati su ${total} controlli)."
+    fi
+
+    if (( is_check )); then
+        log "Verifica preflight completata: tutti i ${ok_count}/${total} controlli superati con successo."
+    fi
 }
 
 plan_age_seconds() {
@@ -2122,12 +2283,15 @@ main() {
     case "${c}" in
         check)
             (( $#==1 )) || die 'check non accetta argomenti'
-            preflight update >/dev/null
+            log "Diagnostica e verifica preflight ${PROGRAM_VERSION} [$(uname -m)]:"
+            log "Kernel: $(uname -r) | Host Boot ID: $(current_boot_id 2>/dev/null || echo '?')"
+            preflight check
             load_state
             if [[ -n "${STATE_STATUS}" && ! "${STATE_STATUS}" =~ ^(confirmed|aborted|rolled-back)$ ]]; then
-                warn "Esiste una transazione attiva in stato '${STATE_STATUS}' (TXID: ${STATE_TXID:-?})."
+                warn "Esiste una transazione registrata in stato '${STATE_STATUS}' (TXID: ${STATE_TXID:-?}, creata: ${STATE_CREATED:-?})."
+            else
+                log "Registro di stato pulito (nessuna transazione pendente)."
             fi
-            log "Preflight ${PROGRAM_VERSION} superato."
             ;;
         plan) (( $#==1 )) || die 'plan non accetta argomenti'; make_plan ;;
         upgrade) (( $#==1 )) || die 'upgrade non accetta argomenti'; upgrade ;;
