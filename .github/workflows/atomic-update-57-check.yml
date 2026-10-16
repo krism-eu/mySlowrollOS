@@ -135,6 +135,8 @@ jobs:
           # post-chroot install_backintime_override, after packages.
           grep -Fq 'install_backintime_override()' agama/post-chroot-boot-policy.sh
           grep -Fq 'install_backintime_override || exit 1' agama/post-chroot-boot-policy.sh
+          grep -Fq 'configure_fstab_mount_options()' agama/post-chroot-boot-policy.sh
+          grep -Fq 'configure_fstab_mount_options /etc/fstab' agama/post-chroot-boot-policy.sh
           grep -Fxq 'WirelessEnabled=false' myslowroll-policy/NetworkManager.state
           grep -Fxq 'AutoEnable=false' myslowroll-policy/90-myslowroll-bluez.conf
           grep -Fq 'bluetoothctl --timeout 5 power off' agama/init-firstboot.sh
@@ -175,6 +177,7 @@ jobs:
           grep -Fxq 'libyui-qt-pkg16' agama/install-only-packages.txt
           grep -Fxq 'xauth' agama/install-only-packages.txt
           grep -Fxq 'Requires:       kfind' myslowroll-workstation/myslowroll-workstation.spec
+          grep -Fxq 'Requires:       /usr/bin/xmllint' atomic-update/atomic-update.spec
           if grep -Eq '^Requires:[[:space:]]+plymouth([[:space:]]|$)' myslowroll-workstation/myslowroll-workstation.spec obs/criscore1/criscore1.spec; then
             echo 'FAIL: forbidden content matched: see preceding check' >&2
             exit 1
