@@ -754,9 +754,9 @@ preflight() {
         local status="$1"
         local title="$2"
         local err_msg="$3"
-        (( total++ ))
+        total=$(( total + 1 ))
         if (( status == 0 )); then
-            (( ok_count++ ))
+            ok_count=$(( ok_count + 1 ))
             if (( is_check )); then
                 printf '  [OK]   %s\n' "${title}"
             fi
