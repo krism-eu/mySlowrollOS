@@ -54,7 +54,7 @@ run_update() {
     fi
 
     print_step "3" "Installazione atomica nella nuova snapshot e verifica boot"
-    /usr/sbin/atomic-update upgrade
+    printf 'AGGIORNA OFFLINE E RIAVVIA\n' | /usr/sbin/atomic-update upgrade
 
     printf '\n\e[1;32m===================================================================\e[0m\n'
     printf '\e[1;32m  Aggiornamento completato con successo!                          \e[0m\n'
