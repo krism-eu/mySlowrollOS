@@ -19,7 +19,6 @@ Requires:       findutils
 Requires:       gawk
 Requires:       grep
 Requires:       kernel-default
-Requires:       /usr/bin/xmllint
 Requires:       konsole
 Requires:       procps
 Requires:       rpm
