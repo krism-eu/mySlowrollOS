@@ -55,6 +55,7 @@ Requires:       exfatprogs
 Requires:       filesystem
 Requires:       firewalld
 Requires:       flatpak
+Requires:       fuse
 Requires:       glibc
 Requires:       glibc-locale
 Requires:       google-noto-coloremoji-fonts
@@ -88,6 +89,7 @@ Requires:       kwalletmanager
 Requires:       kwin6
 Requires:       less
 Requires:       liberation-fonts
+Requires:       libfuse2
 Requires:       libgcrypt20-x86-64-v3
 Requires:       libhogweed6-x86-64-v3
 Requires:       liblz4-1-x86-64-v3
