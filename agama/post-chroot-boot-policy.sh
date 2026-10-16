@@ -185,9 +185,95 @@ install -m 0600 -o sddm -g sddm /etc/xdg/kcminputrc /var/lib/sddm/.config/kcminp
 configure_snapper_root_file /etc/snapper/configs/root || exit 1
 echo 'mySlowrollOS: Snapper root retention configured before first reboot'
 
-# Back In Time: replace any package-provided autostart file with the reviewed
-# Hidden=true override. Runs after packages are installed and before first boot.
-install_backintime_override || exit 1
+# Hostname: ensure a consistent and clean mDNS hostname
+if [[ ! -s /etc/hostname || "$(< /etc/hostname)" =~ ^(localhost|localhost\.localdomain)?$ ]]; then
+  echo "myslowrollos" > /etc/hostname
+  echo 'mySlowrollOS: hostname set to myslowrollos'
+fi
+
+# fstab hardening & optimization: umask=0077 for /boot/efi, noatime for Btrfs
+if [[ -f /etc/fstab ]]; then
+  python3 -c '
+path = "/etc/fstab"
+lines = []
+with open(path, "r") as f:
+    for line in f:
+        parts = line.split()
+        if len(parts) >= 6:
+            # Add umask=0077 to vfat ESP
+            if parts[1] == "/boot/efi" and parts[2] == "vfat":
+                if "umask=0077" not in parts[3]:
+                    parts[3] = parts[3] + ",umask=0077"
+            # Add noatime to btrfs
+            if parts[2] == "btrfs":
+                if "noatime" not in parts[3]:
+                    parts[3] = parts[3] + ",noatime"
+            lines.append(f"{parts[0]:<43} {parts[1]:<12} {parts[2]:<6} {parts[3]:<28} {parts[4]}  {parts[5]}\n")
+        else:
+            lines.append(line)
+with open(path, "w") as f:
+    f.writelines(lines)
+' 2>/dev/null || true
+  echo 'mySlowrollOS: /etc/fstab updated with umask=0077 for ESP and noatime for Btrfs'
+fi
+
+# Wallpaper: install default branded dark wallpaper for SDDM and Plasma
+if [[ -f /var/lib/myslowroll/wallpaper.png ]]; then
+  install -d -m 0755 /usr/share/wallpapers/Next/contents/images
+  install -m 0644 /var/lib/myslowroll/wallpaper.png /usr/share/wallpapers/Next/contents/images/5120x2880.png
+  install -m 0644 /var/lib/myslowroll/wallpaper.png /usr/share/wallpapers/Next/contents/images/1920x1080.png
+  echo 'mySlowrollOS: default dark wallpaper installed into /usr/share/wallpapers/Next'
+fi
+
+# Baloo: configure lightweight file-name-only indexing (no heavy content scraping)
+install -d -m 0755 /etc/xdg
+cat > /etc/xdg/baloofilerc <<'BALOO_EOF'
+[Basic Settings]
+indexing=true
+index hidden folders=false
+only basic metadata=true
+BALOO_EOF
+
+# AppImage: native desktop executor so double-clicking runs seamlessly without terminal
+cat > /usr/bin/myslowroll-appimage-run <<'APPIMAGE_RUN_EOF'
+#!/usr/bin/env bash
+set -e
+target="$1"
+if [[ -f "$target" ]]; then
+    if [[ ! -x "$target" ]]; then
+        chmod +x "$target" 2>/dev/null || true
+    fi
+    exec "$target" "$@"
+fi
+APPIMAGE_RUN_EOF
+chmod 0755 /usr/bin/myslowroll-appimage-run
+
+install -d -m 0755 /usr/share/applications
+cat > /usr/share/applications/appimage-executor.desktop <<'APPIMAGE_DESKTOP_EOF'
+[Desktop Entry]
+Type=Application
+Name=Esegui AppImage
+Name[it]=Esegui AppImage
+GenericName=AppImage Runner
+Comment=Esegue pacchetti AppImage direttamente
+Exec=/usr/bin/myslowroll-appimage-run %f
+Icon=system-run
+Terminal=false
+StartupNotify=true
+Categories=Utility;
+MimeType=application/x-iso9660-appimage;application/vnd.appimage;
+NoDisplay=false
+APPIMAGE_DESKTOP_EOF
+
+cat >> /etc/xdg/mimeapps.list <<'MIME_EOF'
+[Default Applications]
+application/vnd.appimage=appimage-executor.desktop
+application/x-iso9660-appimage=appimage-executor.desktop
+
+[Added Associations]
+application/vnd.appimage=appimage-executor.desktop;
+application/x-iso9660-appimage=appimage-executor.desktop;
+MIME_EOF
 
 # Agama configures the ESP interactively. Detect the actual EFI mountpoint
 # and let sdbootutil choose the real Snapper default BLS entry before reboot.

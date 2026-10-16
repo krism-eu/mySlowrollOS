@@ -75,6 +75,7 @@ Requires:       kernel-default
 Requires:       kernel-firmware-amdgpu
 Requires:       kernel-firmware-mediatek
 Requires:       kernel-firmware-realtek
+Requires:       kfind
 Requires:       kf6-baloo-file
 Requires:       kglobalacceld6
 Requires:       kio-admin
