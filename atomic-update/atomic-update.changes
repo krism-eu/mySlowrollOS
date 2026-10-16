@@ -1,4 +1,13 @@
 -------------------------------------------------------------------
+Fri Oct 16 2026 - kris
+
+- Set umask 022 to avoid restricted permissions on updated targets.
+- Increase default OPERATION_TIMEOUT to 900s for large upgrades.
+- Enforce snapshot_is_bootable postcondition in commit_target.
+- Support direct recovery rollback from pending-reboot on active TARGET.
+- Add regression coverage for pending-reboot rollback (22 review tests).
+
+-------------------------------------------------------------------
 Mon Oct 12 2026 - kris
 
 - Fix Back In Time autostart deployment path, recovery preflight gating,

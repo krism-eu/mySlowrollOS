@@ -84,6 +84,31 @@ rollback_active_target() {
     rollback 10 <<< 'ROLLBACK 10 E RIAVVIA' >/dev/null || fail 'active TARGET recovery rejected'
     assert_eq "$STATE_STATUS" rollback-pending
 }
+rollback_pending_reboot_target() {
+    rollback_fixture
+    STATE_STATUS=pending-reboot
+    STATE_INSPECTION_KIND=
+    printf '20\n' >"${fixture}/active"
+    current_boot_id() { printf '33333333-3333-4333-8333-333333333333\n'; }
+    rollback 10 <<< 'ROLLBACK 10 E RIAVVIA' >/dev/null || fail 'pending-reboot on TARGET rollback rejected'
+    assert_eq "$STATE_STATUS" rollback-pending
+    assert_eq "$STATE_TARGET" 30
+}
+rollback_pending_reboot_guards() {
+    rollback_fixture
+    STATE_STATUS=pending-reboot
+    STATE_INSPECTION_KIND=
+    # Guard 1: same boot id (reboot has not occurred yet)
+    if ( rollback 10 <<< 'ROLLBACK 10 E RIAVVIA' ) >/dev/null 2>&1; then
+        fail 'pending-reboot accepted rollback without reboot'
+    fi
+    # Guard 2: booted into something else (active is not target)
+    current_boot_id() { printf '33333333-3333-4333-8333-333333333333\n'; }
+    printf '10\n' >"${fixture}/active"
+    if ( rollback 10 <<< 'ROLLBACK 10 E RIAVVIA' ) >/dev/null 2>&1; then
+        fail 'pending-reboot accepted rollback when active is not target'
+    fi
+}
 rollback_cancel() {
     rollback_fixture
     if ( rollback 10 <<< 'NO' ) >/dev/null 2>&1; then fail 'cancellation accepted'; fi
@@ -287,6 +312,8 @@ inspect_failure() {
 
 run 'failed boot -> explicit rollback -> reboot -> rolled-back' rollback_failed_boot
 run 'explicit rollback from active TARGET' rollback_active_target
+run 'rollback from pending-reboot on active TARGET' rollback_pending_reboot_target
+run 'pending-reboot rollback guards enforce reboot on TARGET' rollback_pending_reboot_guards
 run 'cancel leaves state/default unchanged' rollback_cancel
 run 'unrelated recovery kinds and snapshots refused' rollback_guards
 run 'interruption before default change permits confirmed retry' rollback_before_stage

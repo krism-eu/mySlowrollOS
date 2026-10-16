@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 set -Eeuo pipefail
-umask 077
+umask 022
 
 # mySlowrollOS guarded offline distribution upgrade v5.7.1
 #
@@ -30,7 +30,7 @@ readonly ROOT_MIN_MARGIN_BYTES="${MYSLOWROLL_ROOT_MIN_MARGIN_BYTES:-1073741824}"
 readonly BOOT_MIN_FREE_BYTES="${MYSLOWROLL_BOOT_MIN_FREE_BYTES:-134217728}"
 readonly AUTO_AGREE_LICENSES="${MYSLOWROLL_AUTO_AGREE_LICENSES:-0}"
 readonly AUTO_REBOOT="${MYSLOWROLL_AUTO_REBOOT:-1}"
-readonly OPERATION_TIMEOUT="${MYSLOWROLL_OPERATION_TIMEOUT:-300}"
+readonly OPERATION_TIMEOUT="${MYSLOWROLL_OPERATION_TIMEOUT:-900}"
 
 readonly -a CRITICAL_PKGS=(
     atomic-update criscore1 criscore2 btrfsprogs kernel-default rpm
@@ -1435,10 +1435,11 @@ commit_target() {
     fi
 
     if [[ "$(default_snapshot)" != "${t}" ]] ||
-       ! snapshot_is_rw "${t}"; then
+       ! snapshot_is_rw "${t}" ||
+       ! snapshot_is_bootable "${t}"; then
         STATE_STATUS=needs-inspection
         STATE_INSPECTION_KIND=close-postcondition
-        STATE_LAST_ERROR='tukit close returned success but default/RW postconditions failed'
+        STATE_LAST_ERROR='tukit close returned success but default/RW/bootable postconditions failed'
         persist_state_or_die
         return 1
     fi
@@ -1692,7 +1693,7 @@ rollback() {
 
     # Consistency gate: refuse to overwrite an active or unresolved transaction
     case "${STATE_STATUS}" in
-        ''|confirmed|aborted|rolled-back|planned|revalidated) ;;
+        ''|confirmed|aborted|rolled-back|planned|revalidated|pending-reboot) ;;
         needs-inspection)
             rollback_recovery_allowed "${source}" ||
                 die 'rollback di recovery ammesso solo verso SOURCE per boot-mismatch/target-active-or-default, con active/default appartenenti alla transazione.'
@@ -1710,6 +1711,27 @@ rollback() {
     printf 'Rollback verso snapshot %s. Scrivi esattamente: ROLLBACK %s E RIAVVIA\n> ' "${source}" "${source}"
     IFS= read -r answer || die 'rollback annullato.'
     [[ "${answer}" == "ROLLBACK ${source} E RIAVVIA" ]] || die 'rollback annullato.'
+
+    # Recovery route out of a failed pending-reboot TARGET: the reboot
+    # onto the TARGET already happened and confirm refused.  Reclassify
+    # only after the typed confirmation; before it the state must not
+    # be mutated.
+    if [[ "${STATE_STATUS}" == pending-reboot ]]; then
+        local now_boot
+        now_boot="$(current_boot_id)" || die 'impossibile leggere il boot id corrente.'
+        if [[ "${now_boot}" != "${STATE_BOOT_ID_BEFORE}" \
+            && "$(active_snapshot)" == "${STATE_TARGET}" \
+            && "$(default_snapshot)" == "${STATE_TARGET}" ]]; then
+            STATE_STATUS=needs-inspection
+            STATE_INSPECTION_KIND=target-active-or-default
+            STATE_LAST_ERROR='reboot sulla TARGET osservato dopo confirm fallito; rollback di recovery verso SOURCE'
+            persist_state_or_die
+            history_or_warn rollback-recovery-staged "source=${source} failed-target=${STATE_TARGET}"
+            recovery=1
+        else
+            die 'reboot sulla TARGET non osservato o TARGET non active/default; usare recover o avviare manualmente la TARGET.'
+        fi
+    fi
 
     if (( recovery )); then
         rollback_recovery_allowed "${source}" || die 'contesto recovery cambiato durante la conferma.'
