@@ -469,7 +469,7 @@ zypp_value() {
 normalize_rpm_manifest() {
     # libzypp omits a zero epoch; RPM may explicitly report it as 0:.
     # Preserve nonzero epochs and use identical normalization for host/TARGET.
-    LC_ALL=C sed -E '/^gpg-pubkey\|/d; s/^([^|]+\|)0:/\1/' | LC_ALL=C sort -u
+    LC_ALL=C sed -E '/^gpg-pubkey\|/d; s/^([^|]+\|)0:/\1/' | LC_ALL=C grep -E '^[^|]+\|[^|]*\|[^|]+$' | LC_ALL=C sort -u
 }
 
 write_rpm_manifest_host() {
@@ -1225,7 +1225,7 @@ target_window_valid() {
     (( a <= TARGET_MAX_AGE_SECONDS ))
 }
 
-tukit_call() { local t="$1"; shift; tukit call "${t}" "$@"; }
+tukit_call() { local t="$1"; shift; tukit -q call "${t}" "$@"; }
 
 open_target() {
     local target
