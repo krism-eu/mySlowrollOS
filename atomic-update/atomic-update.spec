@@ -16,7 +16,7 @@ Requires:       findutils
 Requires:       gawk
 Requires:       grep
 Requires:       kernel-default
-Requires:       libxml2-tools
+Requires:       /usr/bin/xmllint
 Requires:       procps
 Requires:       rpm
 Requires:       sdbootutil
