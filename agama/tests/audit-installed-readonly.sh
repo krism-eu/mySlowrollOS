@@ -44,9 +44,9 @@ run systemctl list-timers --all --no-pager
 run sudo -n snapper -c root get-config
 run sudo -n snapper -c root list
 run cat /etc/sysconfig/btrfsmaintenance
-run rpm -q chrony systemd-timesyncd apparmor-parser snapper backintime-qt backintime plymouth plymouth-dracut sddm-config-wayland which libyui-qt-pkg16 atomic-update criscore1 criscore2 avahi nss-mdns
+run rpm -q chrony systemd-timesyncd apparmor-parser snapper backintime-qt backintime kfind sddm-config-wayland which libyui-qt-pkg16 atomic-update criscore1 criscore2 avahi nss-mdns
 run rpm -q --requires criscore1 criscore2
-run rpm -qa 'plymouth*' 'yast2*' 'libyui*' 'ruby*'
+run rpm -qa 'kfind*' 'yast2*' 'libyui*' 'ruby*'
 run rpm -ql backintime-qt
 run rpm -ql backintime
 run rpm -ql sddm-config-wayland

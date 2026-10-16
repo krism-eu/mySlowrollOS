@@ -104,6 +104,11 @@
       "permissions": "0644"
     },
     {
+      "source": "myslowroll-policy/wallpaper.png",
+      "destination": "/var/lib/myslowroll/wallpaper.png",
+      "permissions": "0644"
+    },
+    {
       "source": "myslowroll-policy/backintime-autostart-disabled.desktop",
       "destination": "/var/lib/myslowroll/backintime-autostart-disabled.desktop",
       "permissions": "0644"

@@ -185,6 +185,10 @@ install -m 0600 -o sddm -g sddm /etc/xdg/kcminputrc /var/lib/sddm/.config/kcminp
 configure_snapper_root_file /etc/snapper/configs/root || exit 1
 echo 'mySlowrollOS: Snapper root retention configured before first reboot'
 
+# Back In Time: replace any package-provided autostart file with the reviewed
+# Hidden=true override. Runs after packages are installed and before first boot.
+install_backintime_override || exit 1
+
 # Hostname: ensure a consistent and clean mDNS hostname
 if [[ ! -s /etc/hostname || "$(< /etc/hostname)" =~ ^(localhost|localhost\.localdomain)?$ ]]; then
   echo "myslowrollos" > /etc/hostname

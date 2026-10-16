@@ -174,8 +174,8 @@ jobs:
           grep -Fxq 'rw security=apparmor systemd.show_status=1 quiet' myslowroll-policy/kernel-cmdline
           grep -Fxq 'libyui-qt-pkg16' agama/install-only-packages.txt
           grep -Fxq 'xauth' agama/install-only-packages.txt
-          grep -Fxq 'Requires:       plymouth' myslowroll-workstation/myslowroll-workstation.spec
-          if grep -Eq '^Requires:[[:space:]]+plymouth([[:space:]]|$)' obs/criscore1/criscore1.spec; then
+          grep -Fxq 'Requires:       kfind' myslowroll-workstation/myslowroll-workstation.spec
+          if grep -Eq '^Requires:[[:space:]]+plymouth([[:space:]]|$)' myslowroll-workstation/myslowroll-workstation.spec obs/criscore1/criscore1.spec; then
             echo 'FAIL: forbidden content matched: see preceding check' >&2
             exit 1
           else
