@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.myslowrollos.controlcenter</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>MSCC</name>
+  <summary>Control Center for openSUSE Slowroll</summary>
+  <summary xml:lang="it">Centro di Controllo per openSUSE Slowroll</summary>
+  <developer id="org.myslowrollos">
+    <name>mySlowrollOS Project</name>
+  </developer>
+  <description>
+    <p>
+      MSCC (mySlowrollOS Control Center) provides a centralized system management
+      interface for openSUSE Slowroll, integrating transactional updates, Snapper
+      snapshots, service health monitoring, and KDE desktop configurations.
+    </p>
+    <p xml:lang="it">
+      MSCC offre un'interfaccia centralizzata di gestione per openSUSE Slowroll,
+      integrando aggiornamenti transazionali, stato snapshot Btrfs/Snapper,
+      monitoraggio servizi e configurazioni rapide per KDE Plasma.
+    </p>
+  </description>
+  <url type="homepage">https://github.com/krism-eu/mySlowrollOS</url>
+  <launchable type="desktop-id">myslowroll-cc.desktop</launchable>
+  <provides>
+    <binary>myslowroll-cc</binary>
+  </provides>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="1.0.0" date="2026-10-19" />
+  </releases>
+</component>

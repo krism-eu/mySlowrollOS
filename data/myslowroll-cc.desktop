@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=MSCC
+GenericName=Control Center openSUSE Slowroll
+Comment=MSCC - Centro di Controllo Operativo per openSUSE Slowroll
+Exec=myslowroll-cc
+Icon=myslowroll-cc
+Terminal=false
+Type=Application
+Categories=Qt;KDE;System;Settings;
+StartupNotify=true
+X-KDE-SubstituteUID=false

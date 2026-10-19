@@ -1,0 +1,27 @@
+# Build directories
+build/
+dist/
+rpmbuild/
+
+# Build artifacts
+*.rpm
+*.tar.gz
+*.o
+*.a
+*.so
+.ninja*
+
+# Qt/Creator files
+*.user
+*.autosave
+.qmake.stash
+
+# Editor temporary files
+*~
+*.swp
+.DS_Store
+*.bak
+
+# Unified sources & build lock
+myslowroll-cc-sorgenti-unificati.txt
+.build-rpm.lock/

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>mySlowrollOS</vendor>
+  <vendor_url>https://github.com/krism-eu/mySlowrollOS</vendor_url>
+
+  <action id="org.myslowrollos.controlcenter.atomic-update">
+    <description>Run atomic updates in mySlowrollOS Control Center</description>
+    <description xml:lang="it">Gestione aggiornamenti atomici in mySlowrollOS Control Center</description>
+    <message>Authentication is required to perform atomic system updates</message>
+    <message xml:lang="it">Autenticazione richiesta per eseguire aggiornamenti atomici di sistema</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/sbin/atomic-update</annotate>
+  </action>
+
+  <action id="org.myslowrollos.controlcenter.efibootmgr">
+    <description>Configure EFI boot entries in mySlowrollOS Control Center</description>
+    <description xml:lang="it">Configurazione voci di avvio EFI in mySlowrollOS Control Center</description>
+    <message>Authentication is required to modify EFI boot settings</message>
+    <message xml:lang="it">Autenticazione richiesta per modificare le impostazioni di avvio EFI</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/sbin/efibootmgr</annotate>
+  </action>
+
+  <action id="org.myslowrollos.controlcenter.zypper">
+    <description>Clean package cache in mySlowrollOS Control Center</description>
+    <description xml:lang="it">Pulizia cache pacchetti Zypper in mySlowrollOS Control Center</description>
+    <message>Authentication is required to manage package cache</message>
+    <message xml:lang="it">Autenticazione richiesta per gestire la cache dei pacchetti</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/zypper</annotate>
+  </action>
+</policyconfig>

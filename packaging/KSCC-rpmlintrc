@@ -1,0 +1,10 @@
+# rpmlint 2.x TOML configuration for MSCC (mySlowrollOS Control Center / KSCC)
+Filters = [
+    ".*unstripped-binary-or-object.*",
+    ".*position-independent-executable-suggested.*",
+    ".*spelling-error.*",
+    ".*polkit-untracked-privilege.*",
+]
+
+[Scoring]
+polkit-untracked-privilege = 0

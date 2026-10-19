@@ -1,0 +1,42 @@
+name: CI - Build & Test
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container:
+      image: opensuse/tumbleweed:latest
+
+    steps:
+      - name: Install dependencies and validation tools
+        run: |
+          zypper --non-interactive refresh
+          zypper --non-interactive install --no-recommends \
+            git cmake gcc-c++ ninja \
+            desktop-file-utils AppStream libxml2-tools \
+            qt6-base-devel qt6-declarative-devel qt6-declarative-tools \
+            qt6-widgets-devel qt6-quickcontrols2-devel qt6-test-devel \
+            kf6-kirigami-devel kf6-extra-cmake-modules
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Desktop, AppStream and PolKit metadata
+        run: |
+          desktop-file-validate data/myslowroll-cc.desktop
+          appstreamcli validate --no-net data/org.myslowrollos.controlcenter.metainfo.xml
+          xmllint --noout data/org.myslowrollos.controlcenter.policy
+
+      - name: Configure CMake
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+
+      - name: Build Project
+        run: cmake --build build -j$(nproc)
+
+      - name: Run Unit Tests
+        run: ctest --test-dir build --output-on-failure

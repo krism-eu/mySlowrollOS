@@ -1,0 +1,10 @@
+-------------------------------------------------------------------
+Mon Oct 19 12:00:00 UTC 2026 - Kris <kris@myslowrollos.org>
+
+- Initial package release 1.0.0 for openSUSE Slowroll / mySlowrollOS:
+  * Centralized operational control center in C++20 / Qt 6 / Kirigami 6.
+  * Real-time monitoring of CPU, RAM, thermal and disk usage.
+  * Native PolKit policy integration for atomic-update, efibootmgr and zypper.
+  * Fast UEFI firmware reboot and BootNext configuration.
+  * Safe user custom actions and network profile switcher (IPv4/DNS).
+  * AppStream metadata (org.myslowrollos.controlcenter.metainfo.xml).
