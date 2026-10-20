@@ -107,6 +107,13 @@ TEST_BTRFS
   fi
   echo 'PASS: Btrfs timer policy, one root scrub, preservation, idempotence'
   echo 'PASS: failsafe removed, root/subvolume preserved, shipped cmdline idempotent'
+  # Verify the sudoers.d mode check logic against a synthetic rpm dump.
+  fake_rpm_dump="$(mktemp)" || exit 1
+  printf '/etc/sudoers.d 0 0 0 040750 root root 0 0 0 X\n' >"$fake_rpm_dump"
+  expected_mode="$(awk '$1=="/etc/sudoers.d"{m=$5; sub(/^0+/,"",m); print m}' "$fake_rpm_dump")"
+  rm -f -- "$fake_rpm_dump"
+  [[ "$expected_mode" == "40750" ]] || { echo 'FAIL: sudoers.d mode extraction' >&2; exit 1; }
+  echo 'PASS: sudoers.d mode verification logic'
   exit 0
 fi
 
@@ -183,6 +190,19 @@ if [[ -f /etc/zypp/repos.d/home_krism.key ]]; then
 else
   echo 'myslowroll-firstboot: OBS key missing' >&2
   firstboot_rc=1
+fi
+
+# Verify /etc/sudoers.d mode matches the sudo package expectation.
+# Agama's post-chroot restores 0750; this is a read-only verification only.
+if [[ -d /etc/sudoers.d ]]; then
+  expected_mode="$(rpm -q --dump sudo 2>/dev/null | awk '$1=="/etc/sudoers.d"{m=$5; sub(/^0+/,"",m); print m}')"
+  if [[ -n "$expected_mode" ]]; then
+    actual_mode="$(stat -c '%a' /etc/sudoers.d)"
+    if [[ "$actual_mode" != "$expected_mode" ]]; then
+      echo "myslowroll-firstboot: /etc/sudoers.d mode $actual_mode != package $expected_mode" >&2
+      firstboot_rc=1
+    fi
+  fi
 fi
 
 # Apply intended runtime service policy.

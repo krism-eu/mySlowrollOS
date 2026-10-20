@@ -282,6 +282,14 @@ getent passwd sddm >/dev/null || { echo 'mySlowrollOS: sddm account missing' >&2
 install -d -m 0700 -o sddm -g sddm /var/lib/sddm/.config
 install -m 0600 -o sddm -g sddm /etc/xdg/kcminputrc /var/lib/sddm/.config/kcminputrc
 
+# Agama creates /etc/sudoers.d with the default 0755 when installing the
+# passwordless-admin drop-in, but the sudo package ships that directory at 0750.
+# Restore the package-expected mode so rpm -V sudo stays clean.
+if [[ -d /etc/sudoers.d ]]; then
+  chmod 0750 /etc/sudoers.d
+  echo 'mySlowrollOS: /etc/sudoers.d mode restored to 0750 (package default)'
+fi
+
 # Apply Snapper retention independently of boot-entry validation, without
 # deleting snapshots. A later EFI/bootloader error must not skip this policy.
 configure_snapper_root_file /etc/snapper/configs/root || exit 1
