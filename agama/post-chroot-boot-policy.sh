@@ -149,6 +149,44 @@ PY
   mv -fT "$tmp" "$fstab" || { rm -f "$tmp"; return 1; }
 }
 
+# Realign and verify sudo package permissions and the custom passwordless drop-in.
+# Sudo package ships /etc/sudoers.d with 0750 (root:root).
+configure_sudoers_policy() {
+  local sudoers_dir="${1:-/etc/sudoers.d}"
+  local dropin="${2:-${sudoers_dir}/99-myslowroll-passwordless-admin}"
+  local owner="${3:-0}"
+  local group="${4:-0}"
+
+  [[ -d "$sudoers_dir" && ! -L "$sudoers_dir" ]] || {
+    echo "mySlowrollOS: sudoers directory missing or is a symlink: $sudoers_dir" >&2
+    return 1
+  }
+
+  if command -v rpm >/dev/null 2>&1 && rpm -q sudo >/dev/null 2>&1; then
+    rpm --setperms sudo >/dev/null 2>&1 || true
+    rpm --setugids sudo >/dev/null 2>&1 || true
+  fi
+
+  chown "$owner:$group" "$sudoers_dir" || return 1
+  chmod 0750 "$sudoers_dir" || return 1
+
+  if [[ -f "$dropin" ]]; then
+    [[ ! -L "$dropin" ]] || {
+      echo "mySlowrollOS: sudoers drop-in is a symlink: $dropin" >&2
+      return 1
+    }
+    chown "$owner:$group" "$dropin" || return 1
+    chmod 0440 "$dropin" || return 1
+    if command -v visudo >/dev/null 2>&1; then
+      visudo -cf "$dropin" >/dev/null 2>&1 || {
+        echo "mySlowrollOS: visudo syntax check failed for: $dropin" >&2
+        return 1
+      }
+    fi
+  fi
+  echo "mySlowrollOS: /etc/sudoers.d permissions (0750) and drop-in verified"
+}
+
 
 if [[ "${1:-}" == --self-test ]]; then
   dir="$(mktemp -d)"
@@ -261,6 +299,20 @@ FSTAB_TEST
     echo 'FAIL: empty fstab accepted' >&2
     exit 1
   fi
+  # Sudoers policy: verify 0750 directory mode, 0440 drop-in, and reject symlinks
+  mkdir -p "$dir/mock_sudoers.d"
+  chmod 0755 "$dir/mock_sudoers.d"
+  printf '%%wheel ALL=(ALL:ALL) NOPASSWD: ALL\n' > "$dir/mock_sudoers.d/99-myslowroll-passwordless-admin"
+  chmod 0644 "$dir/mock_sudoers.d/99-myslowroll-passwordless-admin"
+  configure_sudoers_policy "$dir/mock_sudoers.d" "$dir/mock_sudoers.d/99-myslowroll-passwordless-admin" "$(id -u)" "$(id -g)" || exit 1
+  [[ "$(stat -c '%a' "$dir/mock_sudoers.d")" == "750" ]] || exit 1
+  [[ "$(stat -c '%a' "$dir/mock_sudoers.d/99-myslowroll-passwordless-admin")" == "440" ]] || exit 1
+  ln -s "$dir/mock_sudoers.d" "$dir/symlink_sudoers.d"
+  if configure_sudoers_policy "$dir/symlink_sudoers.d" "$dir/mock_sudoers.d/99-myslowroll-passwordless-admin" "$(id -u)" "$(id -g)"; then
+    echo 'FAIL: symlink sudoers directory accepted' >&2
+    exit 1
+  fi
+  echo 'PASS: /etc/sudoers.d configured to 0750, drop-in 0440, and symlinks rejected'
   echo 'PASS: /etc/fstab configured atomically, idempotently, and fail-closed'
   echo 'PASS: Back In Time autostart suppressed atomically and idempotently'
   echo 'PASS: BLS default entry validator refuses missing/foreign/invalid entries'
@@ -282,14 +334,6 @@ getent passwd sddm >/dev/null || { echo 'mySlowrollOS: sddm account missing' >&2
 install -d -m 0700 -o sddm -g sddm /var/lib/sddm/.config
 install -m 0600 -o sddm -g sddm /etc/xdg/kcminputrc /var/lib/sddm/.config/kcminputrc
 
-# Agama creates /etc/sudoers.d with the default 0755 when installing the
-# passwordless-admin drop-in, but the sudo package ships that directory at 0750.
-# Restore the package-expected mode so rpm -V sudo stays clean.
-if [[ -d /etc/sudoers.d ]]; then
-  chmod 0750 /etc/sudoers.d
-  echo 'mySlowrollOS: /etc/sudoers.d mode restored to 0750 (package default)'
-fi
-
 # Apply Snapper retention independently of boot-entry validation, without
 # deleting snapshots. A later EFI/bootloader error must not skip this policy.
 configure_snapper_root_file /etc/snapper/configs/root || exit 1
@@ -298,6 +342,9 @@ echo 'mySlowrollOS: Snapper root retention configured before first reboot'
 # Back In Time: replace any package-provided autostart file with the reviewed
 # Hidden=true override. Runs after packages are installed and before first boot.
 install_backintime_override || exit 1
+
+# Sudo policy: realign sudo package permissions to 0750 and verify custom drop-in.
+configure_sudoers_policy || exit 1
 
 # Hostname: ensure a consistent and clean mDNS hostname
 if [[ ! -s /etc/hostname || "$(< /etc/hostname)" =~ ^(localhost|localhost\.localdomain)?$ ]]; then

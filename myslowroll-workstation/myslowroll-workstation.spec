@@ -103,6 +103,7 @@ Requires:       libxml2-tools
 Requires:       libz1-x86-64-v3
 Requires:       libzstd1-x86-64-v3
 Requires:       myrlyn
+Requires:       myslowroll-cc
 Requires:       nano
 Requires:       nss-mdns
 Requires:       ntfs-3g

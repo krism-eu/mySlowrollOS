@@ -107,12 +107,14 @@ TEST_BTRFS
   fi
   echo 'PASS: Btrfs timer policy, one root scrub, preservation, idempotence'
   echo 'PASS: failsafe removed, root/subvolume preserved, shipped cmdline idempotent'
-  # Verify the sudoers.d mode check logic against a synthetic rpm dump.
-  fake_rpm_dump="$(mktemp)" || exit 1
-  printf '/etc/sudoers.d 0 0 0 040750 root root 0 0 0 X\n' >"$fake_rpm_dump"
-  expected_mode="$(awk '$1=="/etc/sudoers.d"{m=$5; sub(/^0+/,"",m); print m}' "$fake_rpm_dump")"
-  rm -f -- "$fake_rpm_dump"
-  [[ "$expected_mode" == "40750" ]] || { echo 'FAIL: sudoers.d mode extraction' >&2; exit 1; }
+  # Verify sudoers.d verification logic
+  test_sudoers_dir="$(mktemp -d)" || exit 1
+  test_sudoers="$test_sudoers_dir/sudoers.d"
+  mkdir -m 0750 "$test_sudoers"
+  [[ "$(stat -c '%a' "$test_sudoers")" == "750" ]] || { rm -rf -- "$test_sudoers_dir"; exit 1; }
+  chmod 0755 "$test_sudoers"
+  [[ "$(stat -c '%a' "$test_sudoers")" != "750" ]] || { rm -rf -- "$test_sudoers_dir"; exit 1; }
+  rm -rf -- "$test_sudoers_dir"
   echo 'PASS: sudoers.d mode verification logic'
   exit 0
 fi
@@ -192,16 +194,13 @@ else
   firstboot_rc=1
 fi
 
-# Verify /etc/sudoers.d mode matches the sudo package expectation.
-# Agama's post-chroot restores 0750; this is a read-only verification only.
+# Verify /etc/sudoers.d mode matches the sudo package expectation (0:0:750).
+# Agama post-chroot aligns permissions; this is a fail-closed verification only.
 if [[ -d /etc/sudoers.d ]]; then
-  expected_mode="$(rpm -q --dump sudo 2>/dev/null | awk '$1=="/etc/sudoers.d"{m=$5; sub(/^0+/,"",m); print m}')"
-  if [[ -n "$expected_mode" ]]; then
-    actual_mode="$(stat -c '%a' /etc/sudoers.d)"
-    if [[ "$actual_mode" != "$expected_mode" ]]; then
-      echo "myslowroll-firstboot: /etc/sudoers.d mode $actual_mode != package $expected_mode" >&2
-      firstboot_rc=1
-    fi
+  actual_mode="$(stat -c '%u:%g:%a' /etc/sudoers.d)"
+  if [[ "$actual_mode" != "0:0:750" ]]; then
+    echo "myslowroll-firstboot: /etc/sudoers.d ownership/mode $actual_mode != 0:0:750" >&2
+    firstboot_rc=1
   fi
 fi
 

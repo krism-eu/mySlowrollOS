@@ -72,7 +72,7 @@ run nmcli -f NAME,TYPE,DEVICE connection show --active
 run nmcli -f GENERAL.DEVICE,GENERAL.CONNECTION,IP6 device show
 run nmcli radio wifi
 run bluetoothctl --timeout 5 show
-run sysctl net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6 net.ipv6.conf.lo.disable_ipv6 vm.swappiness vm.page-cluster
+run sysctl net.ipv6.conf.all.disable_ipv6 net.ipv6.conf.default.disable_ipv6 net.ipv6.conf.lo.disable_ipv6 net.ipv4.conf.all.send_redirects net.ipv4.conf.default.send_redirects net.ipv4.conf.all.accept_redirects net.ipv4.conf.default.accept_redirects net.ipv4.icmp_echo_ignore_broadcasts vm.swappiness vm.page-cluster
 run ip -6 addr show dev lo
 run getent ahosts localhost
 run cat /etc/nsswitch.conf
