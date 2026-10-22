@@ -67,7 +67,7 @@ Kirigami.ScrollablePage {
 
         StackLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: currentItem ? currentItem.implicitHeight : 0
+            Layout.preferredHeight: children[currentIndex] ? children[currentIndex].implicitHeight : implicitHeight
             currentIndex: commandTabs.currentIndex
 
             // TAB 1: Comandi Predefiniti

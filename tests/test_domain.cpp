@@ -301,24 +301,7 @@ void DomainTest::testSystemctlShowBlockParsingOrderIndependent()
         "Id=cups.service\n"
     );
 
-    const QStringList blocks = fakeOutput.split(QRegularExpression(QStringLiteral(R"(\n\s*\n)")), Qt::SkipEmptyParts);
-    QVariantMap map;
-    for (const QString &block : blocks) {
-        const QStringList blockLines = block.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
-        QString id;
-        QString active;
-        for (const QString &line : blockLines) {
-            const QString trimmed = line.trimmed();
-            if (trimmed.startsWith(QStringLiteral("Id="))) {
-                id = trimmed.mid(3).trimmed();
-            } else if (trimmed.startsWith(QStringLiteral("ActiveState="))) {
-                active = trimmed.mid(12).trimmed();
-            }
-        }
-        if (!id.isEmpty()) {
-            map.insert(id, active.isEmpty() ? QStringLiteral("inactive") : active);
-        }
-    }
+    const QVariantMap map = SlowrollBackend::parseSystemctlShowOutput(fakeOutput);
 
     QCOMPARE(map.value(QStringLiteral("firewalld.service")).toString(), QStringLiteral("active"));
     QCOMPARE(map.value(QStringLiteral("NetworkManager.service")).toString(), QStringLiteral("active"));

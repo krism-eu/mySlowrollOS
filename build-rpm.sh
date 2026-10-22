@@ -69,9 +69,6 @@ TMP_TAR=""
 if [[ -f "$HERE/packaging/myslowroll-cc-rpmlintrc" ]]; then
     cp -f -- "$HERE/packaging/myslowroll-cc-rpmlintrc" "$BUILD_ROOT/SOURCES/"
 fi
-if [[ -f "$HERE/packaging/KSCC-rpmlintrc" ]]; then
-    cp -f -- "$HERE/packaging/KSCC-rpmlintrc" "$BUILD_ROOT/SOURCES/"
-fi
 
 # Assicura sincronizzazione versione tra spec e CMakeLists.txt
 sed "s/^Version:.*/Version:        ${VERSION}/" "$HERE/packaging/myslowroll-cc.spec" > "$BUILD_ROOT/SPECS/myslowroll-cc.spec"
@@ -90,7 +87,7 @@ if [[ ${#rpms[@]} -eq 0 ]]; then
 fi
 
 cp -f -- "${rpms[@]}" "$DIST_DIR/"
-cp -f -- "$HERE"/packaging/myslowroll-cc.spec "$HERE"/packaging/myslowroll-cc.changes "$HERE"/packaging/myslowroll-cc-rpmlintrc "$HERE"/packaging/KSCC-rpmlintrc "$DIST_DIR/"
+cp -f -- "$HERE"/packaging/myslowroll-cc.spec "$HERE"/packaging/myslowroll-cc.changes "$HERE"/packaging/myslowroll-cc-rpmlintrc "$DIST_DIR/"
 
 echo "=== RPM creati con successo in $DIST_DIR ==="
 ls -lh -- "$DIST_DIR"

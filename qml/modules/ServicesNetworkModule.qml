@@ -61,7 +61,7 @@ Kirigami.ScrollablePage {
 
         StackLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: currentItem ? currentItem.implicitHeight : 0
+            Layout.preferredHeight: children[currentIndex] ? children[currentIndex].implicitHeight : implicitHeight
             currentIndex: tabs.currentIndex
 
             // TAB 1: Servizi Fondamentali
@@ -389,7 +389,7 @@ Kirigami.ScrollablePage {
                                 spacing: 2
                                 Controls.Label { text: qsTr("Indirizzo IPv4"); font.bold: true; opacity: UiMetrics.secondaryOpacity }
                                 Controls.Label {
-                                    text: DesktopBackend.networkIpAddress.length > 0 ? DesktopBackend.networkIpAddress.replace(/\/\d+$/, "") : qsTr("Non assegnato")
+                                    text: DesktopBackend.networkIpAddress.length > 0 ? DesktopBackend.networkIpAddress : qsTr("Non assegnato")
                                     font.bold: true
                                     font.family: Kirigami.Theme.fixedWidthFont.family
                                     color: Kirigami.Theme.highlightColor
@@ -588,6 +588,13 @@ Kirigami.ScrollablePage {
                                     text: DesktopBackend.httpsAddress
                                     placeholderText: qsTr("https://... (URL DoH o dashboard fornitore - solo annotazione)")
                                     onAccepted: DesktopBackend.setHttpsAddress(text)
+
+                                    Connections {
+                                        target: DesktopBackend
+                                        function onNetworkPresetsChanged() {
+                                            httpsField.text = DesktopBackend.httpsAddress
+                                        }
+                                    }
                                 }
 
                                 Controls.Button {

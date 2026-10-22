@@ -87,6 +87,10 @@ install(FILES data/org.myslowrollos.controlcenter.metainfo.xml
     DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo
 )
 
+install(PROGRAMS data/scripts/mic.sh
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/myslowroll-cc/scripts
+)
+
 if(BUILD_TESTING)
     add_executable(test_domain
         tests/test_domain.cpp

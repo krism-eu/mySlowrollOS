@@ -402,6 +402,8 @@ void SlowrollBackend::readAtomicStateFiles()
                 m_atomicStateDescription = tr("Aggiornamento confermato e operativo.");
             } else if (val == QStringLiteral("planned")) {
                 m_atomicStateDescription = tr("Piano di aggiornamento verificato e pronto all'installazione.");
+            } else if (val == QStringLiteral("idle")) {
+                m_atomicStateDescription = tr("Stato del sistema nominale. Nessuna transazione pendente.");
             } else {
                 m_atomicStateDescription = tr("Stato transazionale: %1").arg(val);
             }
@@ -525,8 +527,38 @@ void SlowrollBackend::refreshSnapshots()
     emit snapshotsChanged();
 }
 
+QVariantMap SlowrollBackend::parseSystemctlShowOutput(const QString &out)
+{
+    const QStringList blocks = out.split(QRegularExpression(QStringLiteral(R"(\n\s*\n)")), Qt::SkipEmptyParts);
+    QVariantMap map;
+    for (const QString &block : blocks) {
+        const QStringList blockLines = block.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        QString id;
+        QString active;
+        for (const QString &line : blockLines) {
+            const QString trimmed = line.trimmed();
+            if (trimmed.startsWith(QStringLiteral("Id="))) {
+                id = trimmed.mid(3).trimmed();
+            } else if (trimmed.startsWith(QStringLiteral("ActiveState="))) {
+                active = trimmed.mid(12).trimmed();
+            }
+        }
+        if (!id.isEmpty()) {
+            map.insert(id, active.isEmpty() ? QStringLiteral("inactive") : active);
+        }
+    }
+
+    if (map.value(QStringLiteral("cups.service")).toString() != QStringLiteral("active") &&
+        map.value(QStringLiteral("cups.socket")).toString() == QStringLiteral("active")) {
+        map.insert(QStringLiteral("cups.service"), QStringLiteral("active (socket)"));
+    }
+    return map;
+}
+
 void SlowrollBackend::refreshServices()
 {
+    const quint64 reqId = ++m_servicesRequestId;
+
     // 1. Check failed units
     QProcess *failedProc = new QProcess(this);
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
@@ -534,20 +566,21 @@ void SlowrollBackend::refreshServices()
     env.insert(QStringLiteral("LANG"), QStringLiteral("C.UTF-8"));
     failedProc->setProcessEnvironment(env);
 
-    connect(failedProc, &QProcess::finished, this, [this, failedProc](int exitCode, QProcess::ExitStatus) {
-        if (exitCode == 0) {
-            const QString out = QString::fromUtf8(failedProc->readAllStandardOutput()).trimmed();
+    connect(failedProc, &QProcess::finished, this, [this, failedProc, reqId](int exitCode, QProcess::ExitStatus) {
+        if (reqId == m_servicesRequestId) {
             QStringList failed;
-            if (!out.isEmpty() && !out.contains(QStringLiteral("0 loaded units listed"))) {
-                const QStringList lines = out.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
-                for (const QString &line : lines) {
-                    QString trimmed = line.trimmed();
-                    // Strip systemd bullet ● (0x25CF), * or whitespace
-                    while (!trimmed.isEmpty() && (trimmed.startsWith(QLatin1Char('*')) || trimmed.startsWith(QChar(0x25CF)) || trimmed.at(0).isSpace())) {
-                        trimmed = trimmed.mid(1).trimmed();
-                    }
-                    if (!trimmed.isEmpty()) {
-                        failed.append(trimmed);
+            if (exitCode == 0) {
+                const QString out = QString::fromUtf8(failedProc->readAllStandardOutput()).trimmed();
+                if (!out.isEmpty() && !out.contains(QStringLiteral("0 loaded units listed"))) {
+                    const QStringList lines = out.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+                    for (const QString &line : lines) {
+                        QString trimmed = line.trimmed();
+                        while (!trimmed.isEmpty() && (trimmed.startsWith(QLatin1Char('*')) || trimmed.startsWith(QChar(0x25CF)) || trimmed.at(0).isSpace())) {
+                            trimmed = trimmed.mid(1).trimmed();
+                        }
+                        if (!trimmed.isEmpty()) {
+                            failed.append(trimmed);
+                        }
                     }
                 }
             }
@@ -556,8 +589,8 @@ void SlowrollBackend::refreshServices()
         }
         failedProc->deleteLater();
     });
-    connect(failedProc, &QProcess::errorOccurred, this, [this, failedProc](QProcess::ProcessError err) {
-        if (err == QProcess::FailedToStart) {
+    connect(failedProc, &QProcess::errorOccurred, this, [this, failedProc, reqId](QProcess::ProcessError err) {
+        if (reqId == m_servicesRequestId && err == QProcess::FailedToStart) {
             setMessage(tr("Impossibile avviare systemctl per la verifica delle unità."));
         }
         failedProc->deleteLater();
@@ -578,41 +611,19 @@ void SlowrollBackend::refreshServices()
     // 2. Check key services states (firewalld, NetworkManager, bluetooth, cups) by Id and ActiveState properties
     QProcess *servicesProc = new QProcess(this);
     servicesProc->setProcessEnvironment(env);
-    connect(servicesProc, &QProcess::finished, this, [this, servicesProc](int exitCode, QProcess::ExitStatus) {
-        if (exitCode == 0) {
-            const QString out = QString::fromUtf8(servicesProc->readAllStandardOutput());
-            const QStringList blocks = out.split(QRegularExpression(QStringLiteral(R"(\n\s*\n)")), Qt::SkipEmptyParts);
-            QVariantMap map;
-            for (const QString &block : blocks) {
-                const QStringList blockLines = block.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
-                QString id;
-                QString active;
-                for (const QString &line : blockLines) {
-                    const QString trimmed = line.trimmed();
-                    if (trimmed.startsWith(QStringLiteral("Id="))) {
-                        id = trimmed.mid(3).trimmed();
-                    } else if (trimmed.startsWith(QStringLiteral("ActiveState="))) {
-                        active = trimmed.mid(12).trimmed();
-                    }
-                }
-                if (!id.isEmpty()) {
-                    map.insert(id, active.isEmpty() ? QStringLiteral("inactive") : active);
-                }
+    connect(servicesProc, &QProcess::finished, this, [this, servicesProc, reqId](int exitCode, QProcess::ExitStatus) {
+        if (reqId == m_servicesRequestId) {
+            if (exitCode == 0) {
+                m_keyServices = parseSystemctlShowOutput(QString::fromUtf8(servicesProc->readAllStandardOutput()));
+            } else {
+                m_keyServices.clear();
             }
-
-            // Socket activation fallback: if cups.service is inactive/loaded but cups.socket is active
-            if (map.value(QStringLiteral("cups.service")).toString() != QStringLiteral("active") &&
-                map.value(QStringLiteral("cups.socket")).toString() == QStringLiteral("active")) {
-                map.insert(QStringLiteral("cups.service"), QStringLiteral("active (socket)"));
-            }
-
-            m_keyServices = map;
             emit servicesChanged();
         }
         servicesProc->deleteLater();
     });
-    connect(servicesProc, &QProcess::errorOccurred, this, [this, servicesProc](QProcess::ProcessError err) {
-        if (err == QProcess::FailedToStart) {
+    connect(servicesProc, &QProcess::errorOccurred, this, [this, servicesProc, reqId](QProcess::ProcessError err) {
+        if (reqId == m_servicesRequestId && err == QProcess::FailedToStart) {
             setMessage(tr("Impossibile verificare lo stato dei servizi con systemctl."));
         }
         servicesProc->deleteLater();
@@ -685,7 +696,7 @@ void SlowrollBackend::checkAtomicUpdates()
         return;
     }
     QProcess *proc = startProcess(QStringLiteral("pkexec"), {atomicExe, QStringLiteral("check")},
-                                  QStringLiteral("atomic-check"), false, 45000);
+                                  QStringLiteral("atomic-check"), false, 120000);
     if (proc) {
         setMessage(tr("Verifica aggiornamenti atomic-update in corso..."));
     }
@@ -699,7 +710,7 @@ void SlowrollBackend::cancelPendingReboot()
         return;
     }
     QProcess *proc = startProcess(QStringLiteral("pkexec"), {atomicExe, QStringLiteral("recover"), QStringLiteral("clear-opening")},
-                                  QStringLiteral("cancel-reboot"), false, 30000);
+                                  QStringLiteral("cancel-reboot"), false, 120000);
     if (proc) {
         setMessage(tr("Annullamento della transazione pendente in corso..."));
     }
@@ -708,7 +719,7 @@ void SlowrollBackend::cancelPendingReboot()
 void SlowrollBackend::restartService(const QString &serviceName)
 {
     if (serviceName.isEmpty()) return;
-    static const QRegularExpression unitRx(QStringLiteral("^[A-Za-z0-9@_][A-Za-z0-9@._:-]*\\.(service|socket|timer)$"));
+    static const QRegularExpression unitRx(QStringLiteral("^[A-Za-z0-9@_][A-Za-z0-9@._:-]*\\.(service|socket|timer|mount|automount|path|target)$"));
     if (!unitRx.match(serviceName).hasMatch()) {
         setMessage(tr("Nome servizio non valido: %1").arg(serviceName));
         return;
@@ -720,17 +731,18 @@ void SlowrollBackend::restartService(const QString &serviceName)
     }
     // Su openSUSE systemctl gestisce nativamente l'autenticazione Polkit in sessione grafica
     QProcess *proc = startProcess(systemctl, {QStringLiteral("restart"), QStringLiteral("--"), serviceName},
-                                  QStringLiteral("restart-service-%1").arg(serviceName), true, 15000);
+                                  QStringLiteral("restart-service-%1").arg(serviceName), true, 120000);
     if (proc) {
         setMessage(tr("Riavvio del servizio %1 in corso...").arg(serviceName));
     }
 }
+
 void SlowrollBackend::loadServiceJournal(const QString &serviceName)
 {
     if (serviceName.isEmpty()) return;
-    static const QRegularExpression unitRx(QStringLiteral("^[A-Za-z0-9@_][A-Za-z0-9@._:-]*\\.(service|socket|timer)$"));
+    static const QRegularExpression unitRx(QStringLiteral("^[A-Za-z0-9@_][A-Za-z0-9@._:-]*\\.(service|socket|timer|mount|automount|path|target|scope|slice)$"));
     if (!unitRx.match(serviceName).hasMatch()) {
-        m_serviceJournal = tr("Nome servizio non valido.");
+        m_serviceJournal = tr("Nome unità non valido.");
         emit serviceJournalChanged();
         return;
     }
@@ -743,8 +755,16 @@ void SlowrollBackend::loadServiceJournal(const QString &serviceName)
     env.insert(QStringLiteral("LANG"), QStringLiteral("C.UTF-8"));
     proc->setProcessEnvironment(env);
     connect(proc, &QProcess::finished, this, [this, proc](int, QProcess::ExitStatus) {
-        m_serviceJournal = QString::fromUtf8(proc->readAllStandardOutput()).trimmed();
-        if (m_serviceJournal.isEmpty()) {
+        const QString out = QString::fromUtf8(proc->readAllStandardOutput()).trimmed();
+        const QString err = QString::fromUtf8(proc->readAllStandardError()).trimmed();
+        if (!out.isEmpty() && out != QStringLiteral("-- No entries --")) {
+            m_serviceJournal = out;
+        } else if (err.contains(QStringLiteral("systemd-journal")) || err.contains(QStringLiteral("Insufficient permissions"))) {
+            m_serviceJournal = tr("Permessi insufficienti per leggere i log di sistema.\n"
+                                  "Per abilitare la lettura senza root, aggiungi il tuo utente al gruppo 'systemd-journal':\n\n"
+                                  "  sudo usermod -aG systemd-journal $USER\n\n"
+                                  "e riesegui il login.");
+        } else {
             m_serviceJournal = tr("Nessun log disponibile per questa unità.");
         }
         emit serviceJournalChanged();
@@ -932,7 +952,7 @@ void SlowrollBackend::setUefiBootNext(const QString &bootCode)
         return;
     }
     QProcess *proc = startProcess(QStringLiteral("pkexec"), {exe, QStringLiteral("-n"), token},
-                                  QStringLiteral("set-boot-next-") + token, false, 15000);
+                                  QStringLiteral("set-boot-next-") + token, false, 120000);
     if (proc) {
         setMessage(tr("Impostazione del prossimo avvio sulla voce UEFI #%1 in corso...").arg(token));
     }
@@ -946,7 +966,7 @@ void SlowrollBackend::clearUefiBootNext()
         return;
     }
     QProcess *proc = startProcess(QStringLiteral("pkexec"), {exe, QStringLiteral("-N")},
-                                  QStringLiteral("clear-boot-next"), false, 15000);
+                                  QStringLiteral("clear-boot-next"), false, 120000);
     if (proc) {
         setMessage(tr("Cancellazione della voce di prossimo avvio UEFI in corso..."));
     }

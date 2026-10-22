@@ -52,6 +52,8 @@ class DesktopBackend : public QObject
     Q_PROPERTY(int selectedDnsPreset READ selectedDnsPreset NOTIFY networkPresetsChanged)
     Q_PROPERTY(QString httpsAddress READ httpsAddress NOTIFY networkPresetsChanged)
     Q_PROPERTY(QString promptStatus READ bashPromptStatus NOTIFY promptStatusChanged)
+    Q_PROPERTY(bool micMuted READ micMuted NOTIFY micStatusChanged)
+    Q_PROPERTY(bool privacyActive READ privacyActive NOTIFY privacyStatusChanged)
 
     Q_PROPERTY(bool wifiEnabled READ wifiEnabled NOTIFY wifiChanged)
     Q_PROPERTY(bool hasWifiHardware READ hasWifiHardware NOTIFY wifiChanged)
@@ -110,7 +112,13 @@ public:
     QString wifiStatusString() const { return m_wifiStatusString; }
     const QVariantList &topMemoryProcesses() const { return m_topMemoryProcesses; }
 
+    bool micMuted() const { return m_micMuted; }
+    bool privacyActive() const { return m_privacyActive; }
     Q_INVOKABLE void refreshResources();
+    Q_INVOKABLE void refreshMicStatus();
+    Q_INVOKABLE void toggleMic();
+    Q_INVOKABLE void refreshPrivacyStatus();
+    Q_INVOKABLE void togglePrivacy();
     Q_INVOKABLE void refreshPowerProfile();
     Q_INVOKABLE void setPowerProfile(const QString &profile);
 
@@ -176,6 +184,8 @@ signals:
     void wifiChanged();
     void topProcessesChanged();
     void promptStatusChanged();
+    void micStatusChanged();
+    void privacyStatusChanged();
 
 private:
     QProcess *startProcess(const QString &program, const QStringList &arguments,
@@ -241,9 +251,13 @@ private:
     quint64 m_wifiRequestId = 0;
     quint64 m_networkRequestId = 0;
 
+    bool m_micMuted = true;
+    bool m_privacyActive = false;
+
     QVariantList m_topMemoryProcesses;
     mutable QMutex m_busyMutex;
 
     QPointer<QProcess> m_activeProcess;
     QPointer<QProcess> m_topProcessesProc;
+    QPointer<QProcess> m_micProc;
 };

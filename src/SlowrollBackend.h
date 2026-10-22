@@ -97,6 +97,7 @@ public:
                                          QString &nextCode,
                                          QString &currentLabel,
                                          QString &nextLabel);
+    static QVariantMap parseSystemctlShowOutput(const QString &output);
 
 signals:
     void atomicStatusChanged();
@@ -131,6 +132,7 @@ private:
     QVariantList m_snapshots;
     QVariantMap m_keyServices;
     QStringList m_failedUnits;
+    quint64 m_servicesRequestId = 0;
     QVariantList m_repositories;
     QString m_serviceJournal;
 

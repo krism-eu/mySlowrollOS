@@ -105,11 +105,14 @@ double readSysCpuTemp()
 
     // 2. Try thermal zones with strict priority (x86_pkg_temp, coretemp, cpu-thermal FIRST)
     double acpitzFallback = 0.0;
-    for (int i = 0; i < 8; ++i) {
-        QFile typeFile(QStringLiteral("/sys/class/thermal/thermal_zone%1/type").arg(i));
+    const QDir thermalDir(QStringLiteral("/sys/class/thermal"));
+    const QStringList zoneEntries = thermalDir.entryList({QStringLiteral("thermal_zone*")}, QDir::Dirs, QDir::Name);
+    for (const QString &zone : zoneEntries) {
+        const QString basePath = thermalDir.filePath(zone);
+        QFile typeFile(basePath + QStringLiteral("/type"));
         if (typeFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
             const QString typeStr = QString::fromUtf8(typeFile.readLine()).trimmed().toLower();
-            QFile tempFile(QStringLiteral("/sys/class/thermal/thermal_zone%1/temp").arg(i));
+            QFile tempFile(basePath + QStringLiteral("/temp"));
             if (tempFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
                 bool ok = false;
                 const qint64 val = QString::fromUtf8(tempFile.readLine()).trimmed().toLongLong(&ok);
@@ -355,6 +358,8 @@ void DesktopBackend::refreshResources()
         m_diskHomeAvailableGiB = m_diskRootAvailableGiB;
     }
 
+    refreshMicStatus();
+    refreshPrivacyStatus();
     emit resourcesChanged();
 }
 
@@ -491,6 +496,102 @@ void DesktopBackend::restartAudio()
     }, QStringLiteral("audio-restart"), false);
 }
 
+void DesktopBackend::refreshMicStatus()
+{
+    if (m_micProc && m_micProc->state() != QProcess::NotRunning)
+        return;
+
+    const QString wpctl = findExecutableWithSbin(QStringLiteral("wpctl"));
+    if (wpctl.isEmpty())
+        return;
+
+    auto *proc = new QProcess(this);
+    m_micProc = proc;
+
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("LC_ALL"), QStringLiteral("C.UTF-8"));
+    env.insert(QStringLiteral("LANG"), QStringLiteral("C.UTF-8"));
+    proc->setProcessEnvironment(env);
+
+    connect(proc, &QProcess::finished, this, [this, proc](int exitCode, QProcess::ExitStatus status) {
+        if (m_micProc == proc)
+            m_micProc = nullptr;
+        if (status == QProcess::NormalExit && exitCode == 0) {
+            const QString output = QString::fromUtf8(proc->readAllStandardOutput());
+            const bool muted = output.contains(QStringLiteral("MUTED"));
+            if (m_micMuted != muted) {
+                m_micMuted = muted;
+                emit micStatusChanged();
+            }
+        }
+        proc->deleteLater();
+    });
+
+    connect(proc, &QProcess::errorOccurred, this, [this, proc](QProcess::ProcessError) {
+        if (m_micProc == proc)
+            m_micProc = nullptr;
+        proc->deleteLater();
+    });
+
+    QPointer<QProcess> guard = proc;
+    QTimer::singleShot(1500, proc, [guard] {
+        if (guard && guard->state() != QProcess::NotRunning)
+            guard->kill();
+    });
+
+    proc->start(wpctl, {QStringLiteral("get-volume"), QStringLiteral("@DEFAULT_AUDIO_SOURCE@")});
+}
+
+void DesktopBackend::toggleMic()
+{
+    const QString wpctl = findExecutableWithSbin(QStringLiteral("wpctl"));
+    if (wpctl.isEmpty()) {
+        setMessage(tr("wpctl non trovato."));
+        return;
+    }
+
+    auto *proc = new QProcess(this);
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("LC_ALL"), QStringLiteral("C.UTF-8"));
+    env.insert(QStringLiteral("LANG"), QStringLiteral("C.UTF-8"));
+    proc->setProcessEnvironment(env);
+
+    connect(proc, &QProcess::finished, this, [this, proc](int, QProcess::ExitStatus) {
+        proc->deleteLater();
+        refreshMicStatus();
+    });
+    connect(proc, &QProcess::errorOccurred, proc, &QProcess::deleteLater);
+
+    QPointer<QProcess> guard = proc;
+    QTimer::singleShot(1500, proc, [guard] {
+        if (guard && guard->state() != QProcess::NotRunning)
+            guard->kill();
+    });
+
+    proc->start(wpctl, {QStringLiteral("set-mute"), QStringLiteral("@DEFAULT_AUDIO_SOURCE@"), QStringLiteral("toggle")});
+}
+
+void DesktopBackend::refreshPrivacyStatus()
+{
+    const QString stateFilePath = QStringLiteral("/run/myslowroll-privacy/state");
+    bool active = false;
+    QFile file(stateFilePath);
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString state = QString::fromUtf8(file.readLine()).trimmed();
+        active = (state == QStringLiteral("on"));
+        file.close();
+    }
+    if (m_privacyActive != active) {
+        m_privacyActive = active;
+        emit privacyStatusChanged();
+    }
+}
+
+void DesktopBackend::togglePrivacy()
+{
+    launchCustomScript(QStringLiteral("Privacy"));
+}
+
 void DesktopBackend::flushDns()
 {
     const QString resolvectl = findExecutableWithSbin(QStringLiteral("resolvectl"));
@@ -526,23 +627,21 @@ bool DesktopBackend::isToolAvailable(const QString &toolId) const
         return !findExecutableWithSbin(QStringLiteral("kdeconnect-app")).isEmpty() ||
                !findExecutableWithSbin(QStringLiteral("kdeconnect-settings")).isEmpty();
     } else if (toolId == QStringLiteral("mast-git") || toolId == QStringLiteral("git-config")) {
-        if (QFile::exists(QStringLiteral("/usr/lib/python3.13/site-packages/mast/qt6/git")) ||
-            QFile::exists(QStringLiteral("/usr/lib64/python3.13/site-packages/mast/qt6/git")))
-            return true;
-        const QDir dir(QStringLiteral("/usr/lib"));
-        for (const QString &pyDir : dir.entryList({QStringLiteral("python3*")}, QDir::Dirs)) {
-            if (QFile::exists(QStringLiteral("/usr/lib/%1/site-packages/mast/qt6/git").arg(pyDir)))
-                return true;
+        for (const QString &base : {QStringLiteral("/usr/lib"), QStringLiteral("/usr/lib64")}) {
+            const QDir dir(base);
+            for (const QString &pyDir : dir.entryList({QStringLiteral("python3*")}, QDir::Dirs)) {
+                if (QFile::exists(QStringLiteral("%1/%2/site-packages/mast/qt6/git").arg(base, pyDir)))
+                    return true;
+            }
         }
         return false;
     } else if (toolId == QStringLiteral("mast-android") || toolId == QStringLiteral("android-manager")) {
-        if (QFile::exists(QStringLiteral("/usr/lib/python3.13/site-packages/mast/qt6/android")) ||
-            QFile::exists(QStringLiteral("/usr/lib64/python3.13/site-packages/mast/qt6/android")))
-            return true;
-        const QDir dir(QStringLiteral("/usr/lib"));
-        for (const QString &pyDir : dir.entryList({QStringLiteral("python3*")}, QDir::Dirs)) {
-            if (QFile::exists(QStringLiteral("/usr/lib/%1/site-packages/mast/qt6/android").arg(pyDir)))
-                return true;
+        for (const QString &base : {QStringLiteral("/usr/lib"), QStringLiteral("/usr/lib64")}) {
+            const QDir dir(base);
+            for (const QString &pyDir : dir.entryList({QStringLiteral("python3*")}, QDir::Dirs)) {
+                if (QFile::exists(QStringLiteral("%1/%2/site-packages/mast/qt6/android").arg(base, pyDir)))
+                    return true;
+            }
         }
         return false;
     } else if (toolId == QStringLiteral("kontainer") || toolId == QStringLiteral("distrobox-gui") || toolId == QStringLiteral("boxbuddy")) {
@@ -700,12 +799,6 @@ bool DesktopBackend::launchTool(const QString &toolId)
 
     if (toolId == QStringLiteral("yast")) {
         return launchYastModule(QString());
-    } else if (toolId == QStringLiteral("yast-software")) {
-        return launchYastModule(QStringLiteral("sw_single"));
-    } else if (toolId == QStringLiteral("yast-repos")) {
-        return launchYastModule(QStringLiteral("repositories"));
-    } else if (toolId == QStringLiteral("yast-snapper")) {
-        return launchYastModule(QStringLiteral("snapper"));
     } else if (toolId == QStringLiteral("discover")) {
         program = QStringLiteral("plasma-discover");
     } else if (toolId == QStringLiteral("systemmonitor")) {
@@ -774,17 +867,31 @@ bool DesktopBackend::launchCustomScript(const QString &scriptName)
         return false;
     }
 
+    // Gli script shipped (Privacy, Mic) vanno SEMPRE presi dal percorso di sistema:
+    // le directory utente scrivibili non devono poter alterare il comportamento ufficiale.
+    static const QSet<QString> shippedScripts = {
+        QStringLiteral("privacy"),
+        QStringLiteral("mic")
+    };
+
     const QString configScriptsDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + QStringLiteral("/myslowroll-cc/scripts");
     QDir().mkpath(configScriptsDir);
     const QString homeBin = QDir::homePath() + QStringLiteral("/.local/bin");
+    const QString systemScriptsDir = QStringLiteral("/usr/share/myslowroll-cc/scripts");
 
     const QStringList names = { cleanName, cleanName.toLower(), cleanName.toUpper() };
+    const bool isShipped = shippedScripts.contains(cleanName.toLower());
+
     QStringList candidates;
     for (const QString &n : names) {
-        candidates << configScriptsDir + QLatin1Char('/') + n
-                   << configScriptsDir + QLatin1Char('/') + n + QStringLiteral(".sh")
-                   << homeBin + QLatin1Char('/') + n
-                   << homeBin + QLatin1Char('/') + n + QStringLiteral(".sh");
+        if (!isShipped) {
+            candidates << configScriptsDir + QLatin1Char('/') + n
+                       << configScriptsDir + QLatin1Char('/') + n + QStringLiteral(".sh")
+                       << homeBin + QLatin1Char('/') + n
+                       << homeBin + QLatin1Char('/') + n + QStringLiteral(".sh");
+        }
+        candidates << systemScriptsDir + QLatin1Char('/') + n
+                   << systemScriptsDir + QLatin1Char('/') + n + QStringLiteral(".sh");
     }
 
     QString foundPath;
@@ -796,18 +903,61 @@ bool DesktopBackend::launchCustomScript(const QString &scriptName)
     }
 
     if (!foundPath.isEmpty()) {
-        const bool started = QProcess::startDetached(QStringLiteral("bash"), {foundPath});
-        if (started) {
-            setMessage(tr("Avvio script '%1'...").arg(cleanName));
-            return true;
-        } else {
-            setMessage(tr("Impossibile avviare lo script: %1").arg(foundPath));
-            return false;
+        const bool isMic = (cleanName.compare(QStringLiteral("mic"), Qt::CaseInsensitive) == 0);
+        const bool isPrivacy = (cleanName.compare(QStringLiteral("privacy"), Qt::CaseInsensitive) == 0);
+
+        auto *proc = new QProcess(this);
+#ifdef Q_OS_UNIX
+        proc->setChildProcessModifier([] { ::setpgid(0, 0); });
+#endif
+        connect(proc, &QProcess::finished, this, [this, proc, cleanName, isMic, isPrivacy](int exitCode, QProcess::ExitStatus) {
+            if (isMic) {
+                refreshMicStatus();
+            } else if (isPrivacy) {
+                refreshPrivacyStatus();
+                refreshMicStatus();
+                refreshNetworkStatus();
+                if (exitCode == 0) {
+                    setMessage(m_privacyActive
+                               ? tr("Modalità Privacy ATTIVATA.")
+                               : tr("Modalità Privacy DISATTIVATA (stato base ripristinato)."));
+                } else if (exitCode == 126 || exitCode == 127) {
+                    setMessage(tr("Autenticazione PolKit annullata."));
+                } else {
+                    setMessage(tr("Operazione Privacy terminata con avvisi/errori (codice %1).").arg(exitCode));
+                }
+            }
+            proc->deleteLater();
+        });
+        connect(proc, &QProcess::errorOccurred, this, [this, proc, foundPath](QProcess::ProcessError err) {
+            if (err == QProcess::FailedToStart) {
+                setMessage(tr("Impossibile avviare lo script: %1").arg(foundPath));
+                proc->deleteLater();
+            }
+        });
+
+        if (!isPrivacy) {
+            QPointer<QProcess> guard = proc;
+            QTimer::singleShot(60000, proc, [this, guard] {
+                if (guard && guard->state() != QProcess::NotRunning)
+                    terminateProcessGroup(guard.data(), true);
+            });
         }
+
+        proc->start(QStringLiteral("bash"), {foundPath});
+        if (!isMic) {
+            setMessage(tr("Esecuzione script '%1' in corso...").arg(cleanName));
+        }
+        return true;
     }
 
-    const QString defaultPath = configScriptsDir + QLatin1Char('/') + cleanName + QStringLiteral(".sh");
-    setMessage(tr("Script '%1' non trovato. Creare il file in: %2").arg(cleanName, defaultPath));
+    if (isShipped) {
+        const QString sysPath = systemScriptsDir + QLatin1Char('/') + cleanName.toLower() + QStringLiteral(".sh");
+        setMessage(tr("Script di sistema '%1' non trovato in: %2").arg(cleanName, sysPath));
+    } else {
+        const QString defaultPath = configScriptsDir + QLatin1Char('/') + cleanName + QStringLiteral(".sh");
+        setMessage(tr("Script '%1' non trovato. Creare il file in: %2").arg(cleanName, defaultPath));
+    }
     return false;
 }
 
@@ -944,10 +1094,11 @@ void DesktopBackend::reloadCustomActions()
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
         m_customActionsLoaded = false;
         const QString bakPath = path + QStringLiteral(".bak");
-        if (!QFile::exists(bakPath)) {
-            QFile::copy(path, bakPath);
+        if (!QFile::exists(bakPath) && !QFile::copy(path, bakPath)) {
+            m_actionError = tr("File delle azioni personali danneggiato e impossibile creare copia .bak. Salvataggio sospeso.");
+        } else {
+            m_actionError = tr("File delle azioni personali non valido o danneggiato. Salvataggio sospeso per proteggere i dati.");
         }
-        m_actionError = tr("File delle azioni personali non valido o danneggiato. Salvataggio sospeso per proteggere i dati.");
         emit customActionsChanged();
         emit actionStateChanged();
         return;
@@ -973,9 +1124,13 @@ bool DesktopBackend::resetCustomActionsToDefault()
 {
     const QString path = customActionsFilePath();
     if (QFile::exists(path)) {
-        const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_hhmmss"));
+        const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_hhmmss_zzz"));
         const QString corruptArchive = path + QStringLiteral(".corrupt-") + timestamp;
-        QFile::rename(path, corruptArchive);
+        if (!QFile::rename(path, corruptArchive)) {
+            m_actionError = tr("Impossibile archiviare il file precedente delle azioni personali.");
+            emit actionStateChanged();
+            return false;
+        }
     }
     m_customActions.clear();
     m_customActionsLoaded = true;
@@ -1160,12 +1315,12 @@ void DesktopBackend::clearActionOutput()
 
 void DesktopBackend::cleanTrash(const QString &)
 {
-    const QString home = QDir::homePath();
-    if (home.isEmpty() || home == QStringLiteral("/")) {
-        setMessage(tr("Percorso home utente non valido."));
+    const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    if (dataDir.isEmpty() || dataDir == QStringLiteral("/")) {
+        setMessage(tr("Percorso dati utente non valido."));
         return;
     }
-    const QString trashPath = home + QStringLiteral("/.local/share/Trash");
+    const QString trashPath = dataDir + QStringLiteral("/Trash");
     setMessage(tr("Svuotamento del cestino utente in corso..."));
     startProcess(QStringLiteral("rm"), {
         QStringLiteral("-rf"),
@@ -1209,17 +1364,17 @@ void DesktopBackend::cleanZypperCache()
 void DesktopBackend::cleanThumbnailCache()
 {
     const QString thumbDir = QDir::homePath() + QStringLiteral("/.cache/thumbnails");
-    QDir dir(thumbDir);
-    if (dir.exists()) {
-        if (dir.removeRecursively()) {
-            QDir().mkpath(thumbDir);
-            setMessage(tr("Cache delle miniature ripulita."));
-        } else {
-            setMessage(tr("Impossibile rimuovere alcuni file dalla cache delle miniature (permessi insufficienti)."));
-        }
-    } else {
+    if (!QDir(thumbDir).exists()) {
         setMessage(tr("Nessuna miniatura in cache trovata."));
+        return;
     }
+    setMessage(tr("Pulizia della cache delle miniature in corso..."));
+    startProcess(QStringLiteral("find"), {
+        thumbDir,
+        QStringLiteral("-mindepth"),
+        QStringLiteral("1"),
+        QStringLiteral("-delete")
+    }, QStringLiteral("clean-thumbnails"), false, 30000);
 }
 
 void DesktopBackend::rebuildDesktopCache()
@@ -1260,10 +1415,18 @@ QString DesktopBackend::bashPromptStatus() const
 
 bool DesktopBackend::applyBashPromptPreset(const QString &presetId)
 {
-    const QString bashrc = QDir::homePath() + QStringLiteral("/.bashrc");
+    const QString rawBashrc = QDir::homePath() + QStringLiteral("/.bashrc");
+    const QFileInfo fi(rawBashrc);
+    const QString bashrc = fi.isSymLink() ? fi.symLinkTarget() : rawBashrc;
+
     QFile f(bashrc);
     QString content;
     if (f.exists()) {
+        const QString bakPath = rawBashrc + QStringLiteral(".bak");
+        if (!QFile::exists(bakPath) && !QFile::copy(bashrc, bakPath)) {
+            setMessage(tr("Impossibile creare il file di backup ~/.bashrc.bak. Operazione annullata."));
+            return false;
+        }
         if (!f.open(QIODevice::ReadOnly)) {
             setMessage(tr("Impossibile leggere il file ~/.bashrc per applicare le modifiche."));
             return false;
@@ -1500,10 +1663,16 @@ void DesktopBackend::handleProcessFinished(QProcess *proc, const QString &operat
     }
 
     if (operation == QStringLiteral("clean-trash-user")) {
-        const QString trashPath = QDir::homePath() + QStringLiteral("/.local/share/Trash");
+        const QString trashPath = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/Trash");
         QDir().mkpath(trashPath + QStringLiteral("/files"));
         QDir().mkpath(trashPath + QStringLiteral("/info"));
         setMessage(exitCode == 0 ? tr("Cestino utente svuotato con successo.") : tr("Svuotamento cestino utente non riuscito (codice %1).").arg(exitCode));
+        return;
+    }
+
+    if (operation == QStringLiteral("clean-thumbnails")) {
+        setMessage(exitCode == 0 ? tr("Cache delle miniature ripulita.")
+                                 : tr("Impossibile rimuovere alcuni file dalla cache delle miniature."));
         return;
     }
 
@@ -1615,21 +1784,21 @@ void DesktopBackend::loadNetworkProfiles()
 
         QVariantMap ip1;
         ip1.insert(QStringLiteral("name"), tr("IP Statico 1"));
-        ip1.insert(QStringLiteral("address"), QStringLiteral("192.168.1.50/24"));
-        ip1.insert(QStringLiteral("gateway"), QStringLiteral("192.168.1.1"));
+        ip1.insert(QStringLiteral("address"), QStringLiteral("192.168.11.50/24"));
+        ip1.insert(QStringLiteral("gateway"), QStringLiteral("192.168.11.1"));
         m_ipPresets.append(ip1);
 
         QVariantMap ip2;
         ip2.insert(QStringLiteral("name"), tr("IP Statico 2"));
-        ip2.insert(QStringLiteral("address"), QStringLiteral("192.168.1.60/24"));
-        ip2.insert(QStringLiteral("gateway"), QStringLiteral("192.168.1.1"));
+        ip2.insert(QStringLiteral("address"), QStringLiteral("192.168.11.60/24"));
+        ip2.insert(QStringLiteral("gateway"), QStringLiteral("192.168.11.1"));
         m_ipPresets.append(ip2);
     }
 
     if (m_dnsPresets.isEmpty()) {
         QVariantMap d1;
         d1.insert(QStringLiteral("name"), tr("DNS Router / Locale"));
-        d1.insert(QStringLiteral("dns"), QStringLiteral("192.168.1.1"));
+        d1.insert(QStringLiteral("dns"), QStringLiteral("192.168.11.1"));
         d1.insert(QStringLiteral("dohUrl"), QString());
         m_dnsPresets.append(d1);
 
@@ -1738,7 +1907,7 @@ bool DesktopBackend::saveIpPreset(int index, const QString &name, const QString 
     const QString cleanGw = gateway.trimmed();
     QString formattedCidr;
     if (!cleanAddr.isEmpty() && !validateIpv4Cidr(cleanAddr, &formattedCidr)) {
-        setMessage(tr("Indirizzo IP non valido. Inserire un formato CIDR valido (es. 192.168.1.50/24) o lasciare vuoto per DHCP."));
+        setMessage(tr("Indirizzo IP non valido. Inserire un formato CIDR valido (es. 192.168.11.50/24) o lasciare vuoto per DHCP."));
         return false;
     }
     if (!cleanGw.isEmpty() && !validateGateway(cleanGw)) {
@@ -1817,7 +1986,7 @@ void DesktopBackend::refreshNetworkStatus()
                 m_networkActiveConnection = lines.at(0).trimmed();
                 m_networkInterface = lines.at(1).trimmed();
                 m_networkConnected = true;
-                m_networkIpAddress = lines.at(2).trimmed().section(QLatin1Char('/'), 0, 0);
+                m_networkIpAddress = lines.at(2).trimmed().section(QStringLiteral(" | "), 0, 0).section(QLatin1Char('/'), 0, 0);
                 m_networkGateway = lines.at(3).trimmed();
                 m_networkDns = lines.at(4).trimmed().replace(QStringLiteral(" | "), QStringLiteral(" "));
                 emit networkStatusChanged();
@@ -1832,14 +2001,14 @@ void DesktopBackend::refreshNetworkStatus()
         proc->deleteLater();
     });
 
-    // Singola interrogazione atomica a nmcli: restituisce Nome, Device, IP, Gateway e DNS
+    // Singola interrogazione atomica a nmcli sul device attivo: restituisce Connessione, Device, IP, Gateway e DNS runtime
     const QString script = QStringLiteral(
-        "conn=$(nmcli -g NAME,TYPE,DEVICE c show --active | grep -E ':(802-|ethernet|wireless|wifi)' | head -n1); "
-        "[ -z \"$conn\" ] && conn=$(nmcli -g NAME,TYPE,DEVICE c show --active | grep -vE ':(loopback|bridge):' | head -n1); "
-        "[ -z \"$conn\" ] && exit 1; "
-        "name=\"${conn%%:*}\"; dev=\"${conn##*:}\"; "
-        "printf '%s\\n%s\\n' \"$name\" \"$dev\"; "
-        "nmcli -g IP4.ADDRESS,IP4.GATEWAY,IP4.DNS c show \"$name\""
+        "dev=$(nmcli -t -f DEVICE,TYPE,STATE device status | awk -F: '($2==\"ethernet\"||$2==\"wifi\") && $3==\"connected\" {print $1; exit}'); "
+        "[ -z \"$dev\" ] && dev=$(nmcli -t -f DEVICE,TYPE,STATE device status | awk -F: '$2!=\"loopback\" && $2!=\"bridge\" && $3==\"connected\" {print $1; exit}'); "
+        "[ -z \"$dev\" ] && exit 1; "
+        "conn=$(nmcli -g GENERAL.CONNECTION device show \"$dev\"); "
+        "printf '%s\\n%s\\n' \"$conn\" \"$dev\"; "
+        "nmcli -g IP4.ADDRESS,IP4.GATEWAY,IP4.DNS device show \"$dev\""
     );
     proc->start(QStringLiteral("bash"), {QStringLiteral("-c"), script});
 }
@@ -1942,7 +2111,21 @@ void DesktopBackend::refreshWifiStatus()
     }
 
     m_hasWifiHardware = hasWifi;
-    m_wifiHardwareBlocked = false;
+    bool hwBlocked = false;
+    const QDir rfkillDir(QStringLiteral("/sys/class/rfkill"));
+    for (const QString &rf : rfkillDir.entryList({QStringLiteral("rfkill*")}, QDir::Dirs)) {
+        QFile typeFile(rfkillDir.filePath(rf + QStringLiteral("/type")));
+        if (typeFile.open(QIODevice::ReadOnly | QIODevice::Text) &&
+            typeFile.readLine().trimmed() == "wlan") {
+            QFile hardFile(rfkillDir.filePath(rf + QStringLiteral("/hard")));
+            if (hardFile.open(QIODevice::ReadOnly | QIODevice::Text) &&
+                hardFile.readLine().trimmed() == "1") {
+                hwBlocked = true;
+                break;
+            }
+        }
+    }
+    m_wifiHardwareBlocked = hwBlocked;
     if (!hasWifi) {
         m_wifiEnabled = false;
         m_wifiStatusString = QStringLiteral("hardware-missing");

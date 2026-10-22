@@ -32,7 +32,6 @@ FILES_TO_INCLUDE = [
     "packaging/myslowroll-cc.spec",
     "packaging/myslowroll-cc.changes",
     "packaging/myslowroll-cc-rpmlintrc",
-    "packaging/KSCC-rpmlintrc",
     ".github/workflows/ci.yml",
     ".gitignore",
     "LICENSE",
@@ -58,7 +57,9 @@ FILES_TO_INCLUDE = [
     "qml/modules/SystemModule.qml",
     "qml/modules/RecoveryModule.qml",
     "qml/modules/CommandsModule.qml",
-    "qml/modules/ToolsModule.qml"
+    "qml/modules/ToolsModule.qml",
+    "data/scripts/mic.sh",
+    "data/scripts/privacy.sh",
 ]
 
 HEADER = f"""================================================================================

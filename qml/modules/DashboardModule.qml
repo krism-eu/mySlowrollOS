@@ -12,7 +12,7 @@ Kirigami.ScrollablePage {
 
     Timer {
         interval: 3000
-        running: root.visible
+        running: root.visible && Qt.application.state === Qt.ApplicationActive
         repeat: true
         onTriggered: {
             DesktopBackend.refreshResources()
@@ -239,7 +239,7 @@ Kirigami.ScrollablePage {
 
                     Controls.Label {
                         text: DesktopBackend.networkConnected
-                              ? qsTr("Rete Attiva: %1 (%2) · IP: %3").arg(DesktopBackend.networkActiveConnection).arg(DesktopBackend.networkInterface).arg(DesktopBackend.networkIpAddress.length > 0 ? DesktopBackend.networkIpAddress.replace(/\/\d+$/, "") : qsTr("DHCP / Assegnato"))
+                              ? qsTr("Rete Attiva: %1 (%2) · IP: %3").arg(DesktopBackend.networkActiveConnection).arg(DesktopBackend.networkInterface).arg(DesktopBackend.networkIpAddress.length > 0 ? DesktopBackend.networkIpAddress : qsTr("DHCP / Assegnato"))
                               : qsTr("Rete: Disconnessa o non gestita")
                         textFormat: Text.PlainText
                         font.pointSize: Kirigami.Theme.defaultFont.pointSize + 1
@@ -393,9 +393,15 @@ Kirigami.ScrollablePage {
             Controls.Button {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 46
-                text: qsTr("Volume")
-                icon.name: "audio-volume-high"
-                onClicked: DesktopBackend.launchCustomScript("Volume")
+                text: DesktopBackend.micMuted ? qsTr("Mic: Disattivato") : qsTr("Mic: Attivo")
+                icon.name: DesktopBackend.micMuted ? "microphone-sensitivity-muted" : "audio-input-microphone"
+                display: Controls.AbstractButton.TextBesideIcon
+                highlighted: !DesktopBackend.micMuted
+                onClicked: {
+                    if (!DesktopBackend.launchCustomScript("Mic")) {
+                        DesktopBackend.toggleMic();
+                    }
+                }
             }
 
             Controls.Button {
