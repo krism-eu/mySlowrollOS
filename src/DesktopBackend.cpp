@@ -1123,6 +1123,7 @@ void DesktopBackend::reloadCustomActions()
 bool DesktopBackend::resetCustomActionsToDefault()
 {
     const QString path = customActionsFilePath();
+    QString archivedPath;
     if (QFile::exists(path)) {
         const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_hhmmss_zzz"));
         const QString corruptArchive = path + QStringLiteral(".corrupt-") + timestamp;
@@ -1131,16 +1132,21 @@ bool DesktopBackend::resetCustomActionsToDefault()
             emit actionStateChanged();
             return false;
         }
+        archivedPath = corruptArchive;
     }
     m_customActions.clear();
     m_customActionsLoaded = true;
     m_actionError.clear();
     const bool ok = persistCustomActions();
-    emit customActionsChanged();
-    emit actionStateChanged();
     if (ok) {
         setMessage(tr("Azioni personali ripristinate (file precedente archiviato)."));
+    } else if (m_actionError.isEmpty()) {
+        m_actionError = archivedPath.isEmpty()
+            ? tr("Impossibile ricreare il file delle azioni personali.")
+            : tr("Impossibile ricreare il file delle azioni personali. Il contenuto precedente è in %1.").arg(archivedPath);
     }
+    emit customActionsChanged();
+    emit actionStateChanged();
     return ok;
 }
 
@@ -1374,7 +1380,7 @@ void DesktopBackend::cleanThumbnailCache()
         QStringLiteral("-mindepth"),
         QStringLiteral("1"),
         QStringLiteral("-delete")
-    }, QStringLiteral("clean-thumbnails"), false, 30000);
+    }, QStringLiteral("clean-thumbnails"), true, 120000);
 }
 
 void DesktopBackend::rebuildDesktopCache()

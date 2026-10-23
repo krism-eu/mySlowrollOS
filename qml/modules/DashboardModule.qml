@@ -385,9 +385,13 @@ Kirigami.ScrollablePage {
             Controls.Button {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 46
-                text: qsTr("Privacy")
-                icon.name: "security-high"
-                onClicked: DesktopBackend.launchCustomScript("Privacy")
+                text: DesktopBackend.privacyActive ? qsTr("Privacy: ATTIVA") : qsTr("Privacy: Disattivata")
+                icon.name: DesktopBackend.privacyActive ? "security-high" : "security-medium"
+                display: Controls.AbstractButton.TextBesideIcon
+                highlighted: DesktopBackend.privacyActive
+                onClicked: {
+                    DesktopBackend.togglePrivacy();
+                }
             }
 
             Controls.Button {

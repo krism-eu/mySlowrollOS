@@ -76,6 +76,7 @@ richiedono autorizzazione Polkit/pkexec o configurazione sudoers per il gruppo w
 %dir %{_datadir}/myslowroll-cc
 %dir %{_datadir}/myslowroll-cc/scripts
 %{_datadir}/myslowroll-cc/scripts/mic.sh
+%{_datadir}/myslowroll-cc/scripts/privacy.sh
 
 %changelog
 * Sat Oct 17 2026 Kris <kris@myslowrollos.org> - 1.0.0-1

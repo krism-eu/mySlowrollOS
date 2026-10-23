@@ -568,8 +568,8 @@ void SlowrollBackend::refreshServices()
 
     connect(failedProc, &QProcess::finished, this, [this, failedProc, reqId](int exitCode, QProcess::ExitStatus) {
         if (reqId == m_servicesRequestId) {
-            QStringList failed;
             if (exitCode == 0) {
+                QStringList failed;
                 const QString out = QString::fromUtf8(failedProc->readAllStandardOutput()).trimmed();
                 if (!out.isEmpty() && !out.contains(QStringLiteral("0 loaded units listed"))) {
                     const QStringList lines = out.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
@@ -583,14 +583,18 @@ void SlowrollBackend::refreshServices()
                         }
                     }
                 }
+                m_failedUnits = failed;
+            } else {
+                m_failedUnits.clear();
             }
-            m_failedUnits = failed;
             emit servicesChanged();
         }
         failedProc->deleteLater();
     });
     connect(failedProc, &QProcess::errorOccurred, this, [this, failedProc, reqId](QProcess::ProcessError err) {
         if (reqId == m_servicesRequestId && err == QProcess::FailedToStart) {
+            m_failedUnits.clear();
+            emit servicesChanged();
             setMessage(tr("Impossibile avviare systemctl per la verifica delle unità."));
         }
         failedProc->deleteLater();
@@ -624,6 +628,8 @@ void SlowrollBackend::refreshServices()
     });
     connect(servicesProc, &QProcess::errorOccurred, this, [this, servicesProc, reqId](QProcess::ProcessError err) {
         if (reqId == m_servicesRequestId && err == QProcess::FailedToStart) {
+            m_keyServices.clear();
+            emit servicesChanged();
             setMessage(tr("Impossibile verificare lo stato dei servizi con systemctl."));
         }
         servicesProc->deleteLater();
@@ -696,7 +702,7 @@ void SlowrollBackend::checkAtomicUpdates()
         return;
     }
     QProcess *proc = startProcess(QStringLiteral("pkexec"), {atomicExe, QStringLiteral("check")},
-                                  QStringLiteral("atomic-check"), false, 120000);
+                                  QStringLiteral("atomic-check"), false, 600000);
     if (proc) {
         setMessage(tr("Verifica aggiornamenti atomic-update in corso..."));
     }

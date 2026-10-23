@@ -87,7 +87,7 @@ install(FILES data/org.myslowrollos.controlcenter.metainfo.xml
     DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo
 )
 
-install(PROGRAMS data/scripts/mic.sh
+install(PROGRAMS data/scripts/mic.sh data/scripts/privacy.sh
     DESTINATION ${CMAKE_INSTALL_DATADIR}/myslowroll-cc/scripts
 )
 
