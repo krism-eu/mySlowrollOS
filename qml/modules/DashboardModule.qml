@@ -10,17 +10,37 @@ Kirigami.ScrollablePage {
 
     signal openSectionRequested(int sectionIndex, int subTabIndex)
 
+    property int slowTickCounter: 0
+
     Timer {
         interval: 3000
-        running: root.visible && Qt.application.state === Qt.ApplicationActive
+        running: root.StackLayout.isCurrentItem && Qt.application.state === Qt.ApplicationActive
         repeat: true
         onTriggered: {
             DesktopBackend.refreshResources()
+            SlowrollBackend.refreshAtomicState()
+            root.slowTickCounter = (root.slowTickCounter + 1) % 10
+            if (root.slowTickCounter === 0) {
+                SlowrollBackend.refreshServices()
+                DesktopBackend.refreshNetworkStatus()
+                DesktopBackend.refreshWifiStatus()
+            }
+        }
+    }
+
+    StackLayout.onIsCurrentItemChanged: {
+        if (root.StackLayout.isCurrentItem) {
+            DesktopBackend.refreshResources()
+            SlowrollBackend.refreshAtomicState()
+            SlowrollBackend.refreshServices()
+            DesktopBackend.refreshNetworkStatus()
+            DesktopBackend.refreshWifiStatus()
         }
     }
 
     Component.onCompleted: {
         DesktopBackend.refreshResources()
+        SlowrollBackend.refreshAtomicState()
     }
 
     ColumnLayout {
@@ -86,45 +106,26 @@ Kirigami.ScrollablePage {
                     Layout.fillWidth: true
                     spacing: Kirigami.Units.largeSpacing
 
-                    Kirigami.Icon {
-                        Layout.preferredWidth: 38
-                        Layout.preferredHeight: 38
-                        source: "distributor-logo-opensuse"
-                    }
-
-                    ColumnLayout {
+                    Controls.Label {
+                        text: SlowrollBackend.atomicStateDescription
+                        opacity: UiMetrics.secondaryOpacity
+                        wrapMode: Text.WordWrap
                         Layout.fillWidth: true
-                        spacing: 2
-
-                        Controls.Label {
-                            text: qsTr("openSUSE Slowroll · mySlowrollOS")
-                            font.bold: true
-                            font.pointSize: Kirigami.Theme.defaultFont.pointSize + 1
-                        }
-
-                        Controls.Label {
-                            text: SlowrollBackend.atomicStateDescription
-                            opacity: UiMetrics.secondaryOpacity
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
                     }
 
                     Controls.Button {
-                        text: qsTr("Verifica Aggiornamenti")
+                        text: qsTr("Aggiorna Stato")
                         icon.name: "view-refresh"
                         enabled: !DesktopBackend.busy && !SlowrollBackend.busy
-                        onClicked: SlowrollBackend.checkAtomicUpdates()
+                        onClicked: SlowrollBackend.refreshAtomicState()
                     }
                 }
 
                 Kirigami.Separator { Layout.fillWidth: true }
 
-                GridLayout {
+                RowLayout {
                     Layout.fillWidth: true
-                    columns: root.width > 750 ? 3 : (root.width > 480 ? 2 : 1)
-                    columnSpacing: Kirigami.Units.largeSpacing
-                    rowSpacing: Kirigami.Units.smallSpacing
+                    spacing: Kirigami.Units.largeSpacing
 
                     ColumnLayout {
                         spacing: 2
@@ -135,6 +136,8 @@ Kirigami.ScrollablePage {
                         }
                     }
 
+                    Item { Layout.preferredWidth: Kirigami.Units.largeSpacing }
+
                     ColumnLayout {
                         spacing: 2
                         Controls.Label { text: qsTr("Snapshot Predefinito (Boot)"); font.bold: true; opacity: UiMetrics.secondaryOpacity }
@@ -143,6 +146,10 @@ Kirigami.ScrollablePage {
                             font.bold: true
                             color: SlowrollBackend.pendingReboot ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.textColor
                         }
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
                     }
 
                     ColumnLayout {
@@ -263,11 +270,19 @@ Kirigami.ScrollablePage {
                         onClicked: DesktopBackend.toggleWifi()
                     }
 
+                    // Tasto Stato Bluetooth (Attivo / Disattivato / Blocco Hardware)
                     Controls.Button {
-                        text: qsTr("Gestisci Rete")
-                        icon.name: "preferences-system-network"
+                        visible: DesktopBackend.hasBluetoothHardware
+                        enabled: !DesktopBackend.busy && !SlowrollBackend.busy && !DesktopBackend.bluetoothHardwareBlocked && !DesktopBackend.privacyActive
+                        text: DesktopBackend.bluetoothHardwareBlocked
+                              ? qsTr("Bluetooth: Blocco HW")
+                              : (DesktopBackend.bluetoothEnabled ? qsTr("Bluetooth: Attivo") : qsTr("Bluetooth: Disattivato"))
+                        icon.name: DesktopBackend.bluetoothHardwareBlocked
+                                   ? "preferences-system-bluetooth"
+                                   : (DesktopBackend.bluetoothEnabled ? "preferences-system-bluetooth" : "network-wireless-disconnected")
                         display: Controls.AbstractButton.TextBesideIcon
-                        onClicked: root.openSectionRequested(2, 1)
+                        highlighted: DesktopBackend.bluetoothEnabled && !DesktopBackend.bluetoothHardwareBlocked
+                        onClicked: DesktopBackend.toggleBluetooth()
                     }
                 }
             }
@@ -283,7 +298,7 @@ Kirigami.ScrollablePage {
 
         GridLayout {
             Layout.fillWidth: true
-            columns: root.width > 1050 ? 5 : (root.width > 680 ? 3 : (root.width > 460 ? 2 : 1))
+            columns: root.width > 1050 ? 6 : (root.width > 680 ? 3 : (root.width > 460 ? 2 : 1))
             columnSpacing: UiMetrics.cardSpacing
             rowSpacing: UiMetrics.cardSpacing
 
@@ -330,6 +345,14 @@ Kirigami.ScrollablePage {
                 value: (DesktopBackend.diskHomeTotalGiB - DesktopBackend.diskHomeAvailableGiB) + " / " + DesktopBackend.diskHomeTotalGiB + " GiB"
                 detail: qsTr("%1 GiB liberi (%2% occupato)").arg(DesktopBackend.diskHomeAvailableGiB).arg(DesktopBackend.diskHomePercent)
             }
+
+            StatCard {
+                iconName: DesktopBackend.privacyActive ? "security-high" : "security-medium"
+                iconColor: DesktopBackend.privacyActive ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.neutralTextColor
+                title: qsTr("Modalità Privacy")
+                value: DesktopBackend.privacyActive ? qsTr("ATTIVA") : qsTr("Disattivata")
+                detail: DesktopBackend.privacyActive ? qsTr("Isolamento attivo") : qsTr("Stato nominale")
+            }
         }
 
         // 4. Comandi Rapidi (Azioni Rapide & Strumenti Essenziali)
@@ -367,10 +390,10 @@ Kirigami.ScrollablePage {
             Controls.Button {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 46
-                text: qsTr("KDE Connect")
-                icon.name: "kdeconnect"
-                enabled: DesktopBackend.isToolAvailable("kdeconnect")
-                onClicked: DesktopBackend.launchTool("kdeconnect")
+                text: qsTr("Console Web Cockpit")
+                icon.name: "network-server"
+                enabled: DesktopBackend.isToolAvailable("cockpit")
+                onClicked: DesktopBackend.launchTool("cockpit")
             }
 
             Controls.Button {
@@ -385,12 +408,17 @@ Kirigami.ScrollablePage {
             Controls.Button {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 46
-                text: DesktopBackend.privacyActive ? qsTr("Privacy: ATTIVA") : qsTr("Privacy: Disattivata")
-                icon.name: DesktopBackend.privacyActive ? "security-high" : "security-medium"
+                text: DesktopBackend.privacyActive ? qsTr("Disattiva Privacy") : qsTr("Modalità Privacy")
+                icon.name: "security-high"
                 display: Controls.AbstractButton.TextBesideIcon
                 highlighted: DesktopBackend.privacyActive
+                enabled: !DesktopBackend.busy && !SlowrollBackend.busy
                 onClicked: {
-                    DesktopBackend.togglePrivacy();
+                    if (DesktopBackend.privacyActive) {
+                        DesktopBackend.togglePrivacy()
+                    } else {
+                        privacyConfirmDialog.open()
+                    }
                 }
             }
 
@@ -427,10 +455,10 @@ Kirigami.ScrollablePage {
             Controls.Button {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 46
-                text: qsTr("Console Web Cockpit")
-                icon.name: "network-server"
-                enabled: DesktopBackend.isToolAvailable("cockpit")
-                onClicked: DesktopBackend.launchTool("cockpit")
+                text: qsTr("KDE Connect")
+                icon.name: "kdeconnect"
+                enabled: DesktopBackend.isToolAvailable("kdeconnect")
+                onClicked: DesktopBackend.launchTool("kdeconnect")
             }
         }
     }
@@ -460,5 +488,32 @@ Kirigami.ScrollablePage {
         }
 
         onAccepted: DesktopBackend.cleanTrash("home")
+    }
+
+    Controls.Dialog {
+        id: privacyConfirmDialog
+        title: qsTr("Conferma Attivazione Modalità Privacy")
+        standardButtons: Controls.Dialog.Yes | Controls.Dialog.No
+        width: 460
+        anchors.centerIn: Controls.Overlay.overlay
+        modal: true
+
+        contentItem: ColumnLayout {
+            spacing: Kirigami.Units.largeSpacing
+            Controls.Label {
+                text: qsTr("Vuoi attivare la Modalità Privacy e Isolamento?")
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            Controls.Label {
+                text: qsTr("Verranno silenziato il microfono, disattivato il Bluetooth, impostato il firewall in zona drop e cancellati in modo irreversibile gli appunti di Klipper, i file recenti e la cache delle miniature.")
+                opacity: UiMetrics.secondaryOpacity
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                font.pointSize: Kirigami.Theme.smallFont.pointSize
+            }
+        }
+
+        onAccepted: DesktopBackend.togglePrivacy()
     }
 }

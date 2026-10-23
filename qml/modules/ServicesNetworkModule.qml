@@ -78,7 +78,6 @@ Kirigami.ScrollablePage {
                             Layout.fillWidth: true
                             Kirigami.Icon { source: "system-run"; Layout.preferredWidth: 28; Layout.preferredHeight: 28 }
                             ColumnLayout {
-                                Layout.fillWidth: true
                                 spacing: 2
                                 Kirigami.Heading { level: 3; text: qsTr("Stato Servizi Chiave"); font.bold: true }
                                 Controls.Label {
@@ -86,6 +85,9 @@ Kirigami.ScrollablePage {
                                     opacity: UiMetrics.secondaryOpacity
                                 }
                             }
+
+                            Item { Layout.fillWidth: true }
+
                             Controls.Button {
                                 text: qsTr("Ricarica Stati")
                                 icon.name: "view-refresh"
@@ -104,17 +106,19 @@ Kirigami.ScrollablePage {
                             // Firewalld
                             Kirigami.AbstractCard {
                                 Layout.fillWidth: true
+                                Layout.preferredWidth: 0
                                 contentItem: RowLayout {
                                     spacing: Kirigami.Units.largeSpacing
                                     Kirigami.Icon { source: "security-high"; Layout.preferredWidth: 28; Layout.preferredHeight: 28 }
                                     ColumnLayout {
-                                        Layout.fillWidth: true
+                                        spacing: 2
                                         Controls.Label { text: qsTr("Firewall (firewalld)"); font.bold: true }
                                         Controls.Label {
                                             text: qsTr("Stato: <b>%1</b>").arg(SlowrollBackend.keyServices["firewalld.service"] || qsTr("verifica..."))
                                             color: SlowrollBackend.keyServices["firewalld.service"] === "active" ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.neutralTextColor
                                         }
                                     }
+                                    Item { Layout.fillWidth: true }
                                     Controls.Button {
                                         text: qsTr("Riavvia")
                                         icon.name: "view-refresh"
@@ -130,17 +134,19 @@ Kirigami.ScrollablePage {
                             // NetworkManager
                             Kirigami.AbstractCard {
                                 Layout.fillWidth: true
+                                Layout.preferredWidth: 0
                                 contentItem: RowLayout {
                                     spacing: Kirigami.Units.largeSpacing
                                     Kirigami.Icon { source: "network-connect"; Layout.preferredWidth: 28; Layout.preferredHeight: 28 }
                                     ColumnLayout {
-                                        Layout.fillWidth: true
+                                        spacing: 2
                                         Controls.Label { text: qsTr("Gestore Rete (NetworkManager)"); font.bold: true }
                                         Controls.Label {
                                             text: qsTr("Stato: <b>%1</b>").arg(SlowrollBackend.keyServices["NetworkManager.service"] || qsTr("verifica..."))
                                             color: SlowrollBackend.keyServices["NetworkManager.service"] === "active" ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.neutralTextColor
                                         }
                                     }
+                                    Item { Layout.fillWidth: true }
                                     Controls.Button {
                                         text: qsTr("Riavvia")
                                         icon.name: "view-refresh"
@@ -156,17 +162,19 @@ Kirigami.ScrollablePage {
                             // Bluetooth
                             Kirigami.AbstractCard {
                                 Layout.fillWidth: true
+                                Layout.preferredWidth: 0
                                 contentItem: RowLayout {
                                     spacing: Kirigami.Units.largeSpacing
                                     Kirigami.Icon { source: "preferences-system-bluetooth"; Layout.preferredWidth: 28; Layout.preferredHeight: 28 }
                                     ColumnLayout {
-                                        Layout.fillWidth: true
+                                        spacing: 2
                                         Controls.Label { text: qsTr("Bluetooth (bluetoothd)"); font.bold: true }
                                         Controls.Label {
                                             text: qsTr("Stato: <b>%1</b>").arg(SlowrollBackend.keyServices["bluetooth.service"] || qsTr("verifica..."))
                                             color: SlowrollBackend.keyServices["bluetooth.service"] === "active" ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.neutralTextColor
                                         }
                                     }
+                                    Item { Layout.fillWidth: true }
                                     Controls.Button {
                                         text: qsTr("Riavvia")
                                         icon.name: "view-refresh"
@@ -182,17 +190,19 @@ Kirigami.ScrollablePage {
                             // CUPS Stampa
                             Kirigami.AbstractCard {
                                 Layout.fillWidth: true
+                                Layout.preferredWidth: 0
                                 contentItem: RowLayout {
                                     spacing: Kirigami.Units.largeSpacing
                                     Kirigami.Icon { source: "printer"; Layout.preferredWidth: 28; Layout.preferredHeight: 28 }
                                     ColumnLayout {
-                                        Layout.fillWidth: true
+                                        spacing: 2
                                         Controls.Label { text: qsTr("Server di Stampa (CUPS)"); font.bold: true }
                                         Controls.Label {
                                             text: qsTr("Stato: <b>%1</b>").arg(SlowrollBackend.keyServices["cups.service"] || qsTr("verifica..."))
                                             color: (SlowrollBackend.keyServices["cups.service"] || "").startsWith("active") ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.neutralTextColor
                                         }
                                     }
+                                    Item { Layout.fillWidth: true }
                                     Controls.Button {
                                         text: qsTr("Riavvia")
                                         icon.name: "view-refresh"
@@ -215,7 +225,6 @@ Kirigami.ScrollablePage {
                         spacing: Kirigami.Units.largeSpacing
                         Kirigami.Icon { source: "yast-services-manager"; Layout.preferredWidth: 32; Layout.preferredHeight: 32 }
                         ColumnLayout {
-                            Layout.fillWidth: true
                             spacing: 1
                             Controls.Label { text: qsTr("Gestione Completa Servizi di Sistema (YaST)"); font.bold: true }
                             Controls.Label {
@@ -223,6 +232,7 @@ Kirigami.ScrollablePage {
                                 opacity: UiMetrics.secondaryOpacity
                             }
                         }
+                        Item { Layout.fillWidth: true }
                         Controls.Button {
                             text: qsTr("Apri YaST Servizi")
                             icon.name: "yast-services-manager"
@@ -249,7 +259,6 @@ Kirigami.ScrollablePage {
                                 Layout.preferredHeight: 32
                             }
                             ColumnLayout {
-                                Layout.fillWidth: true
                                 spacing: 2
                                 Kirigami.Heading {
                                     level: 3
@@ -265,6 +274,7 @@ Kirigami.ScrollablePage {
                                     opacity: UiMetrics.secondaryOpacity
                                 }
                             }
+                            Item { Layout.fillWidth: true }
                             Controls.Button {
                                 text: qsTr("Ricarica")
                                 icon.name: "view-refresh"
@@ -348,7 +358,6 @@ Kirigami.ScrollablePage {
                             }
 
                             ColumnLayout {
-                                Layout.fillWidth: true
                                 spacing: 2
                                 Kirigami.Heading {
                                     level: 3
@@ -363,6 +372,8 @@ Kirigami.ScrollablePage {
                                     opacity: UiMetrics.secondaryOpacity
                                 }
                             }
+
+                            Item { Layout.fillWidth: true }
 
                             Controls.Button {
                                 text: qsTr("Rileva Stato")
@@ -392,7 +403,7 @@ Kirigami.ScrollablePage {
                                     text: DesktopBackend.networkIpAddress.length > 0 ? DesktopBackend.networkIpAddress : qsTr("Non assegnato")
                                     font.bold: true
                                     font.family: Kirigami.Theme.fixedWidthFont.family
-                                    color: Kirigami.Theme.highlightColor
+                                    color: Kirigami.Theme.neutralTextColor
                                 }
                             }
 
@@ -403,6 +414,7 @@ Kirigami.ScrollablePage {
                                     text: DesktopBackend.networkGateway.length > 0 ? DesktopBackend.networkGateway : qsTr("Nessuno")
                                     font.bold: true
                                     font.family: Kirigami.Theme.fixedWidthFont.family
+                                    color: Kirigami.Theme.neutralTextColor
                                 }
                             }
 
@@ -413,7 +425,7 @@ Kirigami.ScrollablePage {
                                     text: DesktopBackend.networkDns.length > 0 ? DesktopBackend.networkDns : qsTr("Predefiniti DHCP")
                                     font.bold: true
                                     font.family: Kirigami.Theme.fixedWidthFont.family
-                                    color: Kirigami.Theme.positiveTextColor
+                                    color: Kirigami.Theme.neutralTextColor
                                 }
                             }
                         }
@@ -435,14 +447,14 @@ Kirigami.ScrollablePage {
                         spacing: Kirigami.Units.largeSpacing
 
                         Controls.Label {
-                            text: qsTr("Seleziona uno dei 3 indirizzi IP e uno dei 3 server DNS per applicarli istantaneamente alla connessione attiva <b>%1</b> senza richiedere password.")
+                            text: qsTr("Seleziona uno dei profili IP e server DNS per applicarli istantaneamente alla connessione attiva <b>%1</b> senza richiedere password.")
                                   .arg(DesktopBackend.networkActiveConnection.length > 0 ? DesktopBackend.networkActiveConnection : qsTr("predefinita"))
                             opacity: UiMetrics.secondaryOpacity
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
 
-                        // Selezione IP: 3 Tasti
+                        // Selezione IP
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: Kirigami.Units.smallSpacing
@@ -455,7 +467,7 @@ Kirigami.ScrollablePage {
                             GridLayout {
                                 id: ipGrid
                                 Layout.fillWidth: true
-                                columns: root.width > 700 ? 3 : 1
+                                columns: root.width > 900 ? 4 : (root.width > 560 ? 2 : 1)
                                 columnSpacing: UiMetrics.cardSpacing
                                 rowSpacing: UiMetrics.cardSpacing
 
@@ -466,7 +478,7 @@ Kirigami.ScrollablePage {
                                         required property var modelData
                                         required property int index
                                         Layout.fillWidth: true
-                                        Layout.preferredWidth: ipGrid.columns === 3 ? Math.floor((ipGrid.width - ipGrid.columnSpacing * 2) / 3) : ipGrid.width
+                                        Layout.preferredWidth: 1
                                         Layout.preferredHeight: 52
                                         highlighted: DesktopBackend.selectedIpPreset === index
 
@@ -489,7 +501,7 @@ Kirigami.ScrollablePage {
                                                 color: ipPresetBtn.highlighted ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
                                             }
                                             Controls.Label {
-                                                text: (modelData.address && modelData.address.length > 0) ? modelData.address : qsTr("DHCP Automatico")
+                                                text: (modelData.address && modelData.address.length > 0) ? modelData.address.split('/')[0] : qsTr("DHCP Automatico")
                                                 font.family: Kirigami.Theme.fixedWidthFont.family
                                                 font.pointSize: Kirigami.Theme.smallFont.pointSize
                                                 font.bold: ipPresetBtn.highlighted
@@ -505,7 +517,7 @@ Kirigami.ScrollablePage {
                             }
                         }
 
-                        // Selezione DNS: 3 Tasti
+                        // Selezione DNS
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: Kirigami.Units.smallSpacing
@@ -518,7 +530,7 @@ Kirigami.ScrollablePage {
                             GridLayout {
                                 id: dnsGrid
                                 Layout.fillWidth: true
-                                columns: root.width > 700 ? 3 : 1
+                                columns: root.width > 900 ? 4 : (root.width > 560 ? 2 : 1)
                                 columnSpacing: UiMetrics.cardSpacing
                                 rowSpacing: UiMetrics.cardSpacing
 
@@ -529,7 +541,7 @@ Kirigami.ScrollablePage {
                                         required property var modelData
                                         required property int index
                                         Layout.fillWidth: true
-                                        Layout.preferredWidth: dnsGrid.columns === 3 ? Math.floor((dnsGrid.width - dnsGrid.columnSpacing * 2) / 3) : dnsGrid.width
+                                        Layout.preferredWidth: 1
                                         Layout.preferredHeight: 52
                                         highlighted: DesktopBackend.selectedDnsPreset === index
 
@@ -630,7 +642,7 @@ Kirigami.ScrollablePage {
 
                             Controls.Button {
                                 Layout.preferredHeight: 46
-                                text: qsTr("Modifica Valori dei 3 Profili...")
+                                text: qsTr("Modifica Valori dei Profili...")
                                 icon.name: "document-edit"
                                 onClicked: editNetworkDialog.open()
                             }
@@ -699,7 +711,7 @@ Kirigami.ScrollablePage {
         onAccepted: DesktopBackend.applyActiveNetworkProfile()
     }
 
-    // Modal Dialog per Modificare i Valori dei 3 Profili IP & DNS
+    // Modal Dialog per Modificare i Valori dei Profili IP & DNS
     Controls.Dialog {
         id: editNetworkDialog
         title: qsTr("Personalizzazione Profili IP & DNS")
@@ -712,18 +724,19 @@ Kirigami.ScrollablePage {
             spacing: Kirigami.Units.largeSpacing
 
             Controls.Label {
-                text: qsTr("Modifica gli indirizzi IP, Gateway e DNS assegnati ai 3 pulsanti rapidi:")
+                text: qsTr("Modifica gli indirizzi IP, Gateway e DNS assegnati ai pulsanti rapidi:")
                 font.bold: true
                 Layout.fillWidth: true
             }
 
-            // Tabs per i 3 profili
+            // Tabs per i profili
             Controls.TabBar {
                 id: profileTabs
                 Layout.fillWidth: true
                 Controls.TabButton { text: qsTr("Profilo 1"); font.bold: true }
                 Controls.TabButton { text: qsTr("Profilo 2"); font.bold: true }
                 Controls.TabButton { text: qsTr("Profilo 3"); font.bold: true }
+                Controls.TabButton { text: qsTr("Profilo 4"); font.bold: true }
             }
 
             StackLayout {
@@ -731,7 +744,7 @@ Kirigami.ScrollablePage {
                 currentIndex: profileTabs.currentIndex
 
                 Repeater {
-                    model: 3
+                    model: 4
                     delegate: ColumnLayout {
                         required property int index
                         spacing: Kirigami.Units.smallSpacing

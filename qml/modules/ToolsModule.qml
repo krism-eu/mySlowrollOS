@@ -335,7 +335,7 @@ Kirigami.ScrollablePage {
         contentItem: ColumnLayout {
             spacing: Kirigami.Units.largeSpacing
             Controls.Label {
-                text: qsTr("Verranno rimossi i log utente più vecchi preservando gli ultimi 16 MB. Vuoi procedere?")
+                text: qsTr("Verranno rimossi i registri Journal archiviati più vecchi preservando gli ultimi 16 MB (richiede autenticazione PolKit). Vuoi procedere?")
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }

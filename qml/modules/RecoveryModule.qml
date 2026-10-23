@@ -8,35 +8,14 @@ Kirigami.ScrollablePage {
     id: root
     title: qsTr("Backup & Recovery")
 
-    Component.onCompleted: {
-        SlowrollBackend.refreshAtomicState()
+    StackLayout.onIsCurrentItemChanged: {
+        if (root.StackLayout.isCurrentItem) {
+            SlowrollBackend.refreshAtomicState()
+        }
     }
 
-    Controls.Dialog {
-        id: cancelTransactionDialog
-        title: qsTr("Conferma Annullamento Transazione")
-        standardButtons: Controls.Dialog.Yes | Controls.Dialog.No
-        width: 440
-        anchors.centerIn: Controls.Overlay.overlay
-        modal: true
-
-        contentItem: ColumnLayout {
-            spacing: Kirigami.Units.largeSpacing
-            Controls.Label {
-                text: qsTr("Sei sicuro di voler annullare la transazione atomica pendente?")
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-            }
-            Controls.Label {
-                text: qsTr("Lo snapshot di aggiornamento non verrà attivato al prossimo riavvio.")
-                opacity: UiMetrics.secondaryOpacity
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-                font.pointSize: Kirigami.Theme.smallFont.pointSize
-            }
-        }
-
-        onAccepted: SlowrollBackend.cancelPendingReboot()
+    Component.onCompleted: {
+        SlowrollBackend.refreshAtomicState()
     }
 
     ColumnLayout {
@@ -169,14 +148,6 @@ Kirigami.ScrollablePage {
                         icon.name: "yast-snapper"
                         enabled: DesktopBackend.isToolAvailable("yast")
                         onClicked: DesktopBackend.launchYastModule("snapper")
-                    }
-
-                    Controls.Button {
-                        visible: SlowrollBackend.pendingReboot
-                        enabled: !DesktopBackend.busy && !SlowrollBackend.busy
-                        text: qsTr("Annulla Transazione Pendente")
-                        icon.name: "dialog-cancel"
-                        onClicked: cancelTransactionDialog.open()
                     }
 
                     Item { Layout.fillWidth: true }

@@ -204,6 +204,7 @@ void DesktopBackend::initialize()
     refreshResources();
     refreshPowerProfile();
     refreshWifiStatus();
+    refreshBluetoothStatus();
     QTimer::singleShot(0, this, [this] {
         refreshNetworkStatus();
     });
@@ -360,6 +361,7 @@ void DesktopBackend::refreshResources()
 
     refreshMicStatus();
     refreshPrivacyStatus();
+    refreshBluetoothStatus();
     emit resourcesChanged();
 }
 
@@ -906,17 +908,30 @@ bool DesktopBackend::launchCustomScript(const QString &scriptName)
         const bool isMic = (cleanName.compare(QStringLiteral("mic"), Qt::CaseInsensitive) == 0);
         const bool isPrivacy = (cleanName.compare(QStringLiteral("privacy"), Qt::CaseInsensitive) == 0);
 
+        if (!isMic && busy()) {
+            setMessage(tr("Un'altra operazione è già in esecuzione."));
+            return false;
+        }
+
         auto *proc = new QProcess(this);
 #ifdef Q_OS_UNIX
         proc->setChildProcessModifier([] { ::setpgid(0, 0); });
 #endif
+        if (!isMic) {
+            setBusy(true);
+        }
+
         connect(proc, &QProcess::finished, this, [this, proc, cleanName, isMic, isPrivacy](int exitCode, QProcess::ExitStatus) {
+            if (!isMic) {
+                setBusy(false);
+            }
             if (isMic) {
                 refreshMicStatus();
             } else if (isPrivacy) {
                 refreshPrivacyStatus();
                 refreshMicStatus();
                 refreshNetworkStatus();
+                refreshBluetoothStatus();
                 if (exitCode == 0) {
                     setMessage(m_privacyActive
                                ? tr("Modalità Privacy ATTIVATA.")
@@ -929,8 +944,11 @@ bool DesktopBackend::launchCustomScript(const QString &scriptName)
             }
             proc->deleteLater();
         });
-        connect(proc, &QProcess::errorOccurred, this, [this, proc, foundPath](QProcess::ProcessError err) {
+        connect(proc, &QProcess::errorOccurred, this, [this, proc, foundPath, isMic](QProcess::ProcessError err) {
             if (err == QProcess::FailedToStart) {
+                if (!isMic) {
+                    setBusy(false);
+                }
                 setMessage(tr("Impossibile avviare lo script: %1").arg(foundPath));
                 proc->deleteLater();
             }
@@ -1339,8 +1357,14 @@ void DesktopBackend::cleanTrash(const QString &)
 
 void DesktopBackend::cleanJournal(int keepMb)
 {
+    const QString journalctl = findTrustedSystemBinary(QStringLiteral("journalctl"));
+    if (journalctl.isEmpty()) {
+        setMessage(tr("journalctl non trovato sul sistema."));
+        return;
+    }
     const QString arg = QStringLiteral("--vacuum-size=%1M").arg(qMax(8, keepMb));
-    startProcess(QStringLiteral("journalctl"), {QStringLiteral("--user"), arg}, QStringLiteral("journal-vacuum"), false);
+    setMessage(tr("Pulizia dei registri Journal in corso..."));
+    startProcess(QStringLiteral("pkexec"), {journalctl, arg}, QStringLiteral("journal-vacuum"), false, 60000);
 }
 
 void DesktopBackend::cleanFlatpakUnused()
@@ -1799,6 +1823,20 @@ void DesktopBackend::loadNetworkProfiles()
         ip2.insert(QStringLiteral("address"), QStringLiteral("192.168.11.60/24"));
         ip2.insert(QStringLiteral("gateway"), QStringLiteral("192.168.11.1"));
         m_ipPresets.append(ip2);
+
+        QVariantMap ip3;
+        ip3.insert(QStringLiteral("name"), tr("Personalizzato"));
+        ip3.insert(QStringLiteral("address"), QString());
+        ip3.insert(QStringLiteral("gateway"), QString());
+        m_ipPresets.append(ip3);
+    } else if (m_ipPresets.size() < 4) {
+        while (m_ipPresets.size() < 4) {
+            QVariantMap ipExtra;
+            ipExtra.insert(QStringLiteral("name"), tr("Personalizzato"));
+            ipExtra.insert(QStringLiteral("address"), QString());
+            ipExtra.insert(QStringLiteral("gateway"), QString());
+            m_ipPresets.append(ipExtra);
+        }
     }
 
     if (m_dnsPresets.isEmpty()) {
@@ -1819,6 +1857,20 @@ void DesktopBackend::loadNetworkProfiles()
         d3.insert(QStringLiteral("dns"), QStringLiteral("9.9.9.9 149.112.112.112"));
         d3.insert(QStringLiteral("dohUrl"), QStringLiteral("https://dns.quad9.net/dns-query"));
         m_dnsPresets.append(d3);
+
+        QVariantMap d4;
+        d4.insert(QStringLiteral("name"), tr("Personalizzato"));
+        d4.insert(QStringLiteral("dns"), QString());
+        d4.insert(QStringLiteral("dohUrl"), QString());
+        m_dnsPresets.append(d4);
+    } else if (m_dnsPresets.size() < 4) {
+        while (m_dnsPresets.size() < 4) {
+            QVariantMap dExtra;
+            dExtra.insert(QStringLiteral("name"), tr("Personalizzato"));
+            dExtra.insert(QStringLiteral("dns"), QString());
+            dExtra.insert(QStringLiteral("dohUrl"), QString());
+            m_dnsPresets.append(dExtra);
+        }
     }
 
     if (!loaded) {
@@ -2200,6 +2252,98 @@ void DesktopBackend::setWifiEnabled(bool enable)
         if (guard && guard->state() != QProcess::NotRunning) guard->kill();
     });
     proc->start(QStringLiteral("nmcli"), {QStringLiteral("radio"), QStringLiteral("wifi"), newState});
+}
+
+void DesktopBackend::refreshBluetoothStatus()
+{
+    bool hasBt = false;
+    bool hwBlocked = false;
+    bool swBlocked = false;
+
+    const QDir rfkillDir(QStringLiteral("/sys/class/rfkill"));
+    for (const QString &rf : rfkillDir.entryList({QStringLiteral("rfkill*")}, QDir::Dirs)) {
+        QFile typeFile(rfkillDir.filePath(rf + QStringLiteral("/type")));
+        if (typeFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            const QString type = QString::fromUtf8(typeFile.readLine()).trimmed();
+            if (type == QStringLiteral("bluetooth")) {
+                hasBt = true;
+                QFile hardFile(rfkillDir.filePath(rf + QStringLiteral("/hard")));
+                if (hardFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                    if (QString::fromUtf8(hardFile.readLine()).trimmed() == QStringLiteral("1")) {
+                        hwBlocked = true;
+                    }
+                }
+                QFile softFile(rfkillDir.filePath(rf + QStringLiteral("/soft")));
+                if (softFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                    if (QString::fromUtf8(softFile.readLine()).trimmed() == QStringLiteral("1")) {
+                        swBlocked = true;
+                    }
+                }
+            }
+        }
+    }
+
+    const bool changed = (m_hasBluetoothHardware != hasBt ||
+                          m_bluetoothHardwareBlocked != hwBlocked ||
+                          m_bluetoothEnabled != (hasBt && !hwBlocked && !swBlocked));
+
+    m_hasBluetoothHardware = hasBt;
+    m_bluetoothHardwareBlocked = hwBlocked;
+    m_bluetoothEnabled = (hasBt && !hwBlocked && !swBlocked);
+    m_bluetoothStatusString = !hasBt ? QStringLiteral("hardware-missing")
+                                     : (hwBlocked ? QStringLiteral("hardware-blocked")
+                                                  : (m_bluetoothEnabled ? QStringLiteral("enabled") : QStringLiteral("disabled")));
+
+    if (changed) {
+        emit bluetoothChanged();
+    }
+}
+
+void DesktopBackend::toggleBluetooth()
+{
+    if (m_privacyActive) {
+        setMessage(tr("Impossibile modificare il Bluetooth mentre la Modalità Privacy è attiva."));
+        return;
+    }
+    if (m_bluetoothHardwareBlocked) {
+        setMessage(tr("Impossibile modificare il Bluetooth: blocco interruttore hardware attivo."));
+        return;
+    }
+    setBluetoothEnabled(!m_bluetoothEnabled);
+}
+
+void DesktopBackend::setBluetoothEnabled(bool enable)
+{
+    if (m_bluetoothHardwareBlocked && enable) {
+        setMessage(tr("Impossibile attivare il Bluetooth: blocco interruttore hardware attivo."));
+        return;
+    }
+
+    const QString rfkillBin = findExecutableWithSbin(QStringLiteral("rfkill"));
+    if (rfkillBin.isEmpty()) {
+        setMessage(tr("Comando rfkill non trovato per la gestione del Bluetooth."));
+        return;
+    }
+
+    const QString action = enable ? QStringLiteral("unblock") : QStringLiteral("block");
+    auto *proc = new QProcess(this);
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("LC_ALL"), QStringLiteral("C.UTF-8"));
+    env.insert(QStringLiteral("LANG"), QStringLiteral("C.UTF-8"));
+    proc->setProcessEnvironment(env);
+
+    connect(proc, &QProcess::finished, this, [this, proc](int, QProcess::ExitStatus) {
+        refreshBluetoothStatus();
+        proc->deleteLater();
+    });
+    connect(proc, &QProcess::errorOccurred, this, [proc](QProcess::ProcessError) {
+        proc->deleteLater();
+    });
+    QPointer<QProcess> guard = proc;
+    QTimer::singleShot(4000, proc, [guard] {
+        if (guard && guard->state() != QProcess::NotRunning) guard->kill();
+    });
+    proc->start(rfkillBin, {action, QStringLiteral("bluetooth")});
 }
 
 void DesktopBackend::refreshTopMemoryProcesses()

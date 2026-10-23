@@ -59,6 +59,11 @@ class DesktopBackend : public QObject
     Q_PROPERTY(bool hasWifiHardware READ hasWifiHardware NOTIFY wifiChanged)
     Q_PROPERTY(bool wifiHardwareBlocked READ wifiHardwareBlocked NOTIFY wifiChanged)
     Q_PROPERTY(QString wifiStatusString READ wifiStatusString NOTIFY wifiChanged)
+
+    Q_PROPERTY(bool bluetoothEnabled READ bluetoothEnabled NOTIFY bluetoothChanged)
+    Q_PROPERTY(bool hasBluetoothHardware READ hasBluetoothHardware NOTIFY bluetoothChanged)
+    Q_PROPERTY(bool bluetoothHardwareBlocked READ bluetoothHardwareBlocked NOTIFY bluetoothChanged)
+    Q_PROPERTY(QString bluetoothStatusString READ bluetoothStatusString NOTIFY bluetoothChanged)
     Q_PROPERTY(QVariantList topMemoryProcesses READ topMemoryProcesses NOTIFY topProcessesChanged)
 
 public:
@@ -110,6 +115,11 @@ public:
     bool hasWifiHardware() const { return m_hasWifiHardware; }
     bool wifiHardwareBlocked() const { return m_wifiHardwareBlocked; }
     QString wifiStatusString() const { return m_wifiStatusString; }
+
+    bool bluetoothEnabled() const { return m_bluetoothEnabled; }
+    bool hasBluetoothHardware() const { return m_hasBluetoothHardware; }
+    bool bluetoothHardwareBlocked() const { return m_bluetoothHardwareBlocked; }
+    QString bluetoothStatusString() const { return m_bluetoothStatusString; }
     const QVariantList &topMemoryProcesses() const { return m_topMemoryProcesses; }
 
     bool micMuted() const { return m_micMuted; }
@@ -129,6 +139,9 @@ public:
     Q_INVOKABLE void refreshWifiStatus();
     Q_INVOKABLE void toggleWifi();
     Q_INVOKABLE void setWifiEnabled(bool enable);
+    Q_INVOKABLE void refreshBluetoothStatus();
+    Q_INVOKABLE void toggleBluetooth();
+    Q_INVOKABLE void setBluetoothEnabled(bool enable);
     Q_INVOKABLE void refreshTopMemoryProcesses();
     Q_INVOKABLE void selectIpPreset(int index);
     Q_INVOKABLE void selectDnsPreset(int index);
@@ -182,6 +195,7 @@ signals:
     void networkStatusChanged();
     void networkPresetsChanged();
     void wifiChanged();
+    void bluetoothChanged();
     void topProcessesChanged();
     void promptStatusChanged();
     void micStatusChanged();
@@ -250,6 +264,11 @@ private:
     QString m_wifiStatusString = QStringLiteral("unknown");
     quint64 m_wifiRequestId = 0;
     quint64 m_networkRequestId = 0;
+
+    bool m_bluetoothEnabled = false;
+    bool m_hasBluetoothHardware = true;
+    bool m_bluetoothHardwareBlocked = false;
+    QString m_bluetoothStatusString = QStringLiteral("unknown");
 
     bool m_micMuted = true;
     bool m_privacyActive = false;

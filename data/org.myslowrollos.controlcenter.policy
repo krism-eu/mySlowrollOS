@@ -6,17 +6,17 @@
   <vendor>mySlowrollOS</vendor>
   <vendor_url>https://github.com/krism-eu/mySlowrollOS</vendor_url>
 
-  <action id="org.myslowrollos.controlcenter.atomic-update">
-    <description>Run atomic updates in mySlowrollOS Control Center</description>
-    <description xml:lang="it">Gestione aggiornamenti atomici in mySlowrollOS Control Center</description>
-    <message>Authentication is required to perform atomic system updates</message>
-    <message xml:lang="it">Autenticazione richiesta per eseguire aggiornamenti atomici di sistema</message>
+  <action id="org.myslowrollos.controlcenter.journalctl">
+    <description>Clean system journal logs in mySlowrollOS Control Center</description>
+    <description xml:lang="it">Pulizia registri Journal in mySlowrollOS Control Center</description>
+    <message>Authentication is required to vacuum journal logs</message>
+    <message xml:lang="it">Autenticazione richiesta per ripulire i registri del Journal</message>
     <defaults>
       <allow_any>no</allow_any>
       <allow_inactive>no</allow_inactive>
       <allow_active>auth_admin_keep</allow_active>
     </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/sbin/atomic-update</annotate>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/journalctl</annotate>
   </action>
 
   <action id="org.myslowrollos.controlcenter.efibootmgr">

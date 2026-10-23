@@ -31,8 +31,9 @@
      rm -f myslowroll-cc-sorgenti-unificati.txt
      ```
 
-5. **No Spec Drift & Clean Build Scripts**:
-   - `KSCC-rpmlintrc` was retired; do not re-introduce it.
+5. **Packaging Architecture & Zero Spec Drift**:
+   - Canonical rpmlint configuration is `packaging/myslowroll-cc-rpmlintrc`, registered as `Source1: %{name}-rpmlintrc` in `packaging/myslowroll-cc.spec` to filter OBS PolKit checks (`polkit-untracked-privilege`). The obsolete legacy file `KSCC-rpmlintrc` was retired and must not be restored.
+   - The source tarball `Source0` must strictly contain application source trees (`src/`, `qml/`, `data/`, `tests/`, `CMakeLists.txt`); the `packaging/` directory must be excluded from the tarball and handled purely at the RPM level.
    - Single source of truth for versioning is `CMakeLists.txt` (`project(myslowroll-cc VERSION X.Y.Z)`).
 
 ---

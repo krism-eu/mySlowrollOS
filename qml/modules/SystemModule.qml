@@ -20,6 +20,8 @@ Kirigami.ScrollablePage {
     StackLayout.onIsCurrentItemChanged: {
         if (root.StackLayout.isCurrentItem) {
             DesktopBackend.refreshTopMemoryProcesses()
+            SlowrollBackend.refreshAtomicState()
+            SlowrollBackend.refreshUefiEntries()
         }
     }
 
@@ -437,10 +439,10 @@ Kirigami.ScrollablePage {
                     }
 
                     Controls.Button {
-                        text: qsTr("Verifica Aggiornamenti")
+                        text: qsTr("Aggiorna Stato")
                         icon.name: "view-refresh"
                         enabled: !DesktopBackend.busy && !SlowrollBackend.busy
-                        onClicked: SlowrollBackend.checkAtomicUpdates()
+                        onClicked: SlowrollBackend.refreshAtomicState()
                     }
                 }
 
@@ -464,9 +466,9 @@ Kirigami.ScrollablePage {
 
                     ColumnLayout {
                         spacing: 2
-                        Controls.Label { text: qsTr("Ultimo Controllo"); font.bold: true; opacity: UiMetrics.secondaryOpacity }
+                        Controls.Label { text: qsTr("Ultima Transazione"); font.bold: true; opacity: UiMetrics.secondaryOpacity }
                         Controls.Label {
-                            text: SlowrollBackend.lastCheckTime.length > 0 ? SlowrollBackend.lastCheckTime : qsTr("Non eseguito in questa sessione")
+                            text: SlowrollBackend.lastCheckTime.length > 0 ? SlowrollBackend.lastCheckTime : qsTr("Nessuna registrata")
                         }
                     }
 

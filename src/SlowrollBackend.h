@@ -79,8 +79,6 @@ public:
     Q_INVOKABLE void refreshUefiEntries();
     Q_INVOKABLE void refreshAll();
 
-    Q_INVOKABLE void checkAtomicUpdates();
-    Q_INVOKABLE void cancelPendingReboot();
     Q_INVOKABLE void restartService(const QString &serviceName);
     Q_INVOKABLE void loadServiceJournal(const QString &serviceName);
     Q_INVOKABLE void clearServiceJournal();

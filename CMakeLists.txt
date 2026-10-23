@@ -11,7 +11,7 @@ set(CMAKE_AUTORCC ON)
 include(GNUInstallDirs)
 include(CTest)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Qml Quick QuickControls2 Network Test)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Qml Quick QuickControls2 Network)
 find_package(KF6Kirigami 6.0 REQUIRED)
 
 add_definitions(-DMYSLOWROLL_CC_VERSION="${PROJECT_VERSION}")
@@ -92,6 +92,7 @@ install(PROGRAMS data/scripts/mic.sh data/scripts/privacy.sh
 )
 
 if(BUILD_TESTING)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
     add_executable(test_domain
         tests/test_domain.cpp
     )

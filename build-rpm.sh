@@ -58,6 +58,7 @@ tar --exclude-vcs \
     --exclude='./build' \
     --exclude='./rpmbuild' \
     --exclude='./dist' \
+    --exclude='./packaging' \
     --exclude='./.build-rpm.lock' \
     --exclude='./myslowroll-cc-sorgenti-unificati.txt' \
     --exclude='*.bak' \

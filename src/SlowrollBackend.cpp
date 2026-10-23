@@ -41,11 +41,6 @@ QString findEfibootmgr()
     return findTrustedSystemBinary(QStringLiteral("efibootmgr"));
 }
 
-QString findAtomicUpdate()
-{
-    return findTrustedSystemBinary(QStringLiteral("atomic-update"));
-}
-
 QStringList parseCsvLine(const QString &line)
 {
     QStringList fields;
@@ -251,27 +246,7 @@ void SlowrollBackend::handleProcessFinished(QProcess *proc, const QString &opera
         causeText = tr("fallita con codice di uscita %1").arg(exitCode);
     }
 
-    if (operationName == QStringLiteral("atomic-check")) {
-        m_lastCheckTime = QDateTime::currentDateTime().toString(QStringLiteral("hh:mm - dd/MM/yyyy"));
-        if (!failed) {
-            setMessage(tr("Controllo aggiornamenti completato. %1").arg(outStr.isEmpty() ? tr("Nessun aggiornamento in sospeso.") : outStr));
-        } else {
-            setMessage(tr("Verifica aggiornamenti %1: %2").arg(causeText, outStr));
-        }
-        refreshAtomicState();
-    } else if (operationName == QStringLiteral("cancel-reboot")) {
-        if (!failed) {
-            setMessage(tr("Transazione annullata con successo."));
-        } else {
-            m_needsInspection = true;
-            m_atomicStatus = QStringLiteral("needs-inspection");
-            m_atomicStateDescription = tr("Attenzione: annullamento transazione %1. Verificare lo stato del sistema prima di procedere con nuove operazioni.")
-                .arg(causeText);
-            emit atomicStatusChanged();
-            setMessage(tr("Impossibile annullare la transazione (%1): %2").arg(causeText, outStr));
-        }
-        refreshAtomicState();
-    } else if (operationName.startsWith(QStringLiteral("restart-service-"))) {
+    if (operationName.startsWith(QStringLiteral("restart-service-"))) {
         const QString sName = operationName.mid(16);
         if (!failed) {
             setMessage(tr("Servizio %1 riavviato correttamente.").arg(sName));
@@ -343,7 +318,8 @@ void SlowrollBackend::readAtomicStateFiles()
     m_atomicStatus = QStringLiteral("idle");
     m_pendingReboot = false;
     m_needsInspection = false;
-    m_atomicStateDescription = tr("Nessuna transazione atomica pendente (o aggiornamento atomico non configurato).");
+    m_lastCheckTime.clear();
+    m_atomicStateDescription = tr("Stato del sistema nominale. Nessuna transazione atomica pendente.");
 
     // 2. Discover active snapshot from /proc/self/mountinfo (instant, 0 external processes)
     QFile miFile(QStringLiteral("/proc/self/mountinfo"));
@@ -352,9 +328,17 @@ void SlowrollBackend::readAtomicStateFiles()
     }
 
     // 3. Inspect real atomic state in /var/lib/myslowroll/atomic-update/state
-    const QString statePath = QStringLiteral("/var/lib/myslowroll/atomic-update/state");
+    const QString stateDir = QStringLiteral("/var/lib/myslowroll/atomic-update");
+    const QString statePath = stateDir + QStringLiteral("/state");
+    const QFileInfo dirInfo(stateDir);
+    const QFileInfo fileInfo(statePath);
+
     QFile stateFile(statePath);
-    if (stateFile.exists() && stateFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    if (dirInfo.exists() && (!dirInfo.isReadable() || !dirInfo.isExecutable() || (fileInfo.exists() && !fileInfo.isReadable()))) {
+        m_atomicStatus = QStringLiteral("unknown");
+        m_needsInspection = true;
+        m_atomicStateDescription = tr("Impossibile leggere lo stato di atomic-update: permessi insufficienti su %1 (richiesto 0755/0644).").arg(statePath);
+    } else if (fileInfo.exists() && stateFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
         QMap<QString, QString> kv;
         while (!stateFile.atEnd()) {
             const QString line = QString::fromUtf8(stateFile.readLine()).trimmed();
@@ -381,17 +365,29 @@ void SlowrollBackend::readAtomicStateFiles()
                 m_activeSnapshot = source;
             }
         }
-        if (kv.contains(QStringLiteral("status"))) {
-            const QString val = kv.value(QStringLiteral("status"));
+        if (kv.contains(QStringLiteral("created_utc")) && !kv.value(QStringLiteral("created_utc")).isEmpty()) {
+            m_lastCheckTime = kv.value(QStringLiteral("created_utc"));
+        }
+
+        const QString lastErr = kv.value(QStringLiteral("last_error")).trimmed();
+        const QString val = kv.value(QStringLiteral("status")).trimmed();
+        if (!val.isEmpty()) {
             m_atomicStatus = val;
             if (val == QStringLiteral("pending-reboot")) {
                 m_pendingReboot = true;
                 const int snapNum = m_defaultSnapshot > 0 ? m_defaultSnapshot : (m_activeSnapshot > 0 ? m_activeSnapshot : 0);
                 m_atomicStateDescription = tr("Aggiornamento atomico completato. Riavviare il sistema per attivare lo snapshot #%1.")
                     .arg(snapNum);
+            } else if (val == QStringLiteral("rollback-pending")) {
+                m_pendingReboot = true;
+                const int snapNum = m_defaultSnapshot > 0 ? m_defaultSnapshot : (m_activeSnapshot > 0 ? m_activeSnapshot : 0);
+                m_atomicStateDescription = tr("Rollback preparato. Riavviare il sistema per attivare lo snapshot #%1.")
+                    .arg(snapNum);
             } else if (val == QStringLiteral("needs-inspection")) {
                 m_needsInspection = true;
-                m_atomicStateDescription = tr("Attenzione: la transazione precedente richiede ispezione manuale.");
+                m_atomicStateDescription = lastErr.isEmpty()
+                    ? tr("Attenzione: la transazione precedente richiede ispezione manuale (atomic-update recover inspect).")
+                    : tr("Attenzione: la transazione richiede ispezione (%1).").arg(lastErr);
             } else if (val == QStringLiteral("rolled-back")) {
                 if (m_activeSnapshot > 0) {
                     m_atomicStateDescription = tr("Sistema ripristinato allo snapshot #%1.").arg(m_activeSnapshot);
@@ -400,8 +396,16 @@ void SlowrollBackend::readAtomicStateFiles()
                 }
             } else if (val == QStringLiteral("confirmed")) {
                 m_atomicStateDescription = tr("Aggiornamento confermato e operativo.");
-            } else if (val == QStringLiteral("planned")) {
+            } else if (val == QStringLiteral("planned") || val == QStringLiteral("revalidated")) {
                 m_atomicStateDescription = tr("Piano di aggiornamento verificato e pronto all'installazione.");
+            } else if (val == QStringLiteral("planning") || val == QStringLiteral("opening") ||
+                       val == QStringLiteral("target") || val == QStringLiteral("verified") ||
+                       val == QStringLiteral("committing")) {
+                m_atomicStateDescription = tr("Transazione atomic-update in corso (stato: %1).").arg(val);
+            } else if (val == QStringLiteral("aborted")) {
+                m_atomicStateDescription = lastErr.isEmpty()
+                    ? tr("Ultima transazione annullata (aborted). Sistema invariato.")
+                    : tr("Ultima transazione annullata: %1").arg(lastErr);
             } else if (val == QStringLiteral("idle")) {
                 m_atomicStateDescription = tr("Stato del sistema nominale. Nessuna transazione pendente.");
             } else {
@@ -694,33 +698,6 @@ void SlowrollBackend::refreshAll()
     refreshUefiEntries();
 }
 
-void SlowrollBackend::checkAtomicUpdates()
-{
-    const QString atomicExe = findAtomicUpdate();
-    if (atomicExe.isEmpty()) {
-        setMessage(tr("atomic-update non trovato nel sistema."));
-        return;
-    }
-    QProcess *proc = startProcess(QStringLiteral("pkexec"), {atomicExe, QStringLiteral("check")},
-                                  QStringLiteral("atomic-check"), false, 600000);
-    if (proc) {
-        setMessage(tr("Verifica aggiornamenti atomic-update in corso..."));
-    }
-}
-
-void SlowrollBackend::cancelPendingReboot()
-{
-    const QString atomicExe = findAtomicUpdate();
-    if (atomicExe.isEmpty()) {
-        setMessage(tr("atomic-update non trovato nel sistema."));
-        return;
-    }
-    QProcess *proc = startProcess(QStringLiteral("pkexec"), {atomicExe, QStringLiteral("recover"), QStringLiteral("clear-opening")},
-                                  QStringLiteral("cancel-reboot"), false, 120000);
-    if (proc) {
-        setMessage(tr("Annullamento della transazione pendente in corso..."));
-    }
-}
 
 void SlowrollBackend::restartService(const QString &serviceName)
 {

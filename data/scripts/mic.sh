@@ -8,7 +8,8 @@ fi
 
 wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle
 
-if wpctl get-volume @DEFAULT_AUDIO_SOURCE@ | grep -q "MUTED"; then
+vol_out="$(wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null || true)"
+if [[ "$vol_out" == *MUTED* ]]; then
     if command -v notify-send >/dev/null 2>&1; then
         notify-send -a "mySlowrollOS" -i microphone-sensitivity-muted -h string:x-canonical-private-synchronous:mic-status "Microfono DISATTIVATO" "Ingresso audio mutato."
     fi
