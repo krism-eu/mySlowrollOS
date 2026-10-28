@@ -79,6 +79,38 @@ install_backintime_override() {
   echo "mySlowrollOS: Back In Time autostart suppressed (Hidden=true) -> $dest"
 }
 
+# Configure AppImage MIME type associations idempotently and nondestructively.
+# Merges into /etc/xdg/mimeapps.list preserving any existing system or desktop defaults.
+configure_mime_associations() {
+  local file="${1:-/etc/xdg/mimeapps.list}"
+  install -d -m 0755 "$(dirname "$file")"
+  python3 - "$file" <<'PY' || return 1
+import sys, configparser
+
+target = sys.argv[1]
+cp = configparser.RawConfigParser()
+cp.optionxform = str
+try:
+    cp.read(target, encoding="utf-8")
+except Exception:
+    pass
+
+for sec in ["Default Applications", "Added Associations"]:
+    if not cp.has_section(sec):
+        cp.add_section(sec)
+
+cp.set("Default Applications", "application/vnd.appimage", "appimage-executor.desktop")
+cp.set("Default Applications", "application/x-iso9660-appimage", "appimage-executor.desktop")
+cp.set("Added Associations", "application/vnd.appimage", "appimage-executor.desktop;")
+cp.set("Added Associations", "application/x-iso9660-appimage", "appimage-executor.desktop;")
+
+with open(target, "w", encoding="utf-8") as fp:
+    cp.write(fp, space_around_delimiters=False)
+PY
+  chmod 0644 "$file"
+  echo "mySlowrollOS: AppImage mime associations merged idempotently -> $file"
+}
+
 # Harden and optimize /etc/fstab: umask=0077 on vfat ESP, noatime on Btrfs subvolumes.
 # Preserves comments, UUIDs, non-target filesystems, and column layout.
 # Performs atomic replacement via tempfile and rename, with fail-closed error propagation.
@@ -312,6 +344,21 @@ FSTAB_TEST
     echo 'FAIL: symlink sudoers directory accepted' >&2
     exit 1
   fi
+  # MIME associations: test creation, merging with existing entries, and idempotence
+  cat > "$dir/mock-mimeapps.list" <<'MIME_PRE'
+[Default Applications]
+text/plain=kate.desktop
+[Custom Section]
+opt=1
+MIME_PRE
+  configure_mime_associations "$dir/mock-mimeapps.list" || exit 1
+  grep -Fxq 'text/plain=kate.desktop' "$dir/mock-mimeapps.list" || exit 1
+  grep -Fxq 'application/vnd.appimage=appimage-executor.desktop' "$dir/mock-mimeapps.list" || exit 1
+  grep -Fxq 'application/vnd.appimage=appimage-executor.desktop;' "$dir/mock-mimeapps.list" || exit 1
+  grep -Fxq 'opt=1' "$dir/mock-mimeapps.list" || exit 1
+  configure_mime_associations "$dir/mock-mimeapps.list" || exit 1
+  [[ "$(grep -Fxc 'application/vnd.appimage=appimage-executor.desktop' "$dir/mock-mimeapps.list")" -eq 1 ]] || exit 1
+  echo 'PASS: /etc/xdg/mimeapps.list merged section-aware, preserves stock, idempotent'
   echo 'PASS: /etc/sudoers.d configured to 0750, drop-in 0440, and symlinks rejected'
   echo 'PASS: /etc/fstab configured atomically, idempotently, and fail-closed'
   echo 'PASS: Back In Time autostart suppressed atomically and idempotently'
@@ -407,15 +454,7 @@ MimeType=application/x-iso9660-appimage;application/vnd.appimage;
 NoDisplay=false
 APPIMAGE_DESKTOP_EOF
 
-cat >> /etc/xdg/mimeapps.list <<'MIME_EOF'
-[Default Applications]
-application/vnd.appimage=appimage-executor.desktop
-application/x-iso9660-appimage=appimage-executor.desktop
-
-[Added Associations]
-application/vnd.appimage=appimage-executor.desktop;
-application/x-iso9660-appimage=appimage-executor.desktop;
-MIME_EOF
+configure_mime_associations /etc/xdg/mimeapps.list
 
 # Agama configures the ESP interactively. Detect the actual EFI mountpoint
 # and let sdbootutil choose the real Snapper default BLS entry before reboot.

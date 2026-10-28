@@ -37,6 +37,18 @@ run_update() {
     printf 'Avvio sessione: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
     printf 'Log sessione:   %s\n' "${LOG_RUN}"
 
+    # Se il sistema e gia riavviato sul TARGET ed e in pending-reboot, confermiamo prima di pianificare
+    local status_out cur_st cur_target cur_active
+    status_out="$(/usr/sbin/atomic-update status 2>/dev/null || true)"
+    cur_st="$(awk '/^State:/ {print $2; exit}' <<<"${status_out}")"
+    cur_target="$(awk '/^TARGET:/ {print $2; exit}' <<<"${status_out}")"
+    cur_active="$(findmnt -no OPTIONS / 2>/dev/null | sed -nE 's#.*subvol=/?.*\.snapshots/([0-9]+)/snapshot.*#\1#p' | head -n1)"
+
+    if [[ "${cur_st}" == "pending-reboot" && -n "${cur_target}" && "${cur_target}" =~ ^[0-9]+$ && "${cur_active}" == "${cur_target}" ]]; then
+        printf '\n\e[1;36m[mySlowrollOS] Conferma dell'\''aggiornamento precedente (snapshot #%s)...\e[0m\n' "${cur_target}"
+        /usr/sbin/atomic-update confirm
+    fi
+
     print_step "1" "Verifica diagnostica preflight di sistema"
     /usr/sbin/atomic-update check
 
@@ -63,9 +75,19 @@ run_update() {
     if [[ "${MYSLOWROLL_AUTO_REBOOT:-1}" == "0" ]]; then
         printf '\n\e[1;33m[mySlowrollOS] Modalita ispezione: riavvio automatico disabilitato.\e[0m\n'
         printf 'Il sistema e pronto nella nuova snapshot. Riavviare manualmente quando desiderato.\n'
+        printf '\nPremi INVIO per chiudere questa finestra...\n'
+        read -r _ || true
         return 0
     fi
 }
 
-# Eseguiamo inviando sia a terminale che a log
-run_update 2>&1 | tee "${LOG_RUN}"
+# Eseguiamo inviando sia a terminale che a log e fermando la chiusura in caso di errore
+rc=0
+run_update 2>&1 | tee "${LOG_RUN}" || rc=$?
+if (( rc != 0 )); then
+    printf '\n\e[1;31m[mySlowrollOS] Aggiornamento interrotto con errore (codice %d).\e[0m\n' "${rc}"
+    printf 'Consulta il log: %s\n' "${LOG_RUN}"
+    printf '\nPremi INVIO per chiudere questa finestra...\n'
+    read -r _ || true
+    exit "${rc}"
+fi

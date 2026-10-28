@@ -256,9 +256,9 @@ load_state() {
 persist_state() {
     local tmp
     local safe
-    install -d -o root -g root -m 0700 "${STATE_DIR}" || return 1
+    install -d -o root -g root -m 0755 "${STATE_DIR}" || return 1
     tmp="$(mktemp "${STATE_DIR}/.state.XXXXXX")" || return 1
-    chmod 0600 "${tmp}" || { rm -f -- "${tmp}"; return 1; }
+    chmod 0644 "${tmp}" || { rm -f -- "${tmp}"; return 1; }
     safe="${STATE_LAST_ERROR//$'\n'/ }"; safe="${safe//$'\r'/ }"; safe="${safe//$'\t'/ }"
     {
         printf 'version=%s\n' "${STATE_VERSION}"
@@ -288,11 +288,11 @@ hist_log() {
     local stamp
     stamp="$(date -u +%FT%TZ)" || return 1
     detail="${detail//$'\n'/ }"; detail="${detail//$'\t'/ }"
-    install -d -o root -g root -m 0700 "${STATE_DIR}" || return 1
+    install -d -o root -g root -m 0755 "${STATE_DIR}" || return 1
     printf '%s\t%s\t%s\tstatus=%s\tsource=%s\ttarget=%s\t%s\n' \
         "${stamp}" "${STATE_TXID:-none}" "${event}" "${STATE_STATUS:-none}" \
         "${STATE_SOURCE:-none}" "${STATE_TARGET:-none}" "${detail}" >> "${HISTORY_FILE}" || return 1
-    chmod 0600 "${HISTORY_FILE}" || return 1
+    chmod 0644 "${HISTORY_FILE}" || return 1
     sync "${HISTORY_FILE}" || return 1
 }
 history_or_warn() { hist_log "$@" || warn 'history.log non aggiornabile; state resta autoritativo.'; }
@@ -982,7 +982,9 @@ make_plan() {
     STATE_STATUS=planning
     STATE_SOURCE="${a}"
     set_tx_paths
-    install -d -o root -g root -m 0700 "${STATE_DIR}" "${TX_CACHE_DIR}" "${TX_PKG_CACHE}" "${LOG_ROOT}" ||
+    install -d -o root -g root -m 0755 "${STATE_DIR}" ||
+        die 'creazione directory transazione fallita.'
+    install -d -o root -g root -m 0700 "${TX_CACHE_DIR}" "${TX_PKG_CACHE}" "${LOG_ROOT}" ||
         die 'creazione directory transazione fallita.'
     persist_state_or_die
     history_or_warn planning-started

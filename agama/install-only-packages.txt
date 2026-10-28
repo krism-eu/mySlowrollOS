@@ -7,9 +7,11 @@ yast2
 yast2-apparmor
 yast2-bootloader
 yast2-control-center-qt
+yast2-network
 yast2-packager
 yast2-services-manager
 yast2-snapper
 yast2-storage-ng
 yast2-sysconfig
+yast2-users
 xauth

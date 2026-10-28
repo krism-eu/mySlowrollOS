@@ -7,6 +7,7 @@ Source0:        LICENSE
 BuildArch:      noarch
 
 Requires:       7zip
+Requires:       Mesa-demo-x
 Requires:       Mesa-dri
 Requires:       Mesa-vulkan-device-select
 Requires:       NetworkManager
@@ -76,8 +77,9 @@ Requires:       kernel-default
 Requires:       kernel-firmware-amdgpu
 Requires:       kernel-firmware-mediatek
 Requires:       kernel-firmware-realtek
-Requires:       kfind
 Requires:       kf6-baloo-file
+Requires:       kfind
+Requires:       kinfocenter6
 Requires:       kglobalacceld6
 Requires:       kio-admin
 Requires:       kio-extras
@@ -137,6 +139,7 @@ Requires:       polkit-kde-agent-6
 Requires:       power-profiles-daemon
 Requires:       powerdevil6
 Requires:       procps
+Requires:       qdirstat
 Requires:       rpm
 Requires:       rsync
 Requires:       sdbootutil
@@ -167,6 +170,7 @@ Requires:       unzip
 Requires:       upower
 Requires:       usbutils
 Requires:       util-linux
+Requires:       vulkan-tools
 Requires:       wget
 Requires:       which
 Requires:       wireplumber

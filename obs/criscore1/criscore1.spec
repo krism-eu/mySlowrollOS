@@ -63,6 +63,7 @@ Requires:       kwin6
 Requires:       libnss_usrfiles2
 Requires:       libvulkan_radeon
 Requires:       myrlyn
+Requires:       myslowroll-cc
 Requires:       nano
 Requires:       ntfs-3g
 Requires:       openSUSE-build-key
@@ -181,6 +182,7 @@ Requires:       kwin6
 Requires:       libnss_usrfiles2
 Requires:       libvulkan_radeon
 Requires:       myrlyn
+Requires:       myslowroll-cc
 Requires:       nano
 Requires:       ntfs-3g
 Requires:       openSUSE-build-key
