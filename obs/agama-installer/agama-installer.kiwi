@@ -50,6 +50,7 @@
         <package name="dbus-1"/>
         <package name="NetworkManager"/>
         <package name="kbd"/>
+        <package name="timezone"/>
 
         <!-- Filesystem & Disk Management Tools -->
         <package name="btrfsprogs"/>
@@ -82,7 +83,7 @@
     <!-- Minimal Bootstrap Packages -->
     <packages type="bootstrap">
         <package name="filesystem"/>
-        <package name="glibc-locale-base"/>
+        <package name="glibc-locale"/>
         <package name="openSUSE-release"/>
         <package name="openSUSE-release-appliance-custom"/>
     </packages>
