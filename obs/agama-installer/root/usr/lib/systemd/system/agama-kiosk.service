@@ -1,12 +1,15 @@
 [Unit]
 Description=mySlowrollOS Agama Local Wayland Kiosk (Cage + Firefox)
 Documentation=https://github.com/krism-eu/mySlowrollOS
-After=agama.service agama-web-server.service network.target
-Wants=agama.service
+After=agama.service agama-web-server.service network.target dbus.socket systemd-logind.service
+Wants=agama.service agama-web-server.service dbus.socket systemd-logind.service
 Conflicts=getty@tty1.service
+After=getty@tty1.service
 
 [Service]
 Type=simple
+User=root
+PAMName=login
 Environment=MOZ_ENABLE_WAYLAND=1
 Environment=XDG_RUNTIME_DIR=/run/user/0
 Environment=HOME=/root
@@ -16,9 +19,10 @@ Environment=WLR_RENDERER_ALLOW_SOFTWARE=1
 ExecStartPre=/usr/bin/mkdir -p -m 0700 /run/user/0
 ExecStartPre=/usr/libexec/myslowroll/wait-for-agama.sh
 ExecStart=/usr/bin/cage -s -- /usr/bin/firefox --kiosk --private-window http://localhost/
-Restart=on-failure
+ExecStartPost=+sh -c "exec chvt 1"
+Restart=always
 RestartSec=2
-StandardInput=tty-fail
+StandardInput=tty
 StandardOutput=journal
 StandardError=journal
 TTYPath=/dev/tty1
