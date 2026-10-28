@@ -753,6 +753,22 @@ Kirigami.ScrollablePage {
                         property var ipData: DesktopBackend.ipPresets[index] || {}
                         property var dnsData: DesktopBackend.dnsPresets[index] || {}
 
+                        function resetFields() {
+                            var ip = DesktopBackend.ipPresets[index] || {}
+                            var dns = DesktopBackend.dnsPresets[index] || {}
+                            ipNameField.text = ip.name || ""
+                            ipAddrField.text = ip.address || ""
+                            ipGwField.text = ip.gateway || ""
+                            dnsNameField.text = dns.name || ""
+                            dnsServerField.text = dns.dns || ""
+                            dnsDohField.text = dns.dohUrl || ""
+                        }
+
+                        Connections {
+                            target: editNetworkDialog
+                            function onOpened() { resetFields() }
+                        }
+
                         RowLayout {
                             Layout.fillWidth: true
                             Controls.Label { text: qsTr("Nome Profilo IP:"); Layout.preferredWidth: 140 }

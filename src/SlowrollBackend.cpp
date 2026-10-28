@@ -281,7 +281,10 @@ void SlowrollBackend::setBusy(bool b)
 {
     {
         QMutexLocker locker(&m_busyMutex);
-        if (m_busy == b) return;
+        if (m_busy == b) {
+            emit busyChanged();
+            return;
+        }
         m_busy = b;
     }
     emit busyChanged();
@@ -297,17 +300,18 @@ void SlowrollBackend::setMessage(const QString &m)
 int SlowrollBackend::parseActiveSnapshotFromMountinfo(const QString &mountinfoContent)
 {
     const QStringList lines = mountinfoContent.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
-    const QRegularExpression rx(QStringLiteral(R"(\.snapshots\/(\d+)\/snapshot)"));
+    static const QRegularExpression rx(QStringLiteral(R"(\.snapshots\/(\d+)\/snapshot)"));
+    int activeSnap = -1;
     for (const QString &line : lines) {
         const QStringList parts = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
         if (parts.size() >= 5 && parts.at(4) == QStringLiteral("/")) {
             const auto match = rx.match(line);
             if (match.hasMatch()) {
-                return match.captured(1).toInt();
+                activeSnap = match.captured(1).toInt();
             }
         }
     }
-    return -1;
+    return activeSnap;
 }
 
 void SlowrollBackend::readAtomicStateFiles()
@@ -583,7 +587,10 @@ void SlowrollBackend::refreshServices()
                             trimmed = trimmed.mid(1).trimmed();
                         }
                         if (!trimmed.isEmpty()) {
-                            failed.append(trimmed);
+                            const QString unitName = trimmed.section(QRegularExpression(QStringLiteral("\\s+")), 0, 0);
+                            if (!unitName.isEmpty()) {
+                                failed.append(unitName);
+                            }
                         }
                     }
                 }

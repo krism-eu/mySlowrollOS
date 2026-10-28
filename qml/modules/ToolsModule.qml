@@ -80,7 +80,7 @@ Kirigami.ScrollablePage {
                         text: qsTr("Pulisci Miniature (~/.cache)")
                         icon.name: "edit-clear"
                         enabled: !DesktopBackend.busy && !SlowrollBackend.busy
-                        onClicked: DesktopBackend.cleanThumbnailCache()
+                        onClicked: thumbnailsConfirmDialog.open()
                     }
 
                     Controls.Button {
@@ -319,7 +319,7 @@ Kirigami.ScrollablePage {
         }
 
         onAccepted: {
-            DesktopBackend.cleanTrash("home")
+            DesktopBackend.cleanTrash()
         }
     }
 
@@ -395,5 +395,26 @@ Kirigami.ScrollablePage {
         }
 
         onAccepted: DesktopBackend.cleanZypperCache()
+    }
+
+    // Confirmation dialog for thumbnail cache clean
+    Controls.Dialog {
+        id: thumbnailsConfirmDialog
+        title: qsTr("Conferma Pulizia Miniature")
+        standardButtons: Controls.Dialog.Yes | Controls.Dialog.No
+        width: 440
+        anchors.centerIn: Controls.Overlay.overlay
+        modal: true
+
+        contentItem: ColumnLayout {
+            spacing: Kirigami.Units.largeSpacing
+            Controls.Label {
+                text: qsTr("Vuoi davvero eliminare la cache delle miniature (~/.cache/thumbnails)?<br><br>Le miniature verranno ricreate automaticamente quando visualizzerai nuovamente i file multimediali.")
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+        }
+
+        onAccepted: DesktopBackend.cleanThumbnailCache()
     }
 }

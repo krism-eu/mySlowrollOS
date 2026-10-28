@@ -21,7 +21,7 @@ Centro di Controllo Operativo desktop in **C++20 / Qt 6 / KDE Kirigami 6** per *
 3. **Servizi & Rete**:
    - Monitoraggio e riavvio con conferma dei servizi chiave (`firewalld`, `NetworkManager`, `bluetooth`, `cups`).
    - Ispezione delle unità systemd fallite con visualizzatore log `journalctl`.
-   - Commutazione rapida tra 3 profili di rete IPv4 (DHCP o IP statico/CIDR/Gateway) e 3 profili DNS con campo annotazione URL DoH.
+   - Commutazione rapida tra 4 profili di rete IPv4 (DHCP o IP statico/CIDR/Gateway) e 4 profili DNS con campo annotazione URL DoH.
    - Scorciatoie per **Firewall di Plasma** e **YaST Rete (LAN)**.
 
 4. **Sistema & Boot**:
@@ -33,7 +33,7 @@ Centro di Controllo Operativo desktop in **C++20 / Qt 6 / KDE Kirigami 6** per *
 
 5. **Backup & Recovery**:
    - Avvio rapido di **Back In Time** per il backup dei dati personali.
-   - Rilevamento dello snapshot Btrfs attivo da `/proc/self/mountinfo` e annullamento transazioni `atomic-update` pendenti.
+   - Rilevamento dello snapshot Btrfs attivo da `/proc/self/mountinfo` e monitoraggio stato `atomic-update`.
    - Collegamento diretto a **YaST Snapper**.
 
 6. **Comandi**:
@@ -42,7 +42,7 @@ Centro di Controllo Operativo desktop in **C++20 / Qt 6 / KDE Kirigami 6** per *
    - **Utility Shell**: applicazione e ripristino di preset per il prompt Bash in `~/.bashrc` (con backup `~/.bashrc.bak`).
 
 7. **Strumenti & Fix**:
-   - **Manutenzione e recupero spazio**: svuotamento cestino utente, pulizia journal utente (`16M`), rimozione runtime Flatpak inutilizzati, pulizia miniature, pulizia cache Zypper e lancio di **QDirStat**.
+   - **Manutenzione e recupero spazio**: svuotamento cestino utente, pulizia journal di sistema (`16M` via PolKit), rimozione runtime Flatpak inutilizzati, pulizia miniature (con conferma), pulizia cache Zypper e lancio di **QDirStat**.
    - **Riparazioni e Fix Desktop**: riavvio dello stack utente PipeWire/WirePlumber e ricostruzione cache `kbuildsycoca6` / `fc-cache`.
    - **Sviluppo & Dispositivi**: avvio interfaccia di configurazione **Git** e gestione dispositivi **Android (ADB)** tramite `python3-mast`.
 

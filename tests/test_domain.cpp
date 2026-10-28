@@ -145,6 +145,13 @@ void DomainTest::testMountinfoActiveSnapshotDetection()
     int active = SlowrollBackend::parseActiveSnapshotFromMountinfo(sampleMountinfo);
     QCOMPARE(active, 39);
 
+    const QString multipleMountinfo = QStringLiteral(
+        "40 1 0:39 /0/.snapshots/39/snapshot / rw,noatime shared:1 - btrfs /dev/nvme0n1p9 rw,ssd,subvol=/0/.snapshots/39/snapshot\n"
+        "44 1 0:42 /0/.snapshots/42/snapshot / rw,noatime shared:1 - btrfs /dev/nvme0n1p9 rw,ssd,subvol=/0/.snapshots/42/snapshot\n"
+    );
+    int lastActive = SlowrollBackend::parseActiveSnapshotFromMountinfo(multipleMountinfo);
+    QCOMPARE(lastActive, 42);
+
     const QString nonBtrfsMountinfo = QStringLiteral(
         "44 1 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw\n"
     );
@@ -187,6 +194,7 @@ void DomainTest::testNetworkGatewayAndDnsValidation()
     QCOMPARE(servers.size(), 3);
 
     QVERIFY(!DesktopBackend::validateDns(QStringLiteral("1.1.1.1 invalid-dns")));
+    QVERIFY(!DesktopBackend::validateDns(QStringLiteral("2620:fe::fe")));
     QVERIFY(!DesktopBackend::validateDns(QStringLiteral("")));
 }
 
@@ -256,6 +264,35 @@ void DomainTest::testNetworkProfilesConfigPath()
     const QString expectedBase = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
     QVERIFY(path.startsWith(expectedBase));
     QVERIFY(path.endsWith(QStringLiteral("myslowroll-cc/network-profiles.json")));
+
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    const QString bakPath = path + QStringLiteral(".bak");
+    QFile::remove(path);
+    QFile::remove(bakPath);
+
+    QFile f1(path);
+    QVERIFY(f1.open(QIODevice::WriteOnly));
+    f1.write("{ PRIMA corruzione ");
+    f1.close();
+
+    DesktopBackend b1;
+    QVERIFY(QFile::exists(bakPath));
+    QFile bakFile(bakPath);
+    QVERIFY(bakFile.open(QIODevice::ReadOnly));
+    const QByteArray firstBakContent = bakFile.readAll();
+    bakFile.close();
+    QVERIFY(firstBakContent.contains("PRIMA corruzione"));
+
+    QFile f2(path);
+    QVERIFY(f2.open(QIODevice::WriteOnly));
+    f2.write("{ SECONDA corruzione ");
+    f2.close();
+
+    DesktopBackend b2;
+    QVERIFY(bakFile.open(QIODevice::ReadOnly));
+    const QByteArray secondBakContent = bakFile.readAll();
+    bakFile.close();
+    QCOMPARE(secondBakContent, firstBakContent);
 }
 
 void DomainTest::testCustomActionsCorruptRecovery()

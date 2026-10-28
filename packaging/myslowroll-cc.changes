@@ -1,4 +1,17 @@
 -------------------------------------------------------------------
+Fri Oct 23 15:42:00 UTC 2026 - Kris <kris@myslowrollos.org>
+
+- Feature update for mySlowrollOS Control Center 1.0.0:
+  * Added on-demand Privacy and Isolation mode (privacy.sh v3.0.1).
+  * Added hardware/software microphone toggle utility (mic.sh).
+  * Integrated Bluetooth monitoring and rfkill state handling.
+  * Added 4th IP/DNS network profile with DoH notation support.
+  * Integrated real-time atomic-update status monitoring.
+  * Updated PolKit policy for system-level journalctl vacuuming.
+  * Cleaned up rpmlintrc and hardened asynchronous process management.
+  * Aligned Kirigami action buttons and symmetrical UI columns.
+
+-------------------------------------------------------------------
 Mon Oct 19 12:00:00 UTC 2026 - Kris <kris@myslowrollos.org>
 
 - Initial package release 1.0.0 for openSUSE Slowroll / mySlowrollOS:

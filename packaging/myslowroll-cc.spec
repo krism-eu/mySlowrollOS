@@ -25,6 +25,9 @@ Requires:       qt6-declarative-imports
 Requires:       kf6-kirigami-imports
 Requires:       kf6-qqc2-desktop-style
 Requires:       polkit
+Requires:       procps
+Requires:       iproute2
+Recommends:     wireplumber
 Recommends:     snapper
 Recommends:     btrfsprogs
 Recommends:     efibootmgr

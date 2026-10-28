@@ -66,15 +66,18 @@ fail() {
 }
 
 load_config() {
-    [[ -f "$CONFIG_FILE" ]] || return 0
-    local owner mode
-    read -r owner mode < <(stat -c '%u %a' "$CONFIG_FILE")
+    [[ -f "$CONFIG_FILE" && ! -L "$CONFIG_FILE" ]] || return 0
+    local fd owner mode
+    exec {fd}< "$CONFIG_FILE" 2>/dev/null || return 0
+    read -r owner mode < <(stat -L -c '%u %a' "/dev/fd/${fd}" 2>/dev/null || echo "1 777")
     if [[ "$owner" != "0" ]] || (( 8#$mode & 8#022 )); then
+        exec {fd}<&-
         log "Config ${CONFIG_FILE} ignorata: deve essere di root e non scrivibile da group/other"
         return 0
     fi
     # shellcheck disable=SC1090
-    source "$CONFIG_FILE"
+    source "/dev/fd/${fd}"
+    exec {fd}<&-
 }
 
 require_root() {
@@ -350,10 +353,10 @@ net_enable() {
         if fw_zone_exists "$FIREWALL_ZONE"; then
             fw="yes"
         else
-            log "ATTENZIONE: zona firewall '$FIREWALL_ZONE' inesistente, firewall non modificato"
+            fail "zona firewall '$FIREWALL_ZONE' inesistente: isolamento di rete non applicato"
         fi
     else
-        log "ATTENZIONE: firewalld non attivo, firewall non modificato"
+        fail "firewalld non attivo: isolamento di rete non applicato"
     fi
 
     : > "${BACKUP_DIR}/net_state"

@@ -170,7 +170,7 @@ public:
     Q_INVOKABLE bool runCustomAction(const QString &id);
     Q_INVOKABLE void clearActionOutput();
 
-    Q_INVOKABLE void cleanTrash(const QString &scope);
+    Q_INVOKABLE void cleanTrash();
     Q_INVOKABLE void cleanJournal(int keepMb = 16);
     Q_INVOKABLE void cleanFlatpakUnused();
     Q_INVOKABLE void cleanZypperCache();

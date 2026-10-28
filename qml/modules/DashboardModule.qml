@@ -487,7 +487,7 @@ Kirigami.ScrollablePage {
             }
         }
 
-        onAccepted: DesktopBackend.cleanTrash("home")
+        onAccepted: DesktopBackend.cleanTrash()
     }
 
     Controls.Dialog {

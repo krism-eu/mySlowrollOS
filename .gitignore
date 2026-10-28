@@ -24,4 +24,7 @@ rpmbuild/
 
 # Unified sources & build lock
 myslowroll-cc-sorgenti-unificati.txt
+KSCC.txt
+KSCC-anonymized.txt
+*-anonymized.txt
 .build-rpm.lock/

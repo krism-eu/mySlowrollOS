@@ -183,7 +183,7 @@ bool DesktopBackend::validateDns(const QString &dns, QStringList *outDnsServers)
     QStringList cleanList;
     for (const QString &s : servers) {
         QHostAddress addr(s.trimmed());
-        if (addr.isNull()) return false;
+        if (addr.isNull() || addr.protocol() != QAbstractSocket::IPv4Protocol) return false;
         cleanList.append(s.trimmed());
     }
     if (outDnsServers) {
@@ -260,8 +260,10 @@ void DesktopBackend::setBusy(bool busy)
 {
     {
         QMutexLocker locker(&m_busyMutex);
-        if (m_busy == busy)
+        if (m_busy == busy) {
+            emit stateChanged();
             return;
+        }
         m_busy = busy;
     }
     emit stateChanged();
@@ -954,13 +956,11 @@ bool DesktopBackend::launchCustomScript(const QString &scriptName)
             }
         });
 
-        if (!isPrivacy) {
-            QPointer<QProcess> guard = proc;
-            QTimer::singleShot(60000, proc, [this, guard] {
-                if (guard && guard->state() != QProcess::NotRunning)
-                    terminateProcessGroup(guard.data(), true);
-            });
-        }
+        QPointer<QProcess> guard = proc;
+        QTimer::singleShot(isPrivacy ? 180000 : 60000, proc, [this, guard] {
+            if (guard && guard->state() != QProcess::NotRunning)
+                terminateProcessGroup(guard.data(), true);
+        });
 
         proc->start(QStringLiteral("bash"), {foundPath});
         if (!isMic) {
@@ -1280,7 +1280,9 @@ bool DesktopBackend::removeCustomAction(const QString &id)
         return false;
     }
 
+    m_actionError.clear();
     emit customActionsChanged();
+    emit actionStateChanged();
     return true;
 }
 
@@ -1337,14 +1339,26 @@ void DesktopBackend::clearActionOutput()
     emit actionStateChanged();
 }
 
-void DesktopBackend::cleanTrash(const QString &)
+void DesktopBackend::cleanTrash()
 {
-    const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
-    if (dataDir.isEmpty() || dataDir == QStringLiteral("/")) {
-        setMessage(tr("Percorso dati utente non valido."));
+    const QString homeClean = QDir::cleanPath(QDir::homePath());
+    const QString rawDataDir = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    const QString dataDir = QDir::cleanPath(rawDataDir);
+
+    if (homeClean.isEmpty() || homeClean == QStringLiteral("/") ||
+        dataDir.isEmpty() || !dataDir.startsWith(homeClean + QLatin1Char('/'))) {
+        setMessage(tr("Percorso dati utente non valido o esterno alla directory Home."));
         return;
     }
+
     const QString trashPath = dataDir + QStringLiteral("/Trash");
+    const QFileInfo dataInfo(dataDir);
+    const QFileInfo trashInfo(trashPath);
+    if (dataInfo.isSymLink() || (trashInfo.exists() && trashInfo.isSymLink())) {
+        setMessage(tr("Operazione annullata: il percorso del cestino contiene un collegamento simbolico."));
+        return;
+    }
+
     setMessage(tr("Svuotamento del cestino utente in corso..."));
     startProcess(QStringLiteral("rm"), {
         QStringLiteral("-rf"),
@@ -1364,7 +1378,7 @@ void DesktopBackend::cleanJournal(int keepMb)
     }
     const QString arg = QStringLiteral("--vacuum-size=%1M").arg(qMax(8, keepMb));
     setMessage(tr("Pulizia dei registri Journal in corso..."));
-    startProcess(QStringLiteral("pkexec"), {journalctl, arg}, QStringLiteral("journal-vacuum"), false, 60000);
+    startProcess(QStringLiteral("pkexec"), {journalctl, arg}, QStringLiteral("journal-vacuum"), false, 120000);
 }
 
 void DesktopBackend::cleanFlatpakUnused()
@@ -1388,7 +1402,7 @@ void DesktopBackend::cleanZypperCache()
     }
     setMessage(tr("Pulizia della cache Zypper e dei metadati in corso..."));
     startProcess(QStringLiteral("pkexec"), {zypper, QStringLiteral("clean"), QStringLiteral("--all")},
-                 QStringLiteral("zypper-clean"), false, 60000);
+                 QStringLiteral("zypper-clean"), false, 120000);
 }
 
 void DesktopBackend::cleanThumbnailCache()
@@ -1781,8 +1795,10 @@ void DesktopBackend::loadNetworkProfiles()
             file.close();
             const QJsonDocument doc = QJsonDocument::fromJson(data, &parseErr);
             if (parseErr.error != QJsonParseError::NoError || !doc.isObject()) {
-                QFile::remove(path + QStringLiteral(".bak"));
-                QFile::copy(path, path + QStringLiteral(".bak"));
+                const QString bakPath = path + QStringLiteral(".bak");
+                if (!QFile::exists(bakPath)) {
+                    QFile::copy(path, bakPath);
+                }
             } else {
                 const QJsonObject root = doc.object();
                 m_selectedIpPreset = root.value(QStringLiteral("selectedIpIndex")).toInt(0);

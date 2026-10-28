@@ -78,7 +78,7 @@ Target Operativo  : openSUSE Slowroll / KDE Plasma 6 / Qt 6.5+ / KF6 Kirigami
                                   installazione desktop file, icona, policy PolKit e metainfo.
   - build-rpm.sh                : Script di build tarball + rpmbuild locale con test e lock.
   - packaging/myslowroll-cc.spec: Specfile RPM per openSUSE Slowroll con Requires/Recommends completi.
-  - data/org.myslowrollos.controlcenter.policy : Policy PolKit con exec.path per atomic-update, efibootmgr e zypper.
+  - data/org.myslowrollos.controlcenter.policy : Policy PolKit con exec.path per journalctl, efibootmgr, zypper e privacy.sh.
   - data/org.myslowrollos.controlcenter.metainfo.xml : Metadati AppStream validati.
   - data/myslowroll-cc.desktop  : Desktop entry FreeDesktop/KDE.
   - generate-unified-sources.py : Script di esportazione deterministica dei sorgenti.
@@ -126,6 +126,34 @@ def generate():
     with open(OUTPUT_LOCAL, "w", encoding="utf-8") as f:
         f.write(full_output)
     print(f"File unificato locale generato: {OUTPUT_LOCAL} ({len(full_output.splitlines())} righe)")
+
+    # Salva KSCC.txt e KSCC-anonymized.txt esclusivamente all'interno del branch/directory KSCC
+    kscc_txt = os.path.join(PROJECT_ROOT, "KSCC.txt")
+    kscc_anon = os.path.join(PROJECT_ROOT, "KSCC-anonymized.txt")
+    with open(kscc_txt, "w", encoding="utf-8") as f:
+        f.write(full_output)
+    print(f"File unificato KSCC generato: {kscc_txt} ({len(full_output.splitlines())} righe)")
+
+    # Anonimizzazione riproducibile automatica
+    anon_output = full_output
+    rules = [
+        ("https://github.com/krism-eu/mySlowrollOS", "https://github.com/<GITHUB_USER>/mySlowrollOS", False),
+        ("krism-eu", "<GITHUB_USER>", False),
+        ("kris@myslowrollos.org", "<AUTHOR_USER>@myslowrollos.org", False),
+        (r"\bKris\b", "<AUTHOR_USER>", True),
+        (r"\bkris\b", "<AUTHOR_USER>", True),
+        ("192.168.11.50", "<PRIVATE_STATIC_IP_1>", False),
+        ("192.168.11.60", "<PRIVATE_STATIC_IP_2>", False),
+        ("192.168.11.1", "<PRIVATE_GATEWAY_IP>", False),
+    ]
+    for pat, repl, is_re in rules:
+        if is_re:
+            anon_output = re.sub(pat, repl, anon_output)
+        else:
+            anon_output = anon_output.replace(pat, repl)
+    with open(kscc_anon, "w", encoding="utf-8") as f:
+        f.write(anon_output)
+    print(f"File unificato anonimizzato generato: {kscc_anon} ({len(anon_output.splitlines())} righe)")
 
     target_artifact = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else ARTIFACT_PATH
     if target_artifact:
