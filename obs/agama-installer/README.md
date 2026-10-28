@@ -17,10 +17,11 @@ La ISO di installazione combina l'ambiente live ufficiale **Agama** con la perso
 3. **Setup semi-interattivo**:
    - Il kernel cmdline del bootloader avvia Agama con:
      ```text
-     inst.auto=file:///usr/share/myslowroll/profile-final.jsonnet inst.install=0
+     inst.auto=file:///usr/share/myslowroll/profile-final.jsonnet inst.install=0 inst.systemd_boot_preview=1
      ```
    - `inst.auto=file:///...`: pre-carica automaticamente la lista pacchetti (`criscore1/2`, `myslowroll-cc`, `atomic-update`), kernel, preset, zram e policy di sistema.
    - `inst.install=0`: impedisce l'installazione automatica non presidiata; la configurazione dischi/partizioni e le credenziali utente rimangono **completamente interattive**.
+   - `inst.systemd_boot_preview=1`: forza l'uso di systemd-boot/`sdbootutil` come bootloader del sistema installato, coerente con la post-chroot policy del progetto (opzione supportata da Agama v24 in Slowroll).
 4. **Repository mySlowrollOS integrato**:
    - I pacchetti protetti e il Control Center sono risolti dal repository `home:krism` (priorità 90).
 
