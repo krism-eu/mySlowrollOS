@@ -12,6 +12,7 @@ import pathlib
 import shutil
 import stat
 import sys
+import tarfile
 
 
 def compute_offline_profile(profile_path):
@@ -33,6 +34,64 @@ def compute_offline_profile(profile_path):
                 script["url"] = f"file:///usr/share/myslowroll/{rel_path}"
 
     return json.dumps(offline_profile, indent=2) + "\n"
+
+
+def pack_root_archive(script_dir):
+    root_dir = script_dir / "root"
+    archive_path = script_dir / "root.tar.gz"
+
+    with tarfile.open(archive_path, "w:gz") as tar:
+        for dirpath, dirs, files in os.walk(root_dir):
+            dirs.sort()
+            files.sort()
+            for d in dirs:
+                full_path = os.path.join(dirpath, d)
+                rel_path = os.path.relpath(full_path, root_dir)
+                info = tar.gettarinfo(full_path, arcname=rel_path)
+                info.uid = 0
+                info.gid = 0
+                info.uname = "root"
+                info.gname = "root"
+                info.mode = 0o755
+                tar.addfile(info)
+            for f in files:
+                full_path = os.path.join(dirpath, f)
+                rel_path = os.path.relpath(full_path, root_dir)
+                info = tar.gettarinfo(full_path, arcname=rel_path)
+                info.uid = 0
+                info.gid = 0
+                info.uname = "root"
+                info.gname = "root"
+                if os.access(full_path, os.X_OK):
+                    info.mode = 0o755
+                else:
+                    info.mode = 0o644
+                with open(full_path, "rb") as fp:
+                    tar.addfile(info, fp)
+    return archive_path
+
+
+def verify_root_archive(archive_path):
+    if not archive_path.is_file():
+        return ["root.tar.gz mancante"]
+    errors = []
+    try:
+        with tarfile.open(archive_path, "r:gz") as tar:
+            names = tar.getnames()
+            bad = [n for n in names if n.startswith("root/") or n.startswith("/") or n.startswith("./")]
+            if bad:
+                errors.append(f"root.tar.gz contiene prefissi non validi ({bad[:3]}...)")
+            required = [
+                "usr/share/myslowroll/profile-final.jsonnet",
+                "usr/lib/systemd/system/agama-kiosk.service",
+                "usr/libexec/myslowroll/wait-for-agama.sh",
+            ]
+            for req in required:
+                if req not in names:
+                    errors.append(f"root.tar.gz non contiene il file essenziale: {req}")
+    except Exception as e:
+        errors.append(f"Impossibile leggere root.tar.gz: {e}")
+    return errors
 
 
 def main():
@@ -95,6 +154,11 @@ def main():
         elif not os.access(kiosk_wait, os.X_OK):
             stale.append("kiosk launcher not executable: root/usr/libexec/myslowroll/wait-for-agama.sh")
 
+        # Verify root.tar.gz archive
+        archive_path = script_dir / "root.tar.gz"
+        archive_errors = verify_root_archive(archive_path)
+        stale.extend(archive_errors)
+
         if stale:
             print("ERROR: Out-of-date or drifted overlay assets in root/usr/share/myslowroll/:", file=sys.stderr)
             for err in stale:
@@ -102,6 +166,7 @@ def main():
             return 1
 
         print(f"PASS: {len(assets)} assets and offline profile match repository sources")
+        print(f"PASS: root.tar.gz verificato con successo (nessun prefisso non valido, tutti i file essenziali inclusi)")
         return 0
 
     # Write / sync mode
@@ -153,6 +218,16 @@ def main():
 
     print(f"PASS: {copied} assets copied to root/usr/share/myslowroll/")
     print("PASS: Offline profile generated at root/usr/share/myslowroll/profile-final.jsonnet (zero GitHub URLs, 100% local references validated)")
+
+    # Pacchettizzazione root.tar.gz per OBS (con path relativi 'usr/...' senza prefisso 'root/')
+    arch_file = pack_root_archive(script_dir)
+    arch_errors = verify_root_archive(arch_file)
+    if arch_errors:
+        print(f"ERROR: Verifica archivio {arch_file} fallita:", file=sys.stderr)
+        for err in arch_errors:
+            print(f"  - {err}", file=sys.stderr)
+        return 1
+    print(f"PASS: {arch_file.name} impacchettato e verificato con successo per OBS")
     return 0
 
 
