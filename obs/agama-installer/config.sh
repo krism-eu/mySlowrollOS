@@ -11,11 +11,17 @@ set -euo pipefail
 
 echo "=== [mySlowrollOS] Configurazione live image Agama Installer ==="
 
-# 1. Abilitazione servizi di rete e bus di sistema
+# 0. Sblocco utente root per ambiente Live (nessuna password richiesta)
+passwd -d root 2>/dev/null || true
+
+# 1. Preparazione directory e certificati Agama
+mkdir -p -m 0755 /etc/agama.d/ssl /run/agama
+
+# 2. Abilitazione servizi di rete e bus di sistema
 systemctl enable NetworkManager.service 2>/dev/null || true
 systemctl enable dbus.service 2>/dev/null || true
 
-# 2. Abilitazione backend e server web di Agama se presenti
+# 3. Abilitazione backend e server web di Agama se presenti
 for srv in agama.service agama-web-server.service cockpit.service; do
     if [ -f "/usr/lib/systemd/system/${srv}" ] || [ -f "/etc/systemd/system/${srv}" ]; then
         echo "Abilitazione servizio: ${srv}"

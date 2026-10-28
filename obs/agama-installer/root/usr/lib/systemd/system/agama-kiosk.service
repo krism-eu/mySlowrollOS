@@ -11,6 +11,8 @@ Environment=MOZ_ENABLE_WAYLAND=1
 Environment=XDG_RUNTIME_DIR=/run/user/0
 Environment=HOME=/root
 Environment=WLR_LIBINPUT_NO_DEVICES=1
+Environment=WLR_NO_HARDWARE_CURSORS=1
+Environment=WLR_RENDERER_ALLOW_SOFTWARE=1
 ExecStartPre=/usr/bin/mkdir -p -m 0700 /run/user/0
 ExecStartPre=/usr/libexec/myslowroll/wait-for-agama.sh
 ExecStart=/usr/bin/cage -s -- /usr/bin/firefox --kiosk --private-window http://localhost/
