@@ -11,19 +11,30 @@ set -euo pipefail
 
 echo "=== [mySlowrollOS] Configurazione live image Agama Installer ==="
 
-# 1. Abilitazione servizi essenziali per il live installer
+# 1. Abilitazione servizi di rete e bus di sistema
 systemctl enable NetworkManager.service 2>/dev/null || true
 systemctl enable dbus.service 2>/dev/null || true
 
-# 2. Abilitazione servizi Agama e sessione kiosk locale se installati
-for srv in agama.service agama-web-server.service cockpit.service cage.service; do
+# 2. Abilitazione backend e server web di Agama se presenti
+for srv in agama.service agama-web-server.service cockpit.service; do
     if [ -f "/usr/lib/systemd/system/${srv}" ] || [ -f "/etc/systemd/system/${srv}" ]; then
         echo "Abilitazione servizio: ${srv}"
         systemctl enable "${srv}" 2>/dev/null || true
     fi
 done
 
-# 3. Verifica profilo e asset mySlowrollOS
+# 3. Configurazione e abilitazione sessione Kiosk grafica locale (Wayland Cage + Firefox)
+if [ -f "/usr/lib/systemd/system/agama-kiosk.service" ] || [ -f "/etc/systemd/system/agama-kiosk.service" ]; then
+    echo "Abilitazione sessione grafica locale: agama-kiosk.service"
+    chmod 0644 /usr/lib/systemd/system/agama-kiosk.service 2>/dev/null || true
+    if [ -f "/usr/libexec/myslowroll/wait-for-agama.sh" ]; then
+        chmod 0755 /usr/libexec/myslowroll/wait-for-agama.sh
+    fi
+    systemctl enable agama-kiosk.service 2>/dev/null || true
+    systemctl set-default graphical.target 2>/dev/null || true
+fi
+
+# 4. Verifica profilo e asset mySlowrollOS
 PROFILE_PATH="/usr/share/myslowroll/profile-final.jsonnet"
 
 if [ ! -f "${PROFILE_PATH}" ]; then
@@ -32,7 +43,6 @@ if [ ! -f "${PROFILE_PATH}" ]; then
     exit 1
 fi
 
-# Imposta permessi corretti per il file del profilo
 chmod 0644 "${PROFILE_PATH}"
 chown root:root "${PROFILE_PATH}"
 
@@ -43,5 +53,5 @@ if grep -q "raw.githubusercontent.com" "${PROFILE_PATH}"; then
     exit 1
 fi
 
-echo "=== [mySlowrollOS] Profilo verificato con successo (autonomo, zero URL GitHub) ==="
+echo "=== [mySlowrollOS] Live image configurata con successo (kiosk attivo, zero URL GitHub) ==="
 exit 0

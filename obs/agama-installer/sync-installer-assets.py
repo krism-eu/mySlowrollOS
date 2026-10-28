@@ -84,6 +84,17 @@ def main():
         elif dst_profile.read_text() != expected_profile_content:
             stale.append("content mismatch: profile-final.jsonnet")
 
+        # Verify Kiosk systemd unit and launcher script
+        kiosk_service = script_dir / "root" / "usr" / "lib" / "systemd" / "system" / "agama-kiosk.service"
+        if not kiosk_service.is_file():
+            stale.append("missing kiosk unit: root/usr/lib/systemd/system/agama-kiosk.service")
+
+        kiosk_wait = script_dir / "root" / "usr" / "libexec" / "myslowroll" / "wait-for-agama.sh"
+        if not kiosk_wait.is_file():
+            stale.append("missing kiosk launcher: root/usr/libexec/myslowroll/wait-for-agama.sh")
+        elif not os.access(kiosk_wait, os.X_OK):
+            stale.append("kiosk launcher not executable: root/usr/libexec/myslowroll/wait-for-agama.sh")
+
         if stale:
             print("ERROR: Out-of-date or drifted overlay assets in root/usr/share/myslowroll/:", file=sys.stderr)
             for err in stale:

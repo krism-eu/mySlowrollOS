@@ -31,6 +31,8 @@ FILES_TO_INCLUDE = [
     "obs/agama-installer/config.sh",
     "obs/agama-installer/sync-installer-assets.py",
     "obs/agama-installer/test-recipe.sh",
+    "obs/agama-installer/root/usr/lib/systemd/system/agama-kiosk.service",
+    "obs/agama-installer/root/usr/libexec/myslowroll/wait-for-agama.sh",
     "myslowroll-workstation/myslowroll-workstation.spec",
     "myslowroll-workstation/myslowroll-workstation.changes",
     "myslowroll-workstation/LICENSE",

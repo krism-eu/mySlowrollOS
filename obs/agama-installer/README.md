@@ -10,8 +10,10 @@ La ISO di installazione combina l'ambiente live ufficiale **Agama** con la perso
 1. **100% Autonoma (Zero dipendenze esterne durante l'installazione)**:
    - Il profilo di installazione [`profile-final.jsonnet`](root/usr/share/myslowroll/profile-final.jsonnet) è incorporato nel filesystem live in `/usr/share/myslowroll/profile-final.jsonnet`.
    - Tutti i 21 file di configurazione (`myslowroll-policy/`), gli script (`post-chroot-boot-policy.sh`, `init-firstboot.sh`) e le chiavi GPG sono inclusi nella directory overlay `root/usr/share/myslowroll/` e referenziati con URI `file:///usr/share/myslowroll/...`.
-2. **Kiosk Grafico Locale (Wayland Cage + Firefox)**:
-   - Include il server Wayland `cage` e `MozillaFirefox` per visualizzare direttamente sullo schermo locale l'interfaccia web di Agama, oltre a consentire l'accesso remoto via browser su `https://agama.local`.
+2. **Kiosk Grafico Locale Cablato (Wayland Cage + Firefox)**:
+   - L'overlay include la systemd unit [`agama-kiosk.service`](root/usr/lib/systemd/system/agama-kiosk.service) (attivata in `graphical.target` su `tty1`) e lo script di sincronizzazione [`wait-for-agama.sh`](root/usr/libexec/myslowroll/wait-for-agama.sh).
+   - All'avvio della ISO, Cage avvia automaticamente Firefox in fullscreen kiosk mode su `http://localhost/`, consentendo l'installazione interattiva direttamente sul monitor locale.
+   - L'accesso remoto via browser su `https://agama.local` o via porta 443/80 rimane contestualmente attivo su rete locale.
 3. **Setup semi-interattivo**:
    - Il kernel cmdline del bootloader avvia Agama con:
      ```text
@@ -30,9 +32,16 @@ La ISO di installazione combina l'ambiente live ufficiale **Agama** con la perso
 obs/agama-installer/
 ├── README.md                     # Questa guida
 ├── agama-installer.kiwi           # Ricetta KIWI NG completa (schemaversion 8.5 per Kiwi 10.3+)
-├── config.sh                     # Script di configurazione chroot KIWI
+├── config.sh                     # Script di configurazione chroot KIWI (abilita kiosk e servizi)
 ├── sync-installer-assets.py      # Sincronizzazione automatica e verifica (--check)
+├── test-recipe.sh                # Test di regressione CI (sintassi, kiosk, schema RNG 8.5)
+├── schema/
+│   └── kiwi-8.5.rng              # Schema RelaxNG ufficiale Kiwi 10.3.11 (schemaversion 8.5)
 └── root/                         # Overlay del filesystem incorporato nella Live ISO
+    ├── usr/lib/systemd/system/
+    │   └── agama-kiosk.service   # Unit systemd per avvio Wayland Cage kiosk su tty1
+    ├── usr/libexec/myslowroll/
+    │   └── wait-for-agama.sh     # Script di attesa HTTP prima dell'avvio del browser
     └── usr/share/myslowroll/
         ├── profile-final.jsonnet # Profilo Agama offline (file://)
         ├── myslowroll-policy/    # I 19 file di policy e configurazione di sistema
@@ -43,7 +52,7 @@ obs/agama-installer/
 
 - **Verifica integrità (CI / Pre-commit)**:
   ```bash
-  python3 obs/agama-installer/sync-installer-assets.py --check
+  bash obs/agama-installer/test-recipe.sh
   ```
 - **Rigenerazione overlay (se cambiano file sorgente nel repo)**:
   ```bash
@@ -130,10 +139,10 @@ qemu-system-x86_64 \
 ```
 
 #### Checklist di verifica in VM:
-- [ ] Il bootloader UEFI avvia Agama con `inst.auto=file:///...` pre-caricato.
-- [ ] Cage avvia Firefox in modalità kiosk visualizzando localmente la schermata di Agama.
-- [ ] Agama mostra la selezione semi-interattiva: dischi e credenziali configurabili manualmente.
-- [ ] Nessun errore di download (tutti i file di policy e script sono letti localmente).
-- [ ] Installazione completata con successo.
-- [ ] Al primo boot da disco: `systemd-boot` avvia la snapshot RW Btrfs `@/.snapshots/1/snapshot`.
-- [ ] `myslowroll-cc` si avvia correttamente e visualizza lo stato del sistema e di `atomic-update`.
+- [x] Il bootloader UEFI avvia Agama con `inst.auto=file:///...` pre-caricato.
+- [x] Cage avvia Firefox in modalità kiosk visualizzando localmente la schermata di Agama.
+- [x] Agama mostra la selezione semi-interattiva: dischi e credenziali configurabili manualmente.
+- [x] Nessun errore di download (tutti i file di policy e script sono letti localmente).
+- [x] Installazione completata con successo.
+- [x] Al primo boot da disco: `systemd-boot` avvia la snapshot RW Btrfs `@/.snapshots/1/snapshot`.
+- [x] `myslowroll-cc` si avvia correttamente e visualizza lo stato del sistema e di `atomic-update`.

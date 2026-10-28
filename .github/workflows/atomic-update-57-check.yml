@@ -11,6 +11,7 @@ on:
       - 'agama/**'
       - 'core/**'
       - 'obs/criscore1/**'
+      - 'obs/agama-installer/**'
       - 'myslowroll-workstation/**'
       - '.github/workflows/atomic-update-57-check.yml'
   pull_request:
@@ -20,6 +21,7 @@ on:
       - 'agama/**'
       - 'core/**'
       - 'obs/criscore1/**'
+      - 'obs/agama-installer/**'
       - 'myslowroll-workstation/**'
       - '.github/workflows/atomic-update-57-check.yml'
 
@@ -30,23 +32,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Install ShellCheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Install ShellCheck and libxml2-utils
+        run: sudo apt-get update && sudo apt-get install -y shellcheck libxml2-utils
       - name: Run ShellCheck
         shell: bash
-        run: shellcheck --severity=error atomic-update/atomic-update-5.7.1.sh atomic-update/tests/*.sh agama/*.sh agama/tests/*.sh
+        run: shellcheck --severity=error atomic-update/atomic-update-5.7.1.sh atomic-update/tests/*.sh agama/*.sh agama/tests/*.sh obs/agama-installer/*.sh obs/agama-installer/root/usr/libexec/myslowroll/*.sh
       # Run these before the revision-pin check: intermediate work-branch
       # commits intentionally defer asset/profile regeneration until final review.
       - name: Early shell syntax and firstboot self-test
         shell: bash
         run: |
           set -euo pipefail
-          for script in atomic-update/atomic-update-5.7.1.sh agama/*.sh agama/tests/*.sh; do
+          for script in atomic-update/atomic-update-5.7.1.sh agama/*.sh agama/tests/*.sh obs/agama-installer/*.sh obs/agama-installer/root/usr/libexec/myslowroll/*.sh; do
             bash -n "$script"
           done
           test "$(grep -Fc 'exit "$firstboot_rc"' agama/init-firstboot.sh)" -eq 1
           bash agama/init-firstboot.sh --self-test
           bash agama/post-chroot-boot-policy.sh --self-test
+      - name: Validate Agama installer KIWI recipe and overlay
+        shell: bash
+        run: bash obs/agama-installer/test-recipe.sh
       # The work branch intentionally batches installer changes before one
       # final assets-revision/profile generation. Never weaken main or PR gates.
       - name: Check generated criscore spec
