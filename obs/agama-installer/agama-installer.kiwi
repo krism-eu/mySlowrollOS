@@ -39,7 +39,7 @@
         <source path="obs://openSUSE:Slowroll/standard"/>
     </repository>
 
-    <!-- Live Environment System Packages -->
+    <!-- Live Environment System Packages (verified against Slowroll repo metadata) -->
     <packages type="image">
         <!-- Kernel & Live Boot Architecture -->
         <package name="kernel-default"/>
@@ -49,11 +49,9 @@
         <package name="grub2-x86_64-efi"/>
         <package name="shim"/>
         <package name="systemd"/>
-        <package name="systemd-sysvcompat"/>
         <package name="udev"/>
         <package name="dbus-1"/>
         <package name="NetworkManager"/>
-        <package name="NetworkManager-wifi"/>
 
         <!-- Filesystem & Disk Management Tools -->
         <package name="btrfsprogs"/>
@@ -68,11 +66,11 @@
         <package name="iproute2"/>
         <package name="squashfs"/>
 
-        <!-- Agama Installer Engine, Web Server & CLI -->
+        <!-- Agama Installer Engine, Web UI & CLI -->
         <package name="agama"/>
         <package name="agama-cli"/>
-        <package name="agama-web-server"/>
-        <package name="agama-auto"/>
+        <package name="agama-web-ui"/>
+        <package name="agama-autoinstall"/>
 
         <!-- Local Graphical Kiosk (Wayland Cage + Firefox) -->
         <package name="cage"/>
