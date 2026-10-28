@@ -19,7 +19,7 @@
               mediacheck="true"
               flags="overlay"
               volid="mySlowrollOS_Install"
-              kernelcmdline="inst.auto=file:///usr/share/myslowroll/profile-final.jsonnet inst.install=0 inst.systemd_boot_preview=1">
+              kernelcmdline="inst.auto=file:///usr/share/myslowroll/profile-final.jsonnet inst.install=0 inst.systemd_boot_preview=1 live.password=root">
             <bootloader name="grub2"/>
         </type>
         <version>1.0.0</version>

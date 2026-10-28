@@ -11,8 +11,8 @@ set -euo pipefail
 
 echo "=== [mySlowrollOS] Configurazione live image Agama Installer ==="
 
-# 0. Sblocco utente root per ambiente Live (nessuna password richiesta)
-passwd -d root 2>/dev/null || true
+# 0. Impostazione password root per ambiente Live (utente: root / password: root)
+echo "root:root" | chpasswd
 
 # 1. Preparazione directory e certificati Agama
 mkdir -p -m 0755 /etc/agama.d/ssl /run/agama
