@@ -90,4 +90,9 @@
         <package name="openSUSE-release"/>
         <package name="openSUSE-release-appliance-custom"/>
     </packages>
+
+    <!-- System Users and Credentials (guarantees root password 'root' in /etc/shadow) -->
+    <users>
+        <user name="root" password="root" pwdformat="plain" home="/root" groups="root"/>
+    </users>
 </image>
