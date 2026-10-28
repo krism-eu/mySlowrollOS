@@ -72,6 +72,7 @@
         <!-- Local Graphical Kiosk (Wayland Cage + Firefox) -->
         <package name="cage"/>
         <package name="MozillaFirefox"/>
+        <package name="MozillaFirefox-branding-openSUSE"/>
         <package name="xwayland"/>
         <package name="Mesa-dri"/>
         <package name="google-noto-sans-fonts"/>
@@ -82,5 +83,6 @@
         <package name="filesystem"/>
         <package name="glibc-locale-base"/>
         <package name="openSUSE-release"/>
+        <package name="openSUSE-release-appliance-custom"/>
     </packages>
 </image>
