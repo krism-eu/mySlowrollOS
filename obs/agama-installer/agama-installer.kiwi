@@ -75,12 +75,6 @@
         <package name="xwayland"/>
         <package name="Mesa-dri"/>
         <package name="google-noto-sans-fonts"/>
-
-        <!-- mySlowrollOS Core & Control Center -->
-        <package name="criscore1"/>
-        <package name="criscore2"/>
-        <package name="myslowroll-cc"/>
-        <package name="atomic-update"/>
     </packages>
 
     <!-- Minimal Bootstrap Packages -->
