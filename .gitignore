@@ -3,3 +3,4 @@
 *.code-workspace
 mySlowrollOS.txt
 mySlowrollOS-anonymized.txt
+*.tar.gz
