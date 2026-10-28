@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     mySlowrollOS Agama Live Installer
-    KIWI NG image recipe for openSUSE Slowroll / OBS
+    KIWI NG image recipe for openSUSE Slowroll / OBS (kiwi 10.3.11+, schemaversion 8.5)
     Generates a bootable Live ISO that launches Agama semi-interactively
-    with embedded offline profile and pre-configured repository/policy settings.
+    with embedded offline profile, Wayland Cage kiosk UI, and pre-configured repository/policy settings.
 -->
-<image schemaversion="7.4" name="agama-installer">
+<image schemaversion="8.5" name="agama-installer">
     <description type="system">
         <author>openSUSE / mySlowrollOS</author>
         <contact>https://github.com/krism-eu/mySlowrollOS</contact>
@@ -15,20 +15,18 @@
     <preferences>
         <type image="iso"
               firmware="uefi"
-              hybrid="true"
               hybridpersistent="false"
               mediacheck="true"
               flags="overlay"
-              volid="mySlowrollOS_Install">
-            <bootloader name="grub2" console="gfxterm">
-                <bootoptions>inst.auto=file:///usr/share/myslowroll/profile-final.jsonnet inst.install=0</bootoptions>
-            </bootloader>
+              volid="mySlowrollOS_Install"
+              kernelcmdline="inst.auto=file:///usr/share/myslowroll/profile-final.jsonnet inst.install=0">
+            <bootloader name="grub2" output_console="gfxterm"/>
         </type>
         <version>1.0.0</version>
         <packagemanager>zypper</packagemanager>
         <rpm-check-signatures>false</rpm-check-signatures>
         <rpm-excludedocs>true</rpm-excludedocs>
-        <locale>it_IT.UTF-8</locale>
+        <locale>it_IT</locale>
         <keytable>it.map.gz</keytable>
         <timezone>Europe/Rome</timezone>
     </preferences>
@@ -48,7 +46,6 @@
         <package name="kernel-firmware-all"/>
         <package name="dracut"/>
         <package name="dracut-kiwi-live"/>
-        <package name="grub2"/>
         <package name="grub2-x86_64-efi"/>
         <package name="shim"/>
         <package name="systemd"/>
@@ -69,12 +66,20 @@
         <package name="gzip"/>
         <package name="curl"/>
         <package name="iproute2"/>
+        <package name="squashfs"/>
 
-        <!-- Agama Installer Engine & Frontend -->
+        <!-- Agama Installer Engine, Web Server & CLI -->
         <package name="agama"/>
         <package name="agama-cli"/>
         <package name="agama-web-server"/>
         <package name="agama-auto"/>
+
+        <!-- Local Graphical Kiosk (Wayland Cage + Firefox) -->
+        <package name="cage"/>
+        <package name="MozillaFirefox"/>
+        <package name="xwayland"/>
+        <package name="Mesa-dri"/>
+        <package name="google-noto-sans-fonts"/>
 
         <!-- mySlowrollOS Core & Control Center -->
         <package name="criscore1"/>

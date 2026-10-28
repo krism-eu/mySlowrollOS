@@ -15,15 +15,15 @@ echo "=== [mySlowrollOS] Configurazione live image Agama Installer ==="
 systemctl enable NetworkManager.service 2>/dev/null || true
 systemctl enable dbus.service 2>/dev/null || true
 
-# Abilitazione servizi Agama se presenti
-for srv in agama.service agama-web-server.service cockpit.service; do
-    if systemctl list-unit-files "$srv" &>/dev/null; then
-        echo "Abilitazione servizio: $srv"
-        systemctl enable "$srv" 2>/dev/null || true
+# 2. Abilitazione servizi Agama e sessione kiosk locale se installati
+for srv in agama.service agama-web-server.service cockpit.service cage.service; do
+    if [ -f "/usr/lib/systemd/system/${srv}" ] || [ -f "/etc/systemd/system/${srv}" ]; then
+        echo "Abilitazione servizio: ${srv}"
+        systemctl enable "${srv}" 2>/dev/null || true
     fi
 done
 
-# 2. Verifica profilo e asset mySlowrollOS (inclusione di config.sh.delta)
+# 3. Verifica profilo e asset mySlowrollOS
 PROFILE_PATH="/usr/share/myslowroll/profile-final.jsonnet"
 
 if [ ! -f "${PROFILE_PATH}" ]; then
