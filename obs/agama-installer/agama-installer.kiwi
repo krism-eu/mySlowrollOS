@@ -72,6 +72,7 @@
         <package name="agama-cli"/>
         <package name="agama-web-ui"/>
         <package name="agama-autoinstall"/>
+        <package name="agama-products-opensuse"/>
 
         <!-- Local Graphical Kiosk (Wayland Cage + Firefox) -->
         <package name="cage"/>
