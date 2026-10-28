@@ -27,7 +27,7 @@
         <rpm-check-signatures>false</rpm-check-signatures>
         <rpm-excludedocs>true</rpm-excludedocs>
         <locale>it_IT</locale>
-        <keytable>it.map.gz</keytable>
+        <keytable>it</keytable>
         <timezone>Europe/Rome</timezone>
     </preferences>
 
@@ -49,6 +49,7 @@
         <package name="udev"/>
         <package name="dbus-1"/>
         <package name="NetworkManager"/>
+        <package name="kbd"/>
 
         <!-- Filesystem & Disk Management Tools -->
         <package name="btrfsprogs"/>
