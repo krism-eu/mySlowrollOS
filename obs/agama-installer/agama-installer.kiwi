@@ -31,12 +31,9 @@
         <timezone>Europe/Rome</timezone>
     </preferences>
 
-    <!-- Repositories: OBS Home (krism) and Slowroll Standard -->
-    <repository type="rpm-md" priority="90" alias="home_krism">
-        <source path="obs://home:krism/openSUSE_Slowroll"/>
-    </repository>
-    <repository type="rpm-md" priority="99" alias="repo-oss">
-        <source path="obs://openSUSE:Slowroll/standard"/>
+    <!-- Repository: OBS injected repositories (Slowroll Standard + home:krism) -->
+    <repository type="rpm-md">
+        <source path="obsrepositories:/"/>
     </repository>
 
     <!-- Live Environment System Packages (verified against Slowroll repo metadata) -->
