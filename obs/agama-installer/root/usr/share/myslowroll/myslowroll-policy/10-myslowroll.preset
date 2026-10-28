@@ -1,0 +1,20 @@
+enable NetworkManager.service
+enable bluetooth.service
+enable firewalld.service
+disable NetworkManager-wait-online.service
+disable ModemManager.service
+disable smartd.service
+disable smartd_generate_opts.path
+disable snapper-timeline.timer
+disable sshd.service
+disable sshd.socket
+disable display-manager-legacy.service
+# Btrfs maintenance timers: no duplicate auto maintenance.
+disable btrfs-balance.timer
+disable btrfs-defrag.timer
+disable btrfs-trim.timer
+enable btrfs-scrub.timer
+enable fstrim.timer
+enable chronyd.service
+enable apparmor.service
+enable snapper-cleanup.timer

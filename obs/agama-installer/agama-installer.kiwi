@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    mySlowrollOS Agama Live Installer
+    KIWI NG image recipe for openSUSE Slowroll / OBS
+    Generates a bootable Live ISO that launches Agama semi-interactively
+    with embedded offline profile and pre-configured repository/policy settings.
+-->
+<image schemaversion="7.4" name="agama-installer">
+    <description type="system">
+        <author>openSUSE / mySlowrollOS</author>
+        <contact>https://github.com/krism-eu/mySlowrollOS</contact>
+        <specification>mySlowrollOS Agama Live Installer</specification>
+    </description>
+
+    <preferences>
+        <type image="iso"
+              firmware="uefi"
+              hybrid="true"
+              hybridpersistent="false"
+              mediacheck="true"
+              flags="overlay"
+              volid="mySlowrollOS_Install">
+            <bootloader name="grub2" console="gfxterm">
+                <bootoptions>inst.auto=file:///usr/share/myslowroll/profile-final.jsonnet inst.install=0</bootoptions>
+            </bootloader>
+        </type>
+        <version>1.0.0</version>
+        <packagemanager>zypper</packagemanager>
+        <rpm-check-signatures>false</rpm-check-signatures>
+        <rpm-excludedocs>true</rpm-excludedocs>
+        <locale>it_IT.UTF-8</locale>
+        <keytable>it.map.gz</keytable>
+        <timezone>Europe/Rome</timezone>
+    </preferences>
+
+    <!-- Repositories: OBS Home (krism) and Slowroll Standard -->
+    <repository type="rpm-md" priority="90" alias="home_krism">
+        <source path="obs://home:krism/openSUSE_Slowroll"/>
+    </repository>
+    <repository type="rpm-md" priority="99" alias="repo-oss">
+        <source path="obs://openSUSE:Slowroll/standard"/>
+    </repository>
+
+    <!-- Live Environment System Packages -->
+    <packages type="image">
+        <!-- Kernel & Live Boot Architecture -->
+        <package name="kernel-default"/>
+        <package name="kernel-firmware-all"/>
+        <package name="dracut"/>
+        <package name="dracut-kiwi-live"/>
+        <package name="grub2"/>
+        <package name="grub2-x86_64-efi"/>
+        <package name="shim"/>
+        <package name="systemd"/>
+        <package name="systemd-sysvcompat"/>
+        <package name="udev"/>
+        <package name="dbus-1"/>
+        <package name="NetworkManager"/>
+        <package name="NetworkManager-wifi"/>
+
+        <!-- Filesystem & Disk Management Tools -->
+        <package name="btrfsprogs"/>
+        <package name="dosfstools"/>
+        <package name="e2fsprogs"/>
+        <package name="xfsprogs"/>
+        <package name="parted"/>
+        <package name="util-linux"/>
+        <package name="tar"/>
+        <package name="gzip"/>
+        <package name="curl"/>
+        <package name="iproute2"/>
+
+        <!-- Agama Installer Engine & Frontend -->
+        <package name="agama"/>
+        <package name="agama-cli"/>
+        <package name="agama-web-server"/>
+        <package name="agama-auto"/>
+
+        <!-- mySlowrollOS Core & Control Center -->
+        <package name="criscore1"/>
+        <package name="criscore2"/>
+        <package name="myslowroll-cc"/>
+        <package name="atomic-update"/>
+    </packages>
+
+    <!-- Minimal Bootstrap Packages -->
+    <packages type="bootstrap">
+        <package name="filesystem"/>
+        <package name="glibc-locale-base"/>
+        <package name="openSUSE-release"/>
+    </packages>
+</image>
