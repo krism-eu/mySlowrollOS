@@ -37,8 +37,15 @@ systemctl enable NetworkManager.service 2>/dev/null || true
 systemctl enable dbus.socket 2>/dev/null || true
 systemctl enable systemd-logind.service 2>/dev/null || true
 
-# 3. Abilitazione backend e server web di Agama se presenti
-for srv in agama.service agama-web-server.service cockpit.service; do
+# 3. Abilitazione completa stack Agama (D-Bus privato, cmdline, autoinstall e web server)
+for srv in \
+    agama-dbus-monitor.service \
+    agama-proxy-setup.service \
+    agama-cmdline-process.service \
+    agama.service \
+    agama-web-server.service \
+    agama-autoinstall.service \
+    cockpit.service; do
     if [ -f "/usr/lib/systemd/system/${srv}" ] || [ -f "/etc/systemd/system/${srv}" ]; then
         echo "Abilitazione servizio: ${srv}"
         systemctl enable "${srv}" 2>/dev/null || true
