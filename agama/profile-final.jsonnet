@@ -209,97 +209,97 @@
     {
       "destination": "/etc/systemd/system-preset/10-myslowroll.preset",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/10-myslowroll.preset"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/10-myslowroll.preset"
     },
     {
       "destination": "/etc/sysctl.d/20-myslowroll-disable-ipv6.conf",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/20-myslowroll-disable-ipv6.conf"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/20-myslowroll-disable-ipv6.conf"
     },
     {
       "destination": "/etc/systemd/journald.conf.d/10-myslowroll.conf",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/10-myslowroll-journald.conf"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/10-myslowroll-journald.conf"
     },
     {
       "destination": "/etc/sddm.conf.d/10-myslowroll-wayland.conf",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/10-myslowroll-wayland.conf"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/10-myslowroll-wayland.conf"
     },
     {
       "destination": "/etc/sddm.conf.d/90-myslowroll-fallback.conf",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/90-myslowroll-sddm-fallback.conf"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/90-myslowroll-sddm-fallback.conf"
     },
     {
       "destination": "/etc/zypp/zypp.conf.d/90-myslowroll.conf",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/90-myslowroll-zypp.conf"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/90-myslowroll-zypp.conf"
     },
     {
       "destination": "/etc/zypp/repos.d/home_krism.repo",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/home_krism.repo"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/home_krism.repo"
     },
     {
       "destination": "/etc/zypp/repos.d/home_krism.key",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/agama/keys/home_krism.asc"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/agama/keys/home_krism.asc"
     },
     {
       "destination": "/etc/sudoers.d/99-myslowroll-passwordless-admin",
       "permissions": "0440",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/99-myslowroll-passwordless-admin"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/99-myslowroll-passwordless-admin"
     },
     {
       "destination": "/etc/polkit-1/rules.d/10-myslowroll-passwordless-admin.rules",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/10-myslowroll-passwordless-admin.rules"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/10-myslowroll-passwordless-admin.rules"
     },
     {
       "destination": "/etc/xdg/kdesurc",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/kdesurc"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/kdesurc"
     },
     {
       "destination": "/etc/kernel/cmdline",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/kernel-cmdline"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/kernel-cmdline"
     },
     {
       "destination": "/etc/systemd/zram-generator.conf.d/10-myslowroll.conf",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/10-myslowroll-zram.conf"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/10-myslowroll-zram.conf"
     },
     {
       "destination": "/var/lib/NetworkManager/NetworkManager.state",
       "permissions": "0600",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/NetworkManager.state"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/NetworkManager.state"
     },
     {
       "destination": "/etc/bluetooth/main.conf",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/90-myslowroll-bluez.conf"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/90-myslowroll-bluez.conf"
     },
     {
       "destination": "/etc/xdg/kcminputrc",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/kcminputrc"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/kcminputrc"
     },
     {
       "destination": "/usr/share/sddm/themes/breeze/theme.conf.user",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/90-myslowroll-sddm-theme.conf"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/90-myslowroll-sddm-theme.conf"
     },
     {
       "destination": "/var/lib/myslowroll/wallpaper.png",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/wallpaper.png"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/wallpaper.png"
     },
     {
       "destination": "/var/lib/myslowroll/backintime-autostart-disabled.desktop",
       "permissions": "0644",
-      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/myslowroll-policy/backintime-autostart-disabled.desktop"
+      "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/myslowroll-policy/backintime-autostart-disabled.desktop"
     }
   ],
   "scripts": {
@@ -307,13 +307,13 @@
       {
         "name": "myslowroll-native-sddm-before-first-boot",
         "chroot": true,
-        "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/agama/post-chroot-boot-policy.sh"
+        "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/agama/post-chroot-boot-policy.sh"
       }
     ],
     "init": [
       {
         "name": "myslowroll-firstboot-policy",
-        "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/61a43a5626e16ea99e81adb47b2e2544077913b8/agama/init-firstboot.sh"
+        "url": "https://raw.githubusercontent.com/krism-eu/mySlowrollOS/340f3387be46835d173b21285ea9c9f4ba68f902/agama/init-firstboot.sh"
       }
     ]
   },
