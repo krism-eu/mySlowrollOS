@@ -138,6 +138,7 @@ EOF
   mv "$recv_sub" "$mnt/@golden"
   # default subvolume -> golden
   btrfs subvolume set-default "$mnt/@golden" 2>/dev/null || true
+  rmdir "$mnt/@golden/.snapshots" 2>/dev/null || true
   btrfs subvolume create "$mnt/@golden/.snapshots" 2>/dev/null || true
 
   # vecchie UUID dal fstab ricevuto
@@ -150,10 +151,12 @@ EOF
   new_esp=$(blkid -s UUID -o value "$esp_part")
 
   log "aggiorno UUID: root=${newuuid} esp=${new_esp}"
+  # riga swap hardware rimossa: il disco di destinazione non ha swap e lo zram lo copre
+  sed -i "\#^[^#]*[[:space:]]swap[[:space:]]+#d" "$mnt/@golden/etc/fstab"
+  # path subvol /0/... -> /@golden/...
+  sed -i 's#subvol=/0/#subvol=/@golden/#g' "$mnt/@golden/etc/fstab"
   rewrite_fstab_uuids "$mnt/@golden/etc/fstab" "${old_root}:${newuuid}" "${old_esp}:${new_esp}"
-  if [ -n "${old_swap:-}" ]; then
-    log "swap non ricreato automaticamente: riga swap lasciata (la correggi con mkswap se serve)"
-  fi
+  log "fstab aggiornato: swap hardware rimosso, subvol /0/ riscritti"
   if [ -f "$mnt/@golden/etc/kernel/cmdline" ]; then
     rewrite_cmdline_root "$mnt/@golden/etc/kernel/cmdline" "$newuuid"
   fi
@@ -168,6 +171,11 @@ EOF
     || log "sdbootutil add-all-kernels fallito: verificare a mano dopo il reboot"
   # riscrivi le entrate gia' generate con la vecchia UUID
   rewrite_boot_entries "$mnt/@golden/boot/loader/entries" "${old_root}" "${newuuid}"
+  # sdbootutil in chroot senza efivars puo' generare "root=UUID=" vuoto: lo forziamo
+  for _e in "$mnt/@golden/boot/loader/entries/"*.conf; do
+    [ -e "$_e" ] || continue
+    sed -i "s#root=UUID=[^ ]*#root=UUID=${newuuid}#" "$_e"
+  done
 
   umount -R "$mnt/@golden/dev" "$mnt/@golden/proc" "$mnt/@golden/sys" 2>/dev/null || true
   umount "$mnt/@golden/boot" 2>/dev/null || true
