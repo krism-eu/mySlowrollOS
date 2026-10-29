@@ -368,11 +368,12 @@ MIME_PRE
   exit 0
 fi
 
-install -d -m 0755 /etc/systemd/system
+install -d -m 0755 /etc/systemd/system /etc/systemd/system/graphical.target.wants
 ln -sfn /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
 rm -f /etc/systemd/system/graphical.target.wants/display-manager-legacy.service
 rm -f /etc/systemd/system/display-manager.service
-ln -s /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service
+ln -sfn /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service
+ln -sfn /usr/lib/systemd/system/sddm.service /etc/systemd/system/graphical.target.wants/display-manager.service
 
 # SDDM Wayland uses the greeter account's kcminputrc as well as Numlock=on.
 # Do not assume the login user's personal config controls the greeter.

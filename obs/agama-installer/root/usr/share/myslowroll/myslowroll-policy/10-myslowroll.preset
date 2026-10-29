@@ -1,6 +1,8 @@
 enable NetworkManager.service
 enable bluetooth.service
 enable firewalld.service
+enable display-manager.service
+enable sddm.service
 disable NetworkManager-wait-online.service
 disable ModemManager.service
 disable smartd.service
