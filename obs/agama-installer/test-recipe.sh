@@ -16,6 +16,19 @@ echo "=== [2/5] Verifica integrità overlay e profilo offline ==="
 python3 "${SCRIPT_DIR}/sync-installer-assets.py" --check
 echo "PASS: sync-installer-assets.py --check superato"
 
+echo "=== [2b/5] Verifica shim agama-cmdline-process (root cause autoinstall fallito) ==="
+CMDLINE_UNIT="${SCRIPT_DIR}/root/usr/lib/systemd/system/agama-cmdline-process.service"
+CMDLINE_SH="${SCRIPT_DIR}/root/usr/libexec/myslowroll/agama-cmdline-process.sh"
+test -f "${CMDLINE_UNIT}" || { echo "ERRORE: mancante ${CMDLINE_UNIT}" >&2; exit 1; }
+test -f "${CMDLINE_SH}"   || { echo "ERRORE: mancante ${CMDLINE_SH}" >&2; exit 1; }
+grep -q "WantedBy=multi-user.target" "${CMDLINE_UNIT}" || { echo "ERRORE: unit non installabile in multi-user.target" >&2; exit 1; }
+grep -q "Before=.*agama-autoinstall.service" "${CMDLINE_UNIT}" || { echo "ERRORE: unit senza ordering Before=agama-autoinstall" >&2; exit 1; }
+bash -n "${CMDLINE_SH}"
+grep -q "CMDLINE_DIR}/agama.conf" "${CMDLINE_SH}" || { echo "ERRORE: script non scrive cmdline.d/agama.conf" >&2; exit 1; }
+grep -q "CMDLINE_DIR}/kernel.conf" "${CMDLINE_SH}" || { echo "ERRORE: script non scrive cmdline.d/kernel.conf" >&2; exit 1; }
+test "$(stat -c '%a' "${CMDLINE_SH}")" = "755" || { echo "ERRORE: permessi ${CMDLINE_SH} != 0755" >&2; exit 1; }
+echo "PASS: shim agama-cmdline-process presente, ordinato prima di agama-autoinstall, scrive cmdline.d"
+
 echo "=== [3/5] Verifica cablaggio sessione Kiosk (Cage + Firefox + Input + Policies) ==="
 KIOSK_SERVICE="${SCRIPT_DIR}/root/usr/lib/systemd/system/agama-kiosk.service"
 if [ ! -f "$KIOSK_SERVICE" ]; then

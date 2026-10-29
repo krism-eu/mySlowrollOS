@@ -1,0 +1,16 @@
+[Unit]
+Description=Write Agama kernel cmdline files for autoinstall (mySlowrollOS shim)
+Documentation=https://github.com/krism-eu/mySlowrollOS
+# Nelle ISO live ufficiali Agama questo servizio arriva dall'initrd; nelle
+# immagini live KIWI non viene spedito e e /run/agama/cmdline.d/agama.conf
+# resta assente, facendo fallire agama-autoinstall (inst.auto ignorato).
+After=systemd-tmpfiles-setup.service
+Before=agama.service agama-web-server.service agama-autoinstall.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/myslowroll/agama-cmdline-process.sh
+
+[Install]
+WantedBy=multi-user.target

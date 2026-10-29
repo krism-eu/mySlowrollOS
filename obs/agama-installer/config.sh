@@ -52,6 +52,18 @@ for srv in \
     fi
 done
 
+# 3b. Shim cmdline-process: nelle live KIWI l'unit upstream non esiste e
+#     /run/agama/cmdline.d/agama.conf non viene mai scritto -> agama-autoinstall
+#     muore con "Could not read cmdline args file" e inst.auto resta ignorato.
+if [ -f "/usr/lib/systemd/system/agama-cmdline-process.service" ]; then
+    echo "Abilitazione shim cmdline-process per agama-autoinstall"
+    chmod 0644 /usr/lib/systemd/system/agama-cmdline-process.service 2>/dev/null || true
+    if [ -f "/usr/libexec/myslowroll/agama-cmdline-process.sh" ]; then
+        chmod 0755 /usr/libexec/myslowroll/agama-cmdline-process.sh
+    fi
+    systemctl enable agama-cmdline-process.service 2>/dev/null || true
+fi
+
 # 3. Configurazione e abilitazione sessione Kiosk grafica locale (Wayland Cage + Firefox)
 if [ -f "/usr/lib/systemd/system/agama-kiosk.service" ] || [ -f "/etc/systemd/system/agama-kiosk.service" ]; then
     echo "Abilitazione sessione grafica locale: agama-kiosk.service"
