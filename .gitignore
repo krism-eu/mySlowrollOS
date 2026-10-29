@@ -4,3 +4,5 @@
 mySlowrollOS.txt
 mySlowrollOS-anonymized.txt
 *.tar.gz
+# ma NON l'artefatto installer pubblicato su OBS (verificato dalla CI)
+!obs/agama-installer/root.tar.gz
