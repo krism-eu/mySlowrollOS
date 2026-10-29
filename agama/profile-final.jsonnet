@@ -145,7 +145,7 @@
       "power-profiles-daemon",
       "powerdevil6",
       "procps",
-      "python3-base",
+      "python313-base",
       "qdirstat",
       "rpm",
       "rsync",

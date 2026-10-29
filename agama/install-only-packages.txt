@@ -15,4 +15,4 @@ yast2-storage-ng
 yast2-sysconfig
 yast2-users
 xauth
-python3-base
+python313-base
