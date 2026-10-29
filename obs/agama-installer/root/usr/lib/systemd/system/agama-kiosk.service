@@ -35,5 +35,12 @@ TTYReset=yes
 TTYVHangup=yes
 TTYVTDisallocate=yes
 
+# A single hung ExecStartPre must NOT loop forever: cap at 30s, then abort the start
+# instead of blocking the graphical.target boot and leaving the console blank (the
+# 'black screen with blinking cursor' defect). Restart is still governed by the
+# Restart=/RestartSec= directives above.
+TimeoutStartSec=30
+TimeoutStartFailureMode=abort
+
 [Install]
 WantedBy=graphical.target

@@ -14,13 +14,13 @@ for i in {1..120}; do
         echo "mySlowrollOS Kiosk: server Agama pronto su localhost (tentativo $i)."
         echo "root" | agama auth login 2>/dev/null || true
 
-        # Carica esplicitamente la configurazione completa mySlowrollOS nel server Agama
+        # La configurazione viene caricata automaticamente da agama-cmdline-process
+        # (sshim) e successivamente da agama-autoinstall; NON bloccare qui: altrimenti
+        # l'unità kiosk supera il timeout di systemd (90s) mentre l'installer fila
+        # l'interfaccia interattiva, cage non parte e si ottiene uno schermo nero.
+        # Il caricamento manuale qui sotto è solo diagnostico (non bloccante).
         if [ -f "/autoinst.json" ]; then
-            echo "mySlowrollOS Kiosk: caricamento configurazione da /autoinst.json..."
-            agama config load /autoinst.json 2>/dev/null || true
-        elif [ -f "/usr/share/myslowroll/profile-final.json" ]; then
-            echo "mySlowrollOS Kiosk: caricamento configurazione da /usr/share/myslowroll/profile-final.json..."
-            agama config load /usr/share/myslowroll/profile-final.json 2>/dev/null || true
+            echo "mySlowrollOS Kiosk: configurazione profilo in /autoinst.json (caricata da agama-autoinstall)"
         fi
 
         exit 0

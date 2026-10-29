@@ -16,6 +16,12 @@ sanitize_kernel_cmdline() (
     case "$token" in
       ide=nodma|apm=off|noresume|edd=off|nomodeset|3|security=*|systemd.show_status=*|quiet)
         continue ;;
+      # Installer-live residues must never reach the installed system's boot
+      # entries: inst.* options are Agama-only, live.password leaks a literal
+      # password into /etc/kernel/cmdline, rd.live.* confuses dracut on an
+      # installed system, and BOOT_IMAGE= is written by the live bootloader.
+      inst.*|live.*|rd.live.*|BOOT_IMAGE=*)
+        continue ;;
     esac
     cleaned="${cleaned:+$cleaned }$token"
   done
@@ -60,10 +66,15 @@ disable_optional_unit() {
 
 # Functional regression tests without privileged actions or running services.
 if [[ "${1:-}" == "--self-test" ]]; then
-  sample='root=/dev/vda1 rw ide=nodma apm=off noresume edd=off nomodeset 3 mitigations=auto security= rootflags=subvol=0/.snapshots/1/snapshot'
+  sample='root=/dev/vda1 rw ide=nodma apm=off noresume edd=off nomodeset 3 mitigations=auto security= rootflags=subvol=0/.snapshots/1/snapshot inst.auto=file:///usr/share/myslowroll/profile-final.json inst.install=0 inst.systemd_boot_preview=1 live.password=root rd.live.image BOOT_IMAGE=(cd0)/boot/x86_64/loader/linux'
   expected='root=/dev/vda1 rw mitigations=auto rootflags=subvol=0/.snapshots/1/snapshot security=apparmor systemd.show_status=1 quiet'
   [[ "$(sanitize_kernel_cmdline "$sample")" == "$expected" ]] || exit 1
   [[ "$(sanitize_kernel_cmdline "$expected")" == "$expected" ]] || exit 1
+  # The contaminated cmdline that was actually persisted in /etc/kernel/cmdline
+  # of a previously installed mySlowrollOS guest must be reduced to the shipped
+  # baseline with no installer-live residue leaking through.
+  contaminated='root=/dev/vda2 BOOT_IMAGE=(cd0)/boot/x86_64/loader/linux inst.auto=file:///usr/share/myslowroll/profile-final.json inst.install=0 inst.systemd_boot_preview=1 live.password=root rd.live.image mitigations=auto quiet'
+  [[ "$(sanitize_kernel_cmdline "$contaminated")" == 'root=/dev/vda2 mitigations=auto security=apparmor systemd.show_status=1 quiet' ]] || exit 1
   glob_dir="$(mktemp -d)" || exit 1
   touch "$glob_dir/match-one" "$glob_dir/match-two"
   glob_sample="$glob_dir/* $glob_dir/match-? [abc]"
