@@ -8,16 +8,16 @@ Guida completa per creare l'immagine ISO Live Installer di **mySlowrollOS** util
 
 La ISO di installazione combina l'ambiente live ufficiale **Agama** con la personalizzazione completa **mySlowrollOS**:
 1. **100% Autonoma (Zero dipendenze esterne durante l'installazione)**:
-   - Il profilo di installazione [`profile-final.jsonnet`](root/usr/share/myslowroll/profile-final.jsonnet) è incorporato nel filesystem live in `/usr/share/myslowroll/profile-final.jsonnet`.
+   - Il profilo di installazione [`profile-final.json`](root/usr/share/myslowroll/profile-final.json) (con symlink di compatibilità `profile-final.jsonnet`) è incorporato nel filesystem live in `/usr/share/myslowroll/profile-final.json`.
    - Tutti i 21 file di configurazione (`myslowroll-policy/`), gli script (`post-chroot-boot-policy.sh`, `init-firstboot.sh`) e le chiavi GPG sono inclusi nella directory overlay `root/usr/share/myslowroll/` e referenziati con URI `file:///usr/share/myslowroll/...`.
 2. **Kiosk Grafico Locale Cablato (Wayland Cage + Firefox)**:
-   - L'overlay include la systemd unit [`agama-kiosk.service`](root/usr/lib/systemd/system/agama-kiosk.service) (attivata in `graphical.target` su `tty1`) e lo script di sincronizzazione [`wait-for-agama.sh`](root/usr/libexec/myslowroll/wait-for-agama.sh).
-   - All'avvio della ISO, Cage avvia automaticamente Firefox in fullscreen kiosk mode su `http://localhost/`, consentendo l'installazione interattiva direttamente sul monitor locale.
+   - L'overlay include la systemd unit [`agama-kiosk.service`](root/usr/lib/systemd/system/agama-kiosk.service) (attivata in `graphical.target` su `tty1`), le policy enterprise per i certificati SSL in `/etc/firefox/policies/policies.json` e lo script di sincronizzazione [`wait-for-agama.sh`](root/usr/libexec/myslowroll/wait-for-agama.sh).
+   - All'avvio della ISO, Cage avvia automaticamente Firefox in fullscreen kiosk mode su `https://localhost/`, consentendo l'installazione interattiva direttamente sul monitor locale.
    - L'accesso remoto via browser su `https://agama.local` o via porta 443/80 rimane contestualmente attivo su rete locale.
 3. **Setup semi-interattivo**:
    - Il kernel cmdline del bootloader avvia Agama con:
      ```text
-     inst.auto=file:///usr/share/myslowroll/profile-final.jsonnet inst.install=0 inst.systemd_boot_preview=1
+     inst.auto=file:///usr/share/myslowroll/profile-final.json inst.install=0 inst.systemd_boot_preview=1 live.password=root
      ```
    - `inst.auto=file:///...`: pre-carica automaticamente la lista pacchetti (`criscore1/2`, `myslowroll-cc`, `atomic-update`), kernel, preset, zram e policy di sistema.
    - `inst.install=0`: impedisce l'installazione automatica non presidiata; la configurazione dischi/partizioni e le credenziali utente rimangono **completamente interattive**.
@@ -44,7 +44,7 @@ obs/agama-installer/
     ├── usr/libexec/myslowroll/
     │   └── wait-for-agama.sh     # Script di attesa HTTP prima dell'avvio del browser
     └── usr/share/myslowroll/
-        ├── profile-final.jsonnet # Profilo Agama offline (file://)
+        ├── profile-final.json    # Profilo Agama offline (file://)
         ├── myslowroll-policy/    # I 19 file di policy e configurazione di sistema
         └── agama/                # Script post/init e chiavi GPG
 ```

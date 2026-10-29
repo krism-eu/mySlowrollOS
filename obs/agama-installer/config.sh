@@ -15,11 +15,27 @@ echo "=== [mySlowrollOS] Configurazione live image Agama Installer ==="
 echo "root:root" | chpasswd
 
 # 1. Preparazione directory e certificati Agama
-mkdir -p -m 0755 /etc/agama.d/ssl /run/agama
+mkdir -p -m 0755 /etc/agama.d/ssl /run/agama /etc/pki/trust/anchors
 
-# 2. Abilitazione servizi di rete e bus di sistema
+if command -v openssl >/dev/null 2>&1; then
+    echo "Generazione certificato SSL locale per Agama / Firefox (localhost)..."
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+        -keyout /etc/agama.d/ssl/server.key \
+        -out /etc/agama.d/ssl/server.crt \
+        -subj "/CN=localhost" \
+        -addext "subjectAltName=DNS:localhost,DNS:agama.local,IP:127.0.0.1" 2>/dev/null || true
+    chmod 0600 /etc/agama.d/ssl/server.key 2>/dev/null || true
+    chmod 0644 /etc/agama.d/ssl/server.crt 2>/dev/null || true
+    cp -f /etc/agama.d/ssl/server.crt /etc/pki/trust/anchors/agama-local.crt 2>/dev/null || true
+    if command -v update-ca-certificates >/dev/null 2>&1; then
+        update-ca-certificates 2>/dev/null || true
+    fi
+fi
+
+# 2. Abilitazione servizi di rete, bus di sistema e sessioni logind
 systemctl enable NetworkManager.service 2>/dev/null || true
-systemctl enable dbus.service 2>/dev/null || true
+systemctl enable dbus.socket 2>/dev/null || true
+systemctl enable systemd-logind.service 2>/dev/null || true
 
 # 3. Abilitazione backend e server web di Agama se presenti
 for srv in agama.service agama-web-server.service cockpit.service; do
@@ -40,17 +56,21 @@ if [ -f "/usr/lib/systemd/system/agama-kiosk.service" ] || [ -f "/etc/systemd/sy
     systemctl set-default graphical.target 2>/dev/null || true
 fi
 
-# 4. Verifica profilo e asset mySlowrollOS
-PROFILE_PATH="/usr/share/myslowroll/profile-final.jsonnet"
+# 4. Verifica profilo e asset mySlowrollOS (puro JSON per bypassare dipendenza jsonnet)
+PROFILE_PATH="/usr/share/myslowroll/profile-final.json"
+PROFILE_PATH_LEGACY="/usr/share/myslowroll/profile-final.jsonnet"
 
 if [ ! -f "${PROFILE_PATH}" ]; then
     echo "ERRORE: Profilo mySlowrollOS non trovato in ${PROFILE_PATH}" >&2
-    echo "Assicurarsi che root/usr/share/myslowroll/profile-final.jsonnet sia presente nell'albero della recipe." >&2
+    echo "Assicurarsi che root/usr/share/myslowroll/profile-final.json sia presente nell'albero della recipe." >&2
     exit 1
 fi
 
 chmod 0644 "${PROFILE_PATH}"
 chown root:root "${PROFILE_PATH}"
+
+# Crea symlink di compatibilità .jsonnet -> .json
+ln -sf "profile-final.json" "${PROFILE_PATH_LEGACY}"
 
 # Controllo anti-dipendenze esterne: la ISO deve essere 100% autonoma
 if grep -q "raw.githubusercontent.com" "${PROFILE_PATH}"; then

@@ -62,12 +62,17 @@ def pack_root_archive(script_dir):
                 info.gid = 0
                 info.uname = "root"
                 info.gname = "root"
-                if os.access(full_path, os.X_OK):
-                    info.mode = 0o755
+                if os.path.islink(full_path):
+                    info.type = tarfile.SYMTYPE
+                    info.linkname = os.readlink(full_path)
+                    tar.addfile(info)
                 else:
-                    info.mode = 0o644
-                with open(full_path, "rb") as fp:
-                    tar.addfile(info, fp)
+                    if os.access(full_path, os.X_OK):
+                        info.mode = 0o755
+                    else:
+                        info.mode = 0o644
+                    with open(full_path, "rb") as fp:
+                        tar.addfile(info, fp)
     return archive_path
 
 
@@ -82,9 +87,11 @@ def verify_root_archive(archive_path):
             if bad:
                 errors.append(f"root.tar.gz contiene prefissi non validi ({bad[:3]}...)")
             required = [
-                "usr/share/myslowroll/profile-final.jsonnet",
+                "usr/share/myslowroll/profile-final.json",
                 "usr/lib/systemd/system/agama-kiosk.service",
                 "usr/libexec/myslowroll/wait-for-agama.sh",
+                "etc/firefox/policies/policies.json",
+                "usr/lib/firefox/distribution/policies.json",
             ]
             for req in required:
                 if req not in names:
@@ -137,22 +144,35 @@ def main():
             if actual_mode != expected_mode:
                 stale.append(f"permission mismatch: {rel_path} ({oct(actual_mode)} != {oct(expected_mode)})")
 
-        dst_profile = overlay_dir / "profile-final.jsonnet"
+        dst_profile = overlay_dir / "profile-final.json"
         if not dst_profile.is_file():
-            stale.append("missing profile: profile-final.jsonnet")
+            stale.append("missing profile: profile-final.json")
         elif dst_profile.read_text() != expected_profile_content:
-            stale.append("content mismatch: profile-final.jsonnet")
+            stale.append("content mismatch: profile-final.json")
 
         # Verify Kiosk systemd unit and launcher script
         kiosk_service = script_dir / "root" / "usr" / "lib" / "systemd" / "system" / "agama-kiosk.service"
         if not kiosk_service.is_file():
             stale.append("missing kiosk unit: root/usr/lib/systemd/system/agama-kiosk.service")
+        else:
+            kiosk_text = kiosk_service.read_text()
+            if "WLR_LIBINPUT_NO_DEVICES" in kiosk_text:
+                stale.append("kiosk unit contains obsolete WLR_LIBINPUT_NO_DEVICES directive (breaks mouse/keyboard!)")
+            if "--private-window" in kiosk_text:
+                stale.append("kiosk unit contains --private-window (breaks Firefox token/certs persistence!)")
+            if "https://localhost/" not in kiosk_text:
+                stale.append("kiosk unit does not use https://localhost/")
 
         kiosk_wait = script_dir / "root" / "usr" / "libexec" / "myslowroll" / "wait-for-agama.sh"
         if not kiosk_wait.is_file():
             stale.append("missing kiosk launcher: root/usr/libexec/myslowroll/wait-for-agama.sh")
         elif not os.access(kiosk_wait, os.X_OK):
             stale.append("kiosk launcher not executable: root/usr/libexec/myslowroll/wait-for-agama.sh")
+
+        # Verify Firefox Enterprise Policies
+        ff_policy = script_dir / "root" / "etc" / "firefox" / "policies" / "policies.json"
+        if not ff_policy.is_file():
+            stale.append("missing firefox policy: root/etc/firefox/policies/policies.json")
 
         # Verify root.tar.gz archive
         archive_path = script_dir / "root.tar.gz"
@@ -189,9 +209,14 @@ def main():
             dst.chmod(0o644)
         copied += 1
 
-    dst_profile = overlay_dir / "profile-final.jsonnet"
+    dst_profile = overlay_dir / "profile-final.json"
     dst_profile.write_text(expected_profile_content)
     dst_profile.chmod(0o644)
+
+    dst_profile_legacy = overlay_dir / "profile-final.jsonnet"
+    if dst_profile_legacy.is_symlink() or dst_profile_legacy.is_file():
+        dst_profile_legacy.unlink()
+    dst_profile_legacy.symlink_to("profile-final.json")
 
     # Self-validation
     if "raw.githubusercontent.com" in expected_profile_content:
@@ -217,7 +242,7 @@ def main():
                     return 1
 
     print(f"PASS: {copied} assets copied to root/usr/share/myslowroll/")
-    print("PASS: Offline profile generated at root/usr/share/myslowroll/profile-final.jsonnet (zero GitHub URLs, 100% local references validated)")
+    print("PASS: Offline profile generated at root/usr/share/myslowroll/profile-final.json (zero GitHub URLs, 100% local references validated)")
 
     # Pacchettizzazione root.tar.gz per OBS (con path relativi 'usr/...' senza prefisso 'root/')
     arch_file = pack_root_archive(script_dir)

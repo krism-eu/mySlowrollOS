@@ -1,0 +1,26 @@
+{
+  "policies": {
+    "DisableAppUpdate": true,
+    "DisableFeedbackCommands": true,
+    "DisableFirefoxStudies": true,
+    "DisablePocket": true,
+    "DisableTelemetry": true,
+    "DisableSecurityBypassWarnings": true,
+    "Certificates": {
+      "ImportEnterpriseRoots": true,
+      "Install": [
+        "/etc/pki/trust/anchors/agama-local.crt",
+        "/etc/agama.d/ssl/server.crt"
+      ]
+    },
+    "Preferences": {
+      "security.enterprise_roots.enabled": true,
+      "security.certerrors.mitm.auto_enable_enterprise_roots": true,
+      "security.cert_pinning.enforcement_level": 0,
+      "network.stricttransportsecurity.preloadlist": false,
+      "browser.safebrowsing.enabled": false,
+      "browser.safebrowsing.malware.enabled": false,
+      "browser.xul.error_pages.expert_bad_cert": true
+    }
+  }
+}
