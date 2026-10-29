@@ -13,6 +13,16 @@ for i in {1..120}; do
     if curl -s -k -f -o /dev/null -m 1 https://localhost/ || curl -s -k -f -o /dev/null -m 1 https://127.0.0.1/ || curl -s -f -o /dev/null -m 1 http://localhost/ || curl -s -f -o /dev/null -m 1 http://127.0.0.1/; then
         echo "mySlowrollOS Kiosk: server Agama pronto su localhost (tentativo $i)."
         echo "root" | agama auth login 2>/dev/null || true
+
+        # Carica esplicitamente la configurazione completa mySlowrollOS nel server Agama
+        if [ -f "/autoinst.json" ]; then
+            echo "mySlowrollOS Kiosk: caricamento configurazione da /autoinst.json..."
+            agama config load /autoinst.json 2>/dev/null || true
+        elif [ -f "/usr/share/myslowroll/profile-final.json" ]; then
+            echo "mySlowrollOS Kiosk: caricamento configurazione da /usr/share/myslowroll/profile-final.json..."
+            agama config load /usr/share/myslowroll/profile-final.json 2>/dev/null || true
+        fi
+
         exit 0
     fi
     sleep 1

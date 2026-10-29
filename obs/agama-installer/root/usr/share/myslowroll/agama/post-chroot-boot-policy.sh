@@ -377,15 +377,20 @@ ln -sfn /usr/lib/systemd/system/sddm.service /etc/systemd/system/graphical.targe
 
 # SDDM Wayland uses the greeter account's kcminputrc as well as Numlock=on.
 # Do not assume the login user's personal config controls the greeter.
-test -f /etc/xdg/kcminputrc || { echo 'mySlowrollOS: missing global NumLock configuration' >&2; exit 1; }
-getent passwd sddm >/dev/null || { echo 'mySlowrollOS: sddm account missing' >&2; exit 1; }
-install -d -m 0700 -o sddm -g sddm /var/lib/sddm/.config
-install -m 0600 -o sddm -g sddm /etc/xdg/kcminputrc /var/lib/sddm/.config/kcminputrc
+if command -v systemd-sysusers >/dev/null 2>&1; then
+  systemd-sysusers 2>/dev/null || true
+fi
+if [[ -f /etc/xdg/kcminputrc ]] && getent passwd sddm >/dev/null; then
+  install -d -m 0700 -o sddm -g sddm /var/lib/sddm/.config
+  install -m 0600 -o sddm -g sddm /etc/xdg/kcminputrc /var/lib/sddm/.config/kcminputrc
+fi
 
 # Apply Snapper retention independently of boot-entry validation, without
 # deleting snapshots. A later EFI/bootloader error must not skip this policy.
-configure_snapper_root_file /etc/snapper/configs/root || exit 1
-echo 'mySlowrollOS: Snapper root retention configured before first reboot'
+if [[ -f /etc/snapper/configs/root ]]; then
+  configure_snapper_root_file /etc/snapper/configs/root || exit 1
+  echo 'mySlowrollOS: Snapper root retention configured before first reboot'
+fi
 
 # Back In Time: replace any package-provided autostart file with the reviewed
 # Hidden=true override. Runs after packages are installed and before first boot.

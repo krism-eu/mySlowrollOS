@@ -87,6 +87,7 @@ def verify_root_archive(archive_path):
             if bad:
                 errors.append(f"root.tar.gz contiene prefissi non validi ({bad[:3]}...)")
             required = [
+                "autoinst.json",
                 "usr/share/myslowroll/profile-final.json",
                 "usr/lib/systemd/system/agama-kiosk.service",
                 "usr/libexec/myslowroll/wait-for-agama.sh",
@@ -217,6 +218,16 @@ def main():
     if dst_profile_legacy.is_symlink() or dst_profile_legacy.is_file():
         dst_profile_legacy.unlink()
     dst_profile_legacy.symlink_to("profile-final.json")
+
+    # Scrive autoinst.json e autoinst.jsonnet alla root dell'overlay per agama-autoinstall
+    root_autoinst = script_dir / "root" / "autoinst.json"
+    root_autoinst.write_text(expected_profile_content)
+    root_autoinst.chmod(0o644)
+
+    root_autoinst_legacy = script_dir / "root" / "autoinst.jsonnet"
+    if root_autoinst_legacy.is_symlink() or root_autoinst_legacy.is_file():
+        root_autoinst_legacy.unlink()
+    root_autoinst_legacy.symlink_to("autoinst.json")
 
     # Self-validation
     if "raw.githubusercontent.com" in expected_profile_content:

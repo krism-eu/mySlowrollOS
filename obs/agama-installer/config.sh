@@ -79,6 +79,11 @@ chown root:root "${PROFILE_PATH}"
 # Crea symlink di compatibilità .jsonnet -> .json
 ln -sf "profile-final.json" "${PROFILE_PATH_LEGACY}"
 
+# Garantisce il profilo alla root per agama-autoinstall (/autoinst.json e /autoinst.jsonnet)
+cp -f "${PROFILE_PATH}" /autoinst.json
+cp -f "${PROFILE_PATH}" /autoinst.jsonnet
+chmod 0644 /autoinst.json /autoinst.jsonnet
+
 # Controllo anti-dipendenze esterne: la ISO deve essere 100% autonoma
 if grep -q "raw.githubusercontent.com" "${PROFILE_PATH}"; then
     echo "ERRORE CRITICO: Trovati URL remoti verso raw.githubusercontent.com in ${PROFILE_PATH}!" >&2
