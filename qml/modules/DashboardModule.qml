@@ -318,7 +318,9 @@ Kirigami.ScrollablePage {
                        ? (DesktopBackend.memoryUsedMiB / 1024.0).toFixed(1) + " / " + (DesktopBackend.memoryTotalMiB / 1024.0).toFixed(1) + " GiB"
                        : qsTr("Rilevamento...")
                 detail: DesktopBackend.memoryTotalMiB > 0
-                        ? qsTr("%1% (esclusi cache e buffer)").arg(DesktopBackend.memoryPercent)
+                        ? (DesktopBackend.gpuUsedMiB > 0
+                           ? qsTr("%1% · di cui %2 GiB GPU").arg(DesktopBackend.memoryPercent).arg((DesktopBackend.gpuUsedMiB / 1024.0).toFixed(1))
+                           : qsTr("%1% in uso").arg(DesktopBackend.memoryPercent))
                         : qsTr("Memoria di sistema")
             }
 

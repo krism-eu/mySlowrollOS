@@ -340,6 +340,8 @@ void DesktopBackend::refreshResources()
     if (meminfo.open(QIODevice::ReadOnly | QIODevice::Text)) {
         qint64 totalKiB = 0;
         qint64 availKiB = 0;
+        qint64 gpuActiveKiB = 0;
+        qint64 gpuReclaimKiB = 0;
         while (true) {
             const QByteArray rawLine = meminfo.readLine();
             if (rawLine.isEmpty()) {
@@ -352,14 +354,23 @@ void DesktopBackend::refreshResources()
             } else if (line.startsWith(QStringLiteral("MemAvailable:"))) {
                 const auto parts = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
                 if (parts.size() >= 2) availKiB = parts.at(1).toLongLong();
-            }
-            if (totalKiB > 0 && availKiB > 0) {
-                break;
+            } else if (line.startsWith(QStringLiteral("GPUActive:"))) {
+                const auto parts = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+                if (parts.size() >= 2) gpuActiveKiB = parts.at(1).toLongLong();
+            } else if (line.startsWith(QStringLiteral("GPUReclaim:"))) {
+                const auto parts = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+                if (parts.size() >= 2) gpuReclaimKiB = parts.at(1).toLongLong();
             }
         }
         if (totalKiB > 0) {
             m_memoryTotalMiB = totalKiB / 1024;
-            m_memoryUsedMiB = qMax<qint64>(0, (totalKiB - availKiB) / 1024);
+            // GPUReclaim is GPU memory the kernel can evict on demand, but
+            // MemAvailable does not add it back: subtract it so the reported
+            // usage is not inflated on kernels exposing these fields.
+            const qint64 usedKiB = qMax<qint64>(0, totalKiB - availKiB);
+            const qint64 reclaimKiB = qBound<qint64>(0, gpuReclaimKiB, usedKiB);
+            m_memoryUsedMiB = (usedKiB - reclaimKiB) / 1024;
+            m_gpuUsedMiB = gpuActiveKiB / 1024;
         }
     }
 

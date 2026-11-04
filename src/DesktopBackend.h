@@ -19,6 +19,7 @@ class DesktopBackend : public QObject
     Q_PROPERTY(qint64 memoryUsedMiB READ memoryUsedMiB NOTIFY resourcesChanged)
     Q_PROPERTY(qint64 memoryTotalMiB READ memoryTotalMiB NOTIFY resourcesChanged)
     Q_PROPERTY(int memoryPercent READ memoryPercent NOTIFY resourcesChanged)
+    Q_PROPERTY(qint64 gpuUsedMiB READ gpuUsedMiB NOTIFY resourcesChanged)
     Q_PROPERTY(double cpuTemperatureC READ cpuTemperatureC NOTIFY resourcesChanged)
     Q_PROPERTY(qint64 diskRootTotalGiB READ diskRootTotalGiB NOTIFY resourcesChanged)
     Q_PROPERTY(qint64 diskRootAvailableGiB READ diskRootAvailableGiB NOTIFY resourcesChanged)
@@ -78,6 +79,7 @@ public:
     qint64 memoryUsedMiB() const { return m_memoryUsedMiB; }
     qint64 memoryTotalMiB() const { return m_memoryTotalMiB; }
     int memoryPercent() const;
+    qint64 gpuUsedMiB() const { return m_gpuUsedMiB; }
     double cpuTemperatureC() const { return m_cpuTemperatureC; }
     qint64 diskRootTotalGiB() const { return m_diskRootTotalGiB; }
     qint64 diskRootAvailableGiB() const { return m_diskRootAvailableGiB; }
@@ -225,6 +227,7 @@ private:
     int m_cpuUsagePercent = 0;
     qint64 m_memoryUsedMiB = 0;
     qint64 m_memoryTotalMiB = 0;
+    qint64 m_gpuUsedMiB = 0;
     double m_cpuTemperatureC = 0.0;
     qint64 m_diskRootTotalGiB = 0;
     qint64 m_diskRootAvailableGiB = 0;

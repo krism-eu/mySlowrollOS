@@ -377,6 +377,7 @@ void DomainTest::testMemoryMetricsParsing()
     QVERIFY(backend.memoryUsedMiB() >= 0);
     QVERIFY(backend.memoryUsedMiB() <= backend.memoryTotalMiB());
     QVERIFY(backend.memoryPercent() >= 0 && backend.memoryPercent() <= 100);
+    QVERIFY(backend.gpuUsedMiB() >= 0);
 }
 
 QTEST_MAIN(DomainTest)
