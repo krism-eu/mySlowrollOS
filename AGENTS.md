@@ -35,6 +35,7 @@
    - Canonical rpmlint configuration is `packaging/myslowroll-cc-rpmlintrc`, registered as `Source1: %{name}-rpmlintrc` in `packaging/myslowroll-cc.spec` to filter OBS PolKit checks (`polkit-untracked-privilege`). The obsolete legacy file `KSCC-rpmlintrc` was retired and must not be restored.
    - The source tarball `Source0` contains the application sources (`src/`, `qml/`, `data/`, `tests/`, `CMakeLists.txt`), the build inputs (`build-rpm.sh`, `generate-unified-sources.py`), `LICENSE` (required by `%license`) and `README.md`. Development metadata (`AGENTS.md`, `.github/`, `.gitignore`) and the `packaging/` directory are excluded from the tarball and handled purely at the RPM level.
    - Single source of truth for versioning is `CMakeLists.txt` (`project(myslowroll-cc VERSION X.Y.Z)`).
+   - The `Release:` tag in `packaging/myslowroll-cc.spec` is overridden by the OBS project `prjconf` (`Release: <CI_CNT>.<B_CNT>`): never "fix" it to match the published `N.M` release, and never bump it to force an upgrade.
 
 ---
 
