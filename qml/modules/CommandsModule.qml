@@ -25,7 +25,7 @@ Kirigami.ScrollablePage {
         { id: "journal-size", title: qsTr("Spazio occupato dal Journal"), command: "journalctl --disk-usage", note: qsTr("Quantità di spazio su disco occupata dai registri persistenti.") },
         { id: "uptime", title: qsTr("Tempo di attività (Uptime)"), command: "uptime -p", note: qsTr("Tempo trascorso dall'ultimo avvio del sistema.") },
         { id: "boot-time", title: qsTr("Tempo di avvio del sistema"), command: "systemd-analyze time", note: qsTr("Tempo complessivo impiegato dal firmware, bootloader, kernel e userspace.") },
-        { id: "blame", title: qsTr("Servizi più lenti all'avvio"), command: "systemd-analyze blame | head -n 30", note: qsTr("Unità di avvio ordinate per tempo impiegato per l'inizializzazione.") },
+        { id: "blame", title: qsTr("Servizi più lenti all'avvio"), command: "systemd-analyze blame", note: qsTr("Unità di avvio ordinate per tempo impiegato per l'inizializzazione.") },
         { id: "critical-chain", title: qsTr("Catena critica di boot"), command: "systemd-analyze critical-chain", note: qsTr("Albero delle dipendenze che incidono sul percorso critico dell'avvio.") },
         { id: "ports", title: qsTr("Porte di rete in ascolto"), command: "ss -lntu", note: qsTr("Socket TCP e UDP attualmente in ascolto sulle interfacce di rete.") },
         { id: "network", title: qsTr("Interfacce di rete e IP"), command: "ip -brief address", note: qsTr("Indirizzi IPv4/IPv6 e stato delle schede di rete in formato compatto.") },

@@ -73,9 +73,30 @@ QString findExecutableWithSbin(const QString &name)
     return QString();
 }
 
-QString limitOutput(const QByteArray &data)
+QString limitOutput(const QByteArray &data, bool enforceCap)
 {
-    return QString::fromUtf8(data).trimmed();
+    if (!enforceCap) {
+        return QString::fromUtf8(data).trimmed();
+    }
+
+    // Tetto difensivo per i comandi diagnostici: nessun output illimitato nella card
+    // (systemd-analyze blame, journalctl, lsblk possono essere molto verbosi).
+    constexpr qsizetype kMaxBytes = 64 * 1024;
+    constexpr int kMaxLines = 500;
+
+    const QByteArray capped = data.size() > kMaxBytes ? data.left(kMaxBytes) : data;
+    QString text = QString::fromUtf8(capped).trimmed();
+
+    const QStringList lines = text.split(QLatin1Char('\n'));
+    if (lines.size() > kMaxLines) {
+        text = lines.mid(0, kMaxLines).join(QLatin1Char('\n'));
+        text += QLatin1Char('\n')
+              + QCoreApplication::translate("DesktopBackend",
+                    "… [output troncato: mostrate %1 di %2 righe]")
+                    .arg(kMaxLines)
+                    .arg(lines.size());
+    }
+    return text;
 }
 
 double readSysCpuTemp()
@@ -1713,7 +1734,7 @@ void DesktopBackend::cancelCurrentOperation()
 void DesktopBackend::handleProcessFinished(QProcess *proc, const QString &operation,
                                            int exitCode, const QByteArray &output)
 {
-    const QString text = limitOutput(output);
+    const QString text = limitOutput(output, operation == QStringLiteral("diagnostic"));
     const bool timedOut = proc ? proc->property("opTimedOut").toBool() : false;
     const bool userCancelled = proc ? proc->property("opUserCancelled").toBool() : false;
     const bool crashed = proc ? (proc->exitStatus() == QProcess::CrashExit) : false;
