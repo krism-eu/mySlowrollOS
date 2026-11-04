@@ -258,7 +258,7 @@ Kirigami.ScrollablePage {
                     // Tasto Stato Wi-Fi (Attivo / Disattivato / Blocco Hardware)
                     Controls.Button {
                         visible: DesktopBackend.hasWifiHardware
-                        enabled: !DesktopBackend.busy && !SlowrollBackend.busy && !DesktopBackend.wifiHardwareBlocked
+                        enabled: !DesktopBackend.busy && !SlowrollBackend.busy && !DesktopBackend.wifiHardwareBlocked && !DesktopBackend.privacyActive
                         text: DesktopBackend.wifiHardwareBlocked
                               ? qsTr("Wi-Fi: Blocco HW")
                               : (DesktopBackend.wifiEnabled ? qsTr("Wi-Fi: Attivo") : qsTr("Wi-Fi: Disattivato"))

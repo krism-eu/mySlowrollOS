@@ -19,7 +19,7 @@ def get_project_version():
             match = re.search(r"project\s*\(\s*myslowroll-cc\s+VERSION\s+([0-9\.]+)", f.read(), re.IGNORECASE)
             if match:
                 return match.group(1)
-    return "1.0.0"
+    return "1.0.1"
 
 VERSION = get_project_version()
 TODAY_ISO = date.today().isoformat()

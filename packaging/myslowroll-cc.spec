@@ -1,5 +1,5 @@
 Name:           myslowroll-cc
-Version:        1.0.0
+Version:        1.0.1
 Release:        1%{?dist}
 Summary:        MSCC - Control Center for openSUSE Slowroll
 Summary(it):    MSCC - Centro di Controllo per openSUSE Slowroll
@@ -82,5 +82,15 @@ richiedono autorizzazione Polkit/pkexec o configurazione sudoers per il gruppo w
 %{_datadir}/myslowroll-cc/scripts/privacy.sh
 
 %changelog
+* Sat Oct 31 2026 Kris <kris@myslowrollos.org> - 1.0.1-1
+- Correzioni di robustezza su mySlowrollOS Control Center 1.0.1:
+  * Rete e Wi-Fi non modificabili mentre la Modalità Privacy è attiva.
+  * Comandi diagnostici eseguiti solo tramite tabella interna di argomenti (niente bash -c).
+  * ~/.bashrc modificato in modalità binaria, senza conversioni UTF-8.
+  * Timeout della Modalità Privacy senza interruzione del processo privilegiato.
+  * Profili di rete e azioni personalizzate salvati con permessi 0600.
+  * Filtro del tarball esteso a KSCC.txt, KSCC-anonymized.txt e __pycache__.
+  * Validazione shellcheck e bash -n degli script in CI.
+
 * Sat Oct 17 2026 Kris <kris@myslowrollos.org> - 1.0.0-1
 - Prima bozza e release iniziale per openSUSE Slowroll

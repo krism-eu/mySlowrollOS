@@ -155,7 +155,7 @@ public:
     Q_INVOKABLE bool launchYastModule(const QString &moduleName);
     Q_INVOKABLE bool launchCustomScript(const QString &scriptName);
 
-    Q_INVOKABLE void runCommand(const QString &commandLine, const QString &title);
+    Q_INVOKABLE void runCommand(const QString &commandId, const QString &title);
     Q_INVOKABLE void clearDiagnostic();
     Q_INVOKABLE void clearMessage();
     Q_INVOKABLE void copyToClipboard(const QString &text);

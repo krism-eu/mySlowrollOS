@@ -60,13 +60,15 @@ here = sys.argv[1]
 version = sys.argv[2]
 out_tar = sys.argv[3]
 
-excludes = {'build', 'rpmbuild', 'dist', 'packaging', '.build-rpm.lock', 'myslowroll-cc-sorgenti-unificati.txt', '.git'}
+excludes = {'build', 'rpmbuild', 'dist', 'packaging', '.build-rpm.lock', '.git',
+            'myslowroll-cc-sorgenti-unificati.txt', 'KSCC.txt', 'KSCC-anonymized.txt',
+            '__pycache__'}
 
 def filter_func(tarinfo):
-    parts = tarinfo.name.split('/')
-    if len(parts) > 1 and parts[1] in excludes:
+    parts = tarinfo.name.split('/')[1:]
+    if any(p in excludes for p in parts):
         return None
-    if tarinfo.name.endswith('.bak'):
+    if tarinfo.name.endswith(('.bak', '.pyc', '.pyo')):
         return None
     return tarinfo
 

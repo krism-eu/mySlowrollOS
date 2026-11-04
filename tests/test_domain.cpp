@@ -29,6 +29,7 @@ private slots:
     void testOperationCancellableInitialState();
     void testSystemctlShowBlockParsingOrderIndependent();
     void testRunCommandSanitization();
+    void testMemoryMetricsParsing();
 
 private:
     QString m_oldHome;
@@ -348,21 +349,34 @@ void DomainTest::testSystemctlShowBlockParsingOrderIndependent()
 void DomainTest::testRunCommandSanitization()
 {
     DesktopBackend backend;
-    // Unauthorized binary
+    // Eseguibili solo gli identificativi della tabella interna: comandi arbitrari,
+    // metacaratteri e pipeline vengono rifiutati prima di qualsiasi esecuzione.
     backend.runCommand(QStringLiteral("cat /etc/passwd"), QStringLiteral("Test"));
-    QVERIFY(backend.lastMessage().contains(QStringLiteral("non autorizzato")));
+    QVERIFY(backend.lastMessage().contains(QStringLiteral("non riconosciuto")));
 
-    // Disallowed character: semicolon
     backend.runCommand(QStringLiteral("glxinfo ; rm -rf /"), QStringLiteral("Test"));
-    QVERIFY(backend.lastMessage().contains(QStringLiteral("non consentiti")));
+    QVERIFY(backend.lastMessage().contains(QStringLiteral("non riconosciuto")));
 
-    // Disallowed character: subshell
     backend.runCommand(QStringLiteral("glxinfo $(id)"), QStringLiteral("Test"));
-    QVERIFY(backend.lastMessage().contains(QStringLiteral("non consentiti")));
+    QVERIFY(backend.lastMessage().contains(QStringLiteral("non riconosciuto")));
 
-    // Disallowed pipe filter (sort -o)
     backend.runCommand(QStringLiteral("journalctl | sort -o /tmp/evil"), QStringLiteral("Test"));
-    QVERIFY(backend.lastMessage().contains(QStringLiteral("pipe consentita solo verso comandi di filtro")));
+    QVERIFY(backend.lastMessage().contains(QStringLiteral("non riconosciuto")));
+
+    // Un identificativo valido non viene rifiutato (l'esecuzione dipende dall'ambiente).
+    DesktopBackend valid;
+    valid.runCommand(QStringLiteral("uptime"), QStringLiteral("Test Uptime"));
+    QVERIFY(!valid.lastMessage().contains(QStringLiteral("non riconosciuto")));
+}
+
+void DomainTest::testMemoryMetricsParsing()
+{
+    DesktopBackend backend;
+    backend.refreshResources();
+    QVERIFY(backend.memoryTotalMiB() > 0);
+    QVERIFY(backend.memoryUsedMiB() >= 0);
+    QVERIFY(backend.memoryUsedMiB() <= backend.memoryTotalMiB());
+    QVERIFY(backend.memoryPercent() >= 0 && backend.memoryPercent() <= 100);
 }
 
 QTEST_MAIN(DomainTest)

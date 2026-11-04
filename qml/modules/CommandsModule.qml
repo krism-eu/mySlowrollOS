@@ -130,7 +130,7 @@ Kirigami.ScrollablePage {
                                     Controls.Button {
                                         text: qsTr("Esegui")
                                         icon.name: "media-playback-start"
-                                        onClicked: DesktopBackend.runCommand(modelData.command, modelData.title)
+                                        onClicked: DesktopBackend.runCommand(modelData.id, modelData.title)
                                     }
                                 }
 

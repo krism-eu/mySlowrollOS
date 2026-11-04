@@ -636,7 +636,7 @@ Kirigami.ScrollablePage {
                                 text: qsTr("Applica Configurazione Rete al Volo")
                                 icon.name: "network-connect"
                                 highlighted: true
-                                enabled: !DesktopBackend.busy && !SlowrollBackend.busy
+                                enabled: !DesktopBackend.busy && !SlowrollBackend.busy && !DesktopBackend.privacyActive
                                 onClicked: applyNetworkConfirmDialog.open()
                             }
 

@@ -23,6 +23,7 @@
 #include <QUrl>
 #include <QSettings>
 #include <QSet>
+#include <QHash>
 #include <algorithm>
 #include <cerrno>
 #include <memory>
@@ -271,6 +272,9 @@ void DesktopBackend::setBusy(bool busy)
 
 void DesktopBackend::setMessage(const QString &msg)
 {
+    if (m_lastMessage == msg) {
+        return;  // Nessuna emissione se il messaggio è già quello visualizzato.
+    }
     m_lastMessage = msg;
     emit stateChanged();
 }
@@ -315,8 +319,12 @@ void DesktopBackend::refreshResources()
     if (meminfo.open(QIODevice::ReadOnly | QIODevice::Text)) {
         qint64 totalKiB = 0;
         qint64 availKiB = 0;
-        while (!meminfo.atEnd()) {
-            const QString line = QString::fromUtf8(meminfo.readLine());
+        while (true) {
+            const QByteArray rawLine = meminfo.readLine();
+            if (rawLine.isEmpty()) {
+                break;
+            }
+            const QString line = QString::fromUtf8(rawLine);
             if (line.startsWith(QStringLiteral("MemTotal:"))) {
                 const auto parts = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
                 if (parts.size() >= 2) totalKiB = parts.at(1).toLongLong();
@@ -324,10 +332,13 @@ void DesktopBackend::refreshResources()
                 const auto parts = line.split(QLatin1Char(' '), Qt::SkipEmptyParts);
                 if (parts.size() >= 2) availKiB = parts.at(1).toLongLong();
             }
+            if (totalKiB > 0 && availKiB > 0) {
+                break;
+            }
         }
         if (totalKiB > 0) {
             m_memoryTotalMiB = totalKiB / 1024;
-            m_memoryUsedMiB = (totalKiB - availKiB) / 1024;
+            m_memoryUsedMiB = qMax<qint64>(0, (totalKiB - availKiB) / 1024);
         }
     }
 
@@ -957,9 +968,16 @@ bool DesktopBackend::launchCustomScript(const QString &scriptName)
         });
 
         QPointer<QProcess> guard = proc;
-        QTimer::singleShot(isPrivacy ? 180000 : 60000, proc, [this, guard] {
-            if (guard && guard->state() != QProcess::NotRunning)
-                terminateProcessGroup(guard.data(), true);
+        QTimer::singleShot(isPrivacy ? 180000 : 60000, proc, [this, guard, isPrivacy] {
+            if (guard && guard->state() != QProcess::NotRunning) {
+                if (isPrivacy) {
+                    // Invariante: mai interrompere una transazione pkexec in corso. Se lo script è
+                    // diventato root il kill fallirebbe comunque (EPERM) e spezzerebbe il flusso.
+                    setMessage(tr("Modalità Privacy ancora in esecuzione: attendo il completamento."));
+                } else {
+                    terminateProcessGroup(guard.data(), true);
+                }
+            }
         });
 
         proc->start(QStringLiteral("bash"), {foundPath});
@@ -979,56 +997,49 @@ bool DesktopBackend::launchCustomScript(const QString &scriptName)
     return false;
 }
 
-void DesktopBackend::runCommand(const QString &commandLine, const QString &title)
+namespace {
+// Tabella chiusa dei comandi diagnostici: id -> argv. Nessuna stringa di shell,
+// nessun passaggio da bash -c: il QML sceglie solo un id fra quelli noti.
+const QHash<QString, QStringList> &diagnosticCommands()
 {
-    const QString cmd = commandLine.trimmed();
-    if (cmd.isEmpty())
+    static const QHash<QString, QStringList> table = {
+        { QStringLiteral("gpu-driver"), { QStringLiteral("glxinfo"), QStringLiteral("-B") } },
+        { QStringLiteral("vulkan-info"), { QStringLiteral("vulkaninfo"), QStringLiteral("--summary") } },
+        { QStringLiteral("failed-units"), { QStringLiteral("systemctl"), QStringLiteral("--failed"), QStringLiteral("--no-pager"), QStringLiteral("--plain") } },
+        { QStringLiteral("user-failed-units"), { QStringLiteral("systemctl"), QStringLiteral("--user"), QStringLiteral("--failed"), QStringLiteral("--no-pager"), QStringLiteral("--plain") } },
+        { QStringLiteral("journal-errors"), { QStringLiteral("journalctl"), QStringLiteral("-b"), QStringLiteral("-p"), QStringLiteral("warning"), QStringLiteral("--no-pager"), QStringLiteral("-n"), QStringLiteral("150") } },
+        { QStringLiteral("kernel-errors"), { QStringLiteral("journalctl"), QStringLiteral("-k"), QStringLiteral("-b"), QStringLiteral("-p"), QStringLiteral("warning"), QStringLiteral("--no-pager"), QStringLiteral("-n"), QStringLiteral("150") } },
+        { QStringLiteral("journal-size"), { QStringLiteral("journalctl"), QStringLiteral("--disk-usage") } },
+        { QStringLiteral("uptime"), { QStringLiteral("uptime"), QStringLiteral("-p") } },
+        { QStringLiteral("boot-time"), { QStringLiteral("systemd-analyze"), QStringLiteral("time") } },
+        { QStringLiteral("blame"), { QStringLiteral("systemd-analyze"), QStringLiteral("blame") } },
+        { QStringLiteral("critical-chain"), { QStringLiteral("systemd-analyze"), QStringLiteral("critical-chain") } },
+        { QStringLiteral("ports"), { QStringLiteral("ss"), QStringLiteral("-lntu") } },
+        { QStringLiteral("network"), { QStringLiteral("ip"), QStringLiteral("-brief"), QStringLiteral("address") } },
+        { QStringLiteral("routes"), { QStringLiteral("ip"), QStringLiteral("route") } },
+        { QStringLiteral("dns"), { QStringLiteral("resolvectl"), QStringLiteral("status") } },
+        { QStringLiteral("partitions"), { QStringLiteral("lsblk"), QStringLiteral("-e"), QStringLiteral("7"), QStringLiteral("-o"), QStringLiteral("NAME,PARTN,SIZE,FSTYPE,FSVER,LABEL,UUID,MOUNTPOINTS") } },
+        { QStringLiteral("disk-space"), { QStringLiteral("df"), QStringLiteral("-hT"), QStringLiteral("-x"), QStringLiteral("tmpfs"), QStringLiteral("-x"), QStringLiteral("devtmpfs") } },
+        { QStringLiteral("inodes"), { QStringLiteral("df"), QStringLiteral("-hi"), QStringLiteral("-x"), QStringLiteral("tmpfs"), QStringLiteral("-x"), QStringLiteral("devtmpfs") } },
+        { QStringLiteral("timers"), { QStringLiteral("systemctl"), QStringLiteral("list-timers"), QStringLiteral("--all"), QStringLiteral("--no-pager") } },
+        { QStringLiteral("sessions"), { QStringLiteral("loginctl"), QStringLiteral("list-sessions"), QStringLiteral("--no-legend") } },
+        { QStringLiteral("shell-path"), { QStringLiteral("printenv"), QStringLiteral("PATH") } }
+    };
+    return table;
+}
+} // namespace
+
+void DesktopBackend::runCommand(const QString &commandId, const QString &title)
+{
+    const QString id = commandId.trimmed();
+    if (id.isEmpty())
         return;
 
-    // Sanificazione per prevenire command injection, subshell, wildcard e concatenazioni arbitrarie
-    if (cmd.contains(QLatin1Char(';')) || cmd.contains(QStringLiteral("&&")) ||
-        cmd.contains(QStringLiteral("||")) || cmd.contains(QLatin1Char('>')) ||
-        cmd.contains(QLatin1Char('<')) || cmd.contains(QLatin1Char('$')) ||
-        cmd.contains(QLatin1Char('`')) || cmd.contains(QLatin1Char('&')) ||
-        cmd.contains(QLatin1Char('\n')) || cmd.contains(QLatin1Char('\r')) ||
-        cmd.contains(QLatin1Char('(')) || cmd.contains(QLatin1Char(')')) ||
-        cmd.contains(QLatin1Char('{')) || cmd.contains(QLatin1Char('}')) ||
-        cmd.contains(QLatin1Char('*')) || cmd.contains(QLatin1Char('\'')) ||
-        cmd.contains(QLatin1Char('"')) || cmd.contains(QLatin1Char('\\'))) {
-        setMessage(tr("Comando non valido: caratteri speciali, apici o subshell non consentiti."));
-        return;
-    }
-
-    static const QSet<QString> allowedDiagnosticBinaries = {
-        QStringLiteral("glxinfo"), QStringLiteral("vulkaninfo"), QStringLiteral("systemctl"),
-        QStringLiteral("journalctl"), QStringLiteral("uptime"), QStringLiteral("systemd-analyze"),
-        QStringLiteral("ss"), QStringLiteral("ip"), QStringLiteral("resolvectl"),
-        QStringLiteral("lsblk"), QStringLiteral("df"), QStringLiteral("loginctl"),
-        QStringLiteral("printenv")
-    };
-    static const QSet<QString> allowedFilters = {
-        QStringLiteral("head"), QStringLiteral("tail"), QStringLiteral("grep"), QStringLiteral("wc")
-    };
-
-    QString leftPart = cmd;
-    if (cmd.contains(QLatin1Char('|'))) {
-        const QStringList pipeParts = cmd.split(QLatin1Char('|'));
-        if (pipeParts.size() != 2) {
-            setMessage(tr("Comando non valido: pipeline multiple non consentite."));
-            return;
-        }
-        leftPart = pipeParts.at(0).trimmed();
-        const QString right = pipeParts.at(1).trimmed();
-        const QString filterBin = right.section(QRegularExpression(QStringLiteral("\\s+")), 0, 0);
-        if (!allowedFilters.contains(filterBin)) {
-            setMessage(tr("Comando non valido: pipe consentita solo verso comandi di filtro (head, tail, grep, wc)."));
-            return;
-        }
-    }
-
-    const QString mainBin = leftPart.section(QRegularExpression(QStringLiteral("\\s+")), 0, 0);
-    if (!allowedDiagnosticBinaries.contains(mainBin)) {
-        setMessage(tr("Comando non valido: binario diagnostico non autorizzato (%1).").arg(mainBin));
+    // Il QML passa un identificativo, non una riga di comando: gli argomenti sono
+    // fissati qui e non possono essere alterati dall'esterno.
+    const QStringList argv = diagnosticCommands().value(id);
+    if (argv.isEmpty() || argv.first().isEmpty()) {
+        setMessage(tr("Comando diagnostico non riconosciuto: %1").arg(id));
         return;
     }
 
@@ -1046,11 +1057,12 @@ void DesktopBackend::runCommand(const QString &commandLine, const QString &title
     }
 #endif
 
-    m_diagnosticTitle = title.isEmpty() ? cmd : title;
-    m_diagnosticOutput = tr("Esecuzione del comando in corso: %1...").arg(cmd);
+    const QString printable = argv.join(QLatin1Char(' '));
+    m_diagnosticTitle = title.isEmpty() ? printable : title;
+    m_diagnosticOutput = tr("Esecuzione del comando in corso: %1...").arg(printable);
     emit diagnosticChanged();
 
-    startProcess(QStringLiteral("bash"), {QStringLiteral("-c"), cmd}, QStringLiteral("diagnostic"), true, 60000);
+    startProcess(argv.first(), argv.mid(1), QStringLiteral("diagnostic"), true, 60000);
 }
 
 void DesktopBackend::clearDiagnostic()
@@ -1202,6 +1214,8 @@ bool DesktopBackend::persistCustomActions()
         !file.commit()) {
         return false;
     }
+    // Gli script personalizzati sono dati privati: leggibili solo dal proprietario.
+    QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     return true;
 }
 
@@ -1445,17 +1459,45 @@ QString DesktopBackend::bashPromptStatus() const
 {
     const QString bashrc = QDir::homePath() + QStringLiteral("/.bashrc");
     QFile f(bashrc);
-    if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        const QString content = QString::fromUtf8(f.readAll());
-        if (content.contains(QStringLiteral("myslowroll-prompt-readable")))
+    if (f.open(QIODevice::ReadOnly)) {
+        const QByteArray content = f.readAll();
+        if (content.contains("myslowroll-prompt-readable"))
             return QStringLiteral("readable");
-        if (content.contains(QStringLiteral("myslowroll-prompt-compact")))
+        if (content.contains("myslowroll-prompt-compact"))
             return QStringLiteral("compact");
-        if (content.contains(QStringLiteral("myslowroll-prompt-minimal")))
+        if (content.contains("myslowroll-prompt-minimal"))
             return QStringLiteral("minimal");
     }
     return QStringLiteral("predefinito");
 }
+
+namespace {
+// Rimuove i blocchi prompt gestiti da mySlowrollOS operando sui byte grezzi: un
+// ~/.bashrc con byte non UTF-8 non viene corrotto da conversioni di testo.
+QByteArray stripPromptBlocks(QByteArray data)
+{
+    const QByteArray beginMarker("# myslowroll-prompt-begin");
+    const QByteArray endMarker("# myslowroll-prompt-end");
+
+    int from = data.indexOf(beginMarker);
+    while (from >= 0) {
+        if (from > 0 && data.at(from - 1) == '\n') {
+            --from;  // consuma la riga vuota introdotta dal blocco
+        }
+        int end = data.indexOf(endMarker, from);
+        if (end < 0) {
+            break;  // blocco non terminato: lasciato intatto, nessuna perdita di dati
+        }
+        end += endMarker.size();
+        if (end < data.size() && data.at(end) == '\n') {
+            ++end;
+        }
+        data.remove(from, end - from);
+        from = data.indexOf(beginMarker);
+    }
+    return data;
+}
+} // namespace
 
 bool DesktopBackend::applyBashPromptPreset(const QString &presetId)
 {
@@ -1464,7 +1506,7 @@ bool DesktopBackend::applyBashPromptPreset(const QString &presetId)
     const QString bashrc = fi.isSymLink() ? fi.symLinkTarget() : rawBashrc;
 
     QFile f(bashrc);
-    QString content;
+    QByteArray content;
     if (f.exists()) {
         const QString bakPath = rawBashrc + QStringLiteral(".bak");
         if (!QFile::exists(bakPath) && !QFile::copy(bashrc, bakPath)) {
@@ -1475,29 +1517,29 @@ bool DesktopBackend::applyBashPromptPreset(const QString &presetId)
             setMessage(tr("Impossibile leggere il file ~/.bashrc per applicare le modifiche."));
             return false;
         }
-        content = QString::fromUtf8(f.readAll());
+        content = f.readAll();
         f.close();
     }
 
-    // Strip previous markers
-    const QRegularExpression rx(QStringLiteral("\n?# myslowroll-prompt-begin[\\s\\S]*?# myslowroll-prompt-end\n?"));
-    content.remove(rx);
+    // Rimozione dei blocchi precedenti sui byte grezzi: nessuna conversione UTF-8,
+    // quindi un ~/.bashrc con byte non UTF-8 resta intatto.
+    content = stripPromptBlocks(content);
 
-    QString snippet;
+    QByteArray snippet;
     if (presetId == QStringLiteral("readable")) {
-        snippet = QStringLiteral("\n# myslowroll-prompt-begin (myslowroll-prompt-readable)\n"
-                                 "PS1='\\n\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\n\\$ '\n"
-                                 "# myslowroll-prompt-end\n");
+        snippet = QByteArrayLiteral("\n# myslowroll-prompt-begin (myslowroll-prompt-readable)\n"
+                                    "PS1='\\n\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\n\\$ '\n"
+                                    "# myslowroll-prompt-end\n");
     } else if (presetId == QStringLiteral("compact")) {
-        snippet = QStringLiteral("\n# myslowroll-prompt-begin (myslowroll-prompt-compact)\n"
-                                 "PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ '\n"
-                                 "# myslowroll-prompt-end\n");
+        snippet = QByteArrayLiteral("\n# myslowroll-prompt-begin (myslowroll-prompt-compact)\n"
+                                    "PS1='\\[\\033[01;32m\\]\\u@\\h\\[\\033[00m\\]:\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\$ '\n"
+                                    "# myslowroll-prompt-end\n");
     } else if (presetId == QStringLiteral("minimal")) {
-        snippet = QStringLiteral("\n# myslowroll-prompt-begin (myslowroll-prompt-minimal)\n"
-                                 "PS1='\\n\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\n\\$ '\n"
-                                 "# myslowroll-prompt-end\n");
+        snippet = QByteArrayLiteral("\n# myslowroll-prompt-begin (myslowroll-prompt-minimal)\n"
+                                    "PS1='\\n\\[\\033[01;34m\\]\\w\\[\\033[00m\\]\\n\\$ '\n"
+                                    "# myslowroll-prompt-end\n");
     } else if (presetId == QStringLiteral("predefinito") || presetId == QStringLiteral("default")) {
-        snippet = QString();
+        snippet = QByteArray();
     } else {
         setMessage(tr("Preset prompt sconosciuto: %1").arg(presetId));
         return false;
@@ -1506,8 +1548,8 @@ bool DesktopBackend::applyBashPromptPreset(const QString &presetId)
     content += snippet;
 
     QSaveFile save(bashrc);
-    if (save.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        save.write(content.toUtf8());
+    if (save.open(QIODevice::WriteOnly)) {
+        save.write(content);
         if (!save.commit()) {
             setMessage(tr("Impossibile salvare le modifiche in ~/.bashrc"));
             return false;
@@ -1934,6 +1976,8 @@ bool DesktopBackend::persistNetworkProfiles()
         !file.commit()) {
         return false;
     }
+    // I profili di rete possono contenere indirizzi e DNS personali: solo il proprietario.
+    QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     return true;
 }
 
@@ -2088,6 +2132,13 @@ void DesktopBackend::refreshNetworkStatus()
 }
 void DesktopBackend::applyActiveNetworkProfile()
 {
+    // Durante la Modalità Privacy la configurazione di rete è congelata: modificare la
+    // connessione attiva riattiverebbe il profilo NM e vanificherebbe il lockdown.
+    if (m_privacyActive) {
+        setMessage(tr("Impossibile modificare la configurazione di rete mentre la Modalità Privacy è attiva."));
+        return;
+    }
+
     if (m_selectedIpPreset < 0 || m_selectedIpPreset >= m_ipPresets.size() ||
         m_selectedDnsPreset < 0 || m_selectedDnsPreset >= m_dnsPresets.size()) {
         setMessage(tr("Profilo di rete non selezionato."));
@@ -2174,6 +2225,10 @@ void DesktopBackend::applyActiveNetworkProfile()
 
 void DesktopBackend::refreshWifiStatus()
 {
+    // Invalidazione preventiva: anche le uscite anticipate (hardware assente) devono
+    // scartare le risposte di una nmcli ancora in volo.
+    const quint64 reqId = ++m_wifiRequestId;
+
     bool hasWifi = false;
     const QDir netDir(QStringLiteral("/sys/class/net"));
     for (const QString &iface : netDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
@@ -2207,7 +2262,6 @@ void DesktopBackend::refreshWifiStatus()
         return;
     }
 
-    const quint64 reqId = ++m_wifiRequestId;
     auto *proc = new QProcess(this);
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert(QStringLiteral("LC_ALL"), QStringLiteral("C.UTF-8"));
@@ -2235,6 +2289,10 @@ void DesktopBackend::refreshWifiStatus()
 
 void DesktopBackend::toggleWifi()
 {
+    if (m_privacyActive) {
+        setMessage(tr("Impossibile modificare il Wi-Fi mentre la Modalità Privacy è attiva."));
+        return;
+    }
     if (m_wifiHardwareBlocked) {
         setMessage(tr("Impossibile modificare il Wi-Fi: interruttore hardware attivo (blocco rfkill)."));
         return;
@@ -2244,6 +2302,10 @@ void DesktopBackend::toggleWifi()
 
 void DesktopBackend::setWifiEnabled(bool enable)
 {
+    if (m_privacyActive) {
+        setMessage(tr("Impossibile modificare il Wi-Fi mentre la Modalità Privacy è attiva."));
+        return;
+    }
     if (m_wifiHardwareBlocked && enable) {
         setMessage(tr("Impossibile attivare il Wi-Fi: interruttore hardware attivo (blocco rfkill)."));
         return;

@@ -17,7 +17,7 @@ jobs:
         run: |
           zypper --non-interactive refresh
           zypper --non-interactive install --no-recommends \
-            git cmake gcc-c++ ninja \
+            git cmake gcc-c++ ninja ShellCheck \
             desktop-file-utils AppStream libxml2-tools \
             qt6-base-devel qt6-declarative-devel qt6-declarative-tools \
             qt6-widgets-devel qt6-quickcontrols2-devel qt6-test-devel \
@@ -31,6 +31,14 @@ jobs:
           desktop-file-validate data/myslowroll-cc.desktop
           appstreamcli validate --no-net data/org.myslowrollos.controlcenter.metainfo.xml
           xmllint --noout data/org.myslowrollos.controlcenter.policy
+
+      - name: Validate shipped shell scripts
+        run: |
+          for s in data/scripts/*.sh; do
+            echo "bash -n $s"
+            bash -n "$s"
+          done
+          shellcheck -S warning data/scripts/*.sh
 
       - name: Configure CMake
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
