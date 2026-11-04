@@ -62,7 +62,7 @@ out_tar = sys.argv[3]
 
 excludes = {'build', 'rpmbuild', 'dist', 'packaging', '.build-rpm.lock', '.git',
             'myslowroll-cc-sorgenti-unificati.txt', 'KSCC.txt', 'KSCC-anonymized.txt',
-            '__pycache__'}
+            '__pycache__', 'AGENTS.md', '.github', '.gitignore'}
 
 def filter_func(tarinfo):
     parts = tarinfo.name.split('/')[1:]
