@@ -1,4 +1,13 @@
 -------------------------------------------------------------------
+Wed Nov 04 20:06:52 UTC 2026 - Kris <kris@myslowrollos.org>
+
+- Fix memory usage reporting on kernels exposing GPUActive/GPUReclaim:
+  * Read GPUActive and GPUReclaim from /proc/meminfo when present.
+  * Subtract the reclaimable GPU memory from the used RAM figure.
+  * Expose gpuUsedMiB so the dashboard can show the GPU share.
+  * Drop the misleading "excluded cache and buffers" caption.
+
+-------------------------------------------------------------------
 Sat Oct 31 21:00:00 UTC 2026 - Kris <kris@myslowrollos.org>
 
 - Release 1.0.1 of the mySlowrollOS Control Center:

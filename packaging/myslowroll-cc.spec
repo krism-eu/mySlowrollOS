@@ -82,6 +82,14 @@ richiedono autorizzazione Polkit/pkexec o configurazione sudoers per il gruppo w
 %{_datadir}/myslowroll-cc/scripts/privacy.sh
 
 %changelog
+* Wed Nov 04 2026 Kris <kris@myslowrollos.org> - 1.0.1-1
+- Correzione del calcolo della RAM in uso su kernel che espongono
+  GPUActive/GPUReclaim in /proc/meminfo:
+  * GPUActive e GPUReclaim letti in modo opzionale (assenti su altri kernel).
+  * La memoria GPU reclamabile viene sottratta dal totale in uso.
+  * Nuova proprietà gpuUsedMiB per mostrare la quota GPU nella dashboard.
+  * Rimossa la dicitura fuorviante "esclusi cache e buffer".
+
 * Sat Oct 31 2026 Kris <kris@myslowrollos.org> - 1.0.1-1
 - Correzioni di robustezza su mySlowrollOS Control Center 1.0.1:
   * Rete e Wi-Fi non modificabili mentre la Modalità Privacy è attiva.
